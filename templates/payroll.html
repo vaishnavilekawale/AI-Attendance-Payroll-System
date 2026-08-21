@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payroll - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employees') }}">
+                            <i class="bi bi-people"></i> Employees
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance') }}">
+                            <i class="bi bi-calendar-check"></i> Attendance
+                        </a>
+                    </li>
+                    
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('payroll') }}">
+                            <i class="bi bi-cash"></i> Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('settings') }}">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.admin_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>Payroll Management</h2>
+                    <div class="d-flex gap-2">
+                        <a href="{{ url_for('payroll_settings') }}" class="btn btn-info">
+                            <i class="bi bi-gear"></i> Payroll Settings
+                        </a>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#calculateModal">
+                            <i class="bi bi-calculator"></i> Calculate Payroll
+                        </button>
+                    </div>
+                </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                
+                <!-- Payroll Summary -->
+                <div class="row mb-4">
+                    <div class="col-md-3">
+                        <div class="card bg-primary text-white">
+                            <div class="card-body">
+                                <h5 class="card-title">Total Employees</h5>
+                                <h3>{{ summary.total_employees }}</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-success text-white">
+                            <div class="card-body">
+                                <h5 class="card-title">Total Gross Salary</h5>
+                                <h3>Rs. {{ "{:,.2f}".format(summary.total_gross_salary) if summary else "0.00" }}</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-info text-white">
+                            <div class="card-body">
+                                <h5 class="card-title">Total Net Salary</h5>
+                                <h3>Rs. {{ "{:,.2f}".format(summary.total_net_salary) if summary else "0.00" }}</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-warning text-white">
+                            <div class="card-body">
+                                <h5 class="card-title">Total Overtime Bonus</h5>
+                                <h3>Rs. {{ "{:,.2f}".format(summary.total_overtime_bonus) if summary else "0.00" }}</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Payroll Table -->
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">Payroll for {{ month }}/{{ year }}</h5>
+                        <form method="GET" action="{{ url_for('payroll') }}" class="d-flex gap-2">
+                            <select class="form-select form-select-sm" name="month" style="width: auto;">
+                                {% for m in range(1, 13) %}
+                                <option value="{{ m }}" {{ 'selected' if m == month else '' }}>{{ m }}</option>
+                                {% endfor %}
+                            </select>
+                            <select class="form-select form-select-sm" name="year" style="width: auto;">
+                                {% for y in range(2023, 2027) %}
+                                <option value="{{ y }}" {{ 'selected' if y == year else '' }}>{{ y }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-primary">Go</button>
+                        </form>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Employee ID</th>
+                                        <th>Name</th>
+                                        <th>Department</th>
+                                        <th>Working Days</th>
+                                        <th>Present</th>
+                                        <th>Half</th>
+                                        <th>Absent</th>
+                                        <th>Late</th>
+                                        <th>Paid</th>
+                                        <th>LOP</th>
+                                        <th>Overtime</th>
+                                        <th>Gross Salary</th>
+                                        <th>Deductions</th>
+                                        <th>Net Salary</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for payroll in payrolls %}
+                                    <tr>
+                                        <td>{{ payroll.employee.employee_id }}</td>
+                                        <td>{{ payroll.employee.name }}</td>
+                                        <td>{{ payroll.employee.department }}</td>
+                                        <td>{{ payroll.working_days }}</td>
+                                        <td>{{ payroll.present_days }}</td>
+                                        <td>{{ payroll.half_days }}</td>
+                                        <td>{{ payroll.absent_days }}</td>
+                                        <td>{{ payroll.late_days }}</td>
+                                        <td>{{ payroll.paid_days|round(1) if payroll.paid_days else (payroll.present_days + payroll.half_days * 0.5)|round(1) }}</td>
+                                        <td>{{ payroll.lop_days|round(1) if payroll.lop_days else (payroll.absent_days + payroll.half_days * 0.5)|round(1) }}</td>
+                                        <td>{{ payroll.overtime_hours|round(2) }}h</td>
+                                        <td>Rs. {{ "{:,.2f}".format(payroll.gross_salary) }}</td>
+                                        <td>Rs. {{ "{:,.2f}".format(payroll.total_deductions) }}</td>
+                                        <td><strong>Rs. {{ "{:,.2f}".format(payroll.net_salary) }}</strong></td>
+                                        <td>
+                                            <div class="btn-group">
+                                                <a href="{{ url_for('generate_payslip', id=payroll.id) }}" class="btn btn-sm btn-info" title="Generate Payslip">
+                                                    <i class="bi bi-file-earmark-pdf"></i>
+                                                </a>
+                                                {% if payroll.payslip_generated %}
+                                                <a href="{{ url_for('send_payslip_email', id=payroll.id) }}" class="btn btn-sm btn-success" title="Send Email">
+                                                    <i class="bi bi-envelope"></i>
+                                                </a>
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calculate Payroll Modal -->
+    <div class="modal fade" id="calculateModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Calculate Payroll</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST" action="{{ url_for('calculate_payroll') }}">
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Month</label>
+                            <select class="form-select" name="month" required>
+                                {% for m in range(1, 13) %}
+                                <option value="{{ m }}" {{ 'selected' if m == month else '' }}>{{ m }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Year</label>
+                            <select class="form-select" name="year" required>
+                                {% for y in range(2023, 2027) %}
+                                <option value="{{ y }}" {{ 'selected' if y == year else '' }}>{{ y }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i> This will calculate payroll for all active employees based on their attendance records.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Calculate</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

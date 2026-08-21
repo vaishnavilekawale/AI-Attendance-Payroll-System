@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Attendance - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('employee_dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_attendance') }}">
+                            <i class="bi bi-calendar-check"></i> My Attendance
+                        </a>
+                    </li>
+                    {% if manager and manager.designation == 'Manager' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('manager_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_payroll') }}">
+                            <i class="bi bi-cash"></i> My Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> My Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_profile') }}">
+                            <i class="bi bi-person"></i> My Profile
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.employee_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('employee_profile') }}">Profile</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h2><i class="bi bi-pencil-square"></i> Edit Attendance</h2>
+                <p class="text-muted">Edit attendance time for {{ attendance.employee.name }} ({{ attendance.employee.employee_id }})</p>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">Edit Attendance Details</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <div class="mb-3">
+                                <label for="employee_name" class="form-label">Employee Name</label>
+                                <input type="text" class="form-control" id="employee_name" value="{{ attendance.employee.name }}" readonly>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="employee_id" class="form-label">Employee ID</label>
+                                <input type="text" class="form-control" id="employee_id" value="{{ attendance.employee.employee_id }}" readonly>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="department" class="form-label">Department</label>
+                                <input type="text" class="form-control" id="department" value="{{ attendance.employee.department }}" readonly>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="date" class="form-label">Date</label>
+                                <input type="text" class="form-control" id="date" value="{{ attendance.date.strftime('%Y-%m-%d') }}" readonly>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="in_time" class="form-label">IN Time</label>
+                                <input type="datetime-local" class="form-control" id="in_time" name="in_time" 
+                                       value="{{ attendance.in_time.strftime('%Y-%m-%dT%H:%M') if attendance.in_time else '' }}" required>
+                                <small class="text-muted">Format: YYYY-MM-DD HH:MM</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="out_time" class="form-label">OUT Time</label>
+                                <input type="datetime-local" class="form-control" id="out_time" name="out_time" 
+                                       value="{{ attendance.out_time.strftime('%Y-%m-%dT%H:%M') if attendance.out_time else '' }}">
+                                <small class="text-muted">Leave empty if employee hasn't punched out yet. Format: YYYY-MM-DD HH:MM</small>
+                            </div>
+                            
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle"></i> 
+                                <strong>Important:</strong> Editing attendance times will recalculate working hours and attendance status. This change will be reflected in all reports and payroll calculations.
+                            </div>
+                            
+                            <div class="d-flex gap-2">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-save"></i> Save Changes
+                                </button>
+                                <a href="{{ url_for('employee_attendance') }}" class="btn btn-secondary">
+                                    <i class="bi bi-x-circle"></i> Cancel
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0">Current Values</h5>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-sm">
+                            <tr>
+                                <td><strong>IN Time:</strong></td>
+                                <td>{{ attendance.in_time.strftime('%Y-%m-%d %H:%M') if attendance.in_time else 'Not set' }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>OUT Time:</strong></td>
+                                <td>{{ attendance.out_time.strftime('%Y-%m-%d %H:%M') if attendance.out_time else 'Not set' }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Total Hours:</strong></td>
+                                <td>{{ attendance.total_hours|round(2) if attendance.total_hours else '0.0' }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Status:</strong></td>
+                                <td>
+                                    <span class="badge bg-{{ 'success' if attendance.status == 'present' else 'warning' if attendance.status == 'half_day' else 'danger' }}">
+                                        {{ attendance.status|upper }}
+                                    </span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td><strong>Late Entry:</strong></td>
+                                <td>{{ 'Yes' if attendance.late_entry else 'No' }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Overtime:</strong></td>
+                                <td>{{ attendance.overtime_hours|round(2) if attendance.overtime_hours else '0.0' }} hrs</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="card mt-3">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="mb-0">Edit Guidelines</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="small text-muted">
+                            <li>Only edit attendance for employees in your department</li>
+                            <li>Use 24-hour format for time entry</li>
+                            <li>Date and time must match the attendance date</li>
+                            <li>OUT time must be after IN time</li>
+                            <li>System will automatically recalculate hours and status</li>
+                            <li>Changes are logged and auditable</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

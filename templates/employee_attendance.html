@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Attendance - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('employee_dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('employee_attendance') }}">
+                            <i class="bi bi-calendar-check"></i> My Attendance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_payroll') }}">
+                            <i class="bi bi-cash"></i> My Payroll
+                        </a>
+                    </li>
+                    {% if current_user and current_user.designation == 'Manager' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('manager_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> My Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_profile') }}">
+                            <i class="bi bi-person"></i> My Profile
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.employee_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('employee_profile') }}">
+                                <i class="bi bi-person"></i> My Profile
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('employee_change_password') }}">
+                                <i class="bi bi-key"></i> Change Password
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Logout
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12">
+                <h2><i class="bi bi-calendar-check"></i> My Attendance</h2>
+                <p class="text-muted">{{ employee.name }} - {{ employee.employee_id }}</p>
+            </div>
+        </div>
+
+        <!-- Today's Attendance Status -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">Today's Attendance - {{ today.strftime('%Y-%m-%d') }}</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-3">
+                                <strong>Status:</strong> 
+                                <span class="badge bg-{{ 'success' if attendance_status.status == 'present' else 'warning' if attendance_status.status == 'half_day' else 'danger' if attendance_status.status == 'absent' else 'secondary' }}">
+                                    {{ attendance_status.status|title if attendance_status.status else 'Not Marked' }}
+                                </span>
+                            </div>
+                            <div class="col-md-3">
+                                <strong>IN Time:</strong> {{ attendance_status.in_time if attendance_status.in_time else '--' }}
+                            </div>
+                            <div class="col-md-3">
+                                <strong>OUT Time:</strong> {{ attendance_status.out_time if attendance_status.out_time else '--' }}
+                            </div>
+                            <div class="col-md-3">
+                                <strong>Working Hours:</strong> {{ attendance_status.working_hours if attendance_status.working_hours and attendance_status.working_hours > 0 else '--' }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Attendance Camera Section -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">Face Recognition Attendance</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="video-container">
+                            <video id="video" width="100%" height="400" autoplay></video>
+                            <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+                        </div>
+                        <div class="mt-3" style="display:none;">
+                            <button id="startCamera" class="btn btn-primary">
+                                <i class="bi bi-camera-video"></i> Start Camera
+                            </button>
+                            <button id="stopCamera" class="btn btn-secondary">
+                                <i class="bi bi-camera-video-off"></i> Stop Camera
+                            </button>
+                            <button id="captureAttendance" class="btn btn-success" disabled>
+                                <i class="bi bi-person-check"></i> Mark Attendance
+                            </button>
+                        </div>
+                        <div id="autoStatus" class="mt-3">
+                            <div class="alert alert-info">
+                                <h5><i class="bi bi-camera-video"></i> Automatic Attendance</h5>
+                                <p>Camera will start automatically. Look at the camera to mark attendance.</p>
+                            </div>
+                        </div>
+                        <div id="attendanceResult" class="mt-3"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">Attendance Instructions</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            
+                            <li class="list-group-item">
+                                <i class="bi bi-1-circle-fill text-primary"></i> Position your face clearly in the camera frame
+                            </li>
+                            <li class="list-group-item">
+                                <i class="bi bi-2-circle-fill text-primary"></i> Ensure good lighting for better recognition    
+                            <li class="list-group-item">
+                                <i class="bi bi-3-circle-fill text-primary"></i> The system will automatically determine if you're checking in or out
+                            </li>
+                            <li class="list-group-item">
+                                <i class="bi bi-4-circle-fill text-primary"></i> You can only mark attendance for your own and admin account
+                            </li>
+                        </ul>
+                        <div class="alert alert-info mt-3">
+                            <i class="bi bi-info-circle"></i> 
+                            <strong>Note:</strong> Face recognition compares your face only with your registered face images for faster and more accurate recognition.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">Attendance Records (Last 100)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Status</th>
+                                        <th>IN Time</th>
+                                        <th>OUT Time</th>
+                                        <th>Working Hours</th>
+                                        <th>Late Entry</th>
+                                        <th>Overtime</th>
+                                        
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for att in attendance_records %}
+                                    <tr>
+                                        <td>{{ att.date.strftime('%Y-%m-%d') }}</td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if att.status == 'present' else 'warning' if att.status == 'half_day' else 'danger' }}">
+                                                {{ att.status|title }}
+                                            </span>
+                                        </td>
+                                        <td>{{ att.in_time.strftime('%H:%M:%S') if att.in_time else 'N/A' }}</td>
+                                        <td>{{ att.display_out_time.strftime('%H:%M:%S') if att.display_out_time else '-' }}</td>
+                                        <td>{{ att.total_hours|round(2) if att.total_hours is not none else '0.0' }}</td>
+                                        <td>
+                                            {% if att.late_entry %}
+                                                <span class="badge bg-warning">Yes</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">No</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ att.overtime_hours|round(2) if att.overtime_hours else '0.0' }}</td>
+                                        
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="{% if current_user and current_user.designation == 'Manager' %}8{% else %}7{% endif %}" class="text-center">No attendance records found.</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let videoStream = null;
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const startCameraBtn = document.getElementById('startCamera');
+        const stopCameraBtn = document.getElementById('stopCamera');
+        const captureBtn = document.getElementById('captureAttendance');
+        const resultDiv = document.getElementById('attendanceResult');
+        const autoStatusDiv = document.getElementById('autoStatus');
+        
+        let recognitionInProgress = false;
+        let attendanceMarked = false;
+        let autoCaptureInterval = null;
+
+        // Auto-start camera on page load
+        async function autoStartCamera() {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = videoStream;
+                autoStatusDiv.innerHTML = `
+                    <div class="alert alert-success">
+                        <h5><i class="bi bi-camera-video"></i> Camera Active</h5>
+                        <p>Camera started automatically. Look at the camera to mark attendance.</p>
+                    </div>
+                `;
+                // Start automatic face capture after camera is ready
+                video.onloadedmetadata = () => {
+                    setTimeout(() => startAutoCapture(), 2000);
+                };
+            } catch (err) {
+                autoStatusDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <h5><i class="bi bi-exclamation-triangle"></i> Camera Error</h5>
+                        <p>Error accessing camera: ${err.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // Automatic face capture and recognition
+        function startAutoCapture() {
+            if (attendanceMarked || recognitionInProgress) {
+                return;
+            }
+            
+            autoStatusDiv.innerHTML = `
+                <div class="alert alert-info">
+                    <h5><i class="bi bi-camera-video"></i> Scanning for Face...</h5>
+                    <p>Please look at the camera.</p>
+                </div>
+            `;
+            
+            // Capture every 3 seconds
+            autoCaptureInterval = setInterval(async () => {
+                if (attendanceMarked || recognitionInProgress) {
+                    clearInterval(autoCaptureInterval);
+                    return;
+                }
+                
+                captureAndMarkAttendance();
+            }, 3000);
+            
+            // Capture first frame immediately
+            captureAndMarkAttendance();
+        }
+
+        // Capture frame and mark attendance
+        async function captureAndMarkAttendance() {
+            if (attendanceMarked || recognitionInProgress || !videoStream) {
+                return;
+            }
+            
+            recognitionInProgress = true;
+            
+            canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('image', blob, 'capture.jpg');
+                
+                try {
+                    const response = await fetch('/api/employee-attendance', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    
+                    // ------------------------------------------------------------------
+                    // Frame-presence lock: face matched, but attendance was already
+                    // marked for this continuous presence, so nothing was written
+                    // again. Show a calm status and keep scanning quietly - the lock
+                    // clears automatically once the employee leaves the frame for a
+                    // few seconds and returns (e.g. later for their OUT punch).
+                    // ------------------------------------------------------------------
+                    if (data.success && data.locked) {
+                        recognitionInProgress = false;
+                        autoStatusDiv.innerHTML = `
+                            <div class="alert alert-info">
+                                <h5><i class="bi bi-lock"></i> Attendance Already Marked</h5>
+                                <p>${data.message}</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    if (data.success) {
+                        attendanceMarked = true;
+                        clearInterval(autoCaptureInterval);
+                        stopAutoCamera();
+                        
+                        resultDiv.innerHTML = `
+                            <div class="alert alert-success">
+                                <h5>✓ Attendance Marked Successfully!</h5>
+                                <p><strong>Action:</strong> ${data.message}</p>
+                                ${data.in_time ? `<p><strong>IN Time:</strong> ${data.in_time}</p>` : ''}
+                                ${data.out_time ? `<p><strong>OUT Time:</strong> ${data.out_time}</p>` : ''}
+                                ${data.working_hours ? `<p><strong>Working Hours:</strong> ${data.working_hours}</p>` : ''}
+                                <p class="mt-2"><em>Page will refresh in 3 seconds...</em></p>
+                            </div>
+                        `;
+                        autoStatusDiv.innerHTML = '';
+                        setTimeout(() => reloadPage(), 3000);
+                    } else {
+                        recognitionInProgress = false;
+                        autoStatusDiv.innerHTML = `
+                            <div class="alert alert-warning">
+                                <h5><i class="bi bi-exclamation-triangle"></i> Attendance Not Marked</h5>
+                                <p><strong>Reason:</strong> ${data.message}</p>
+                                <p>Continuing to scan...</p>
+                            </div>
+                        `;
+                    }
+                } catch (err) {
+                    recognitionInProgress = false;
+                    console.error('Attendance error:', err);
+                }
+            }, 'image/jpeg');
+        }
+
+        // Stop camera after successful attendance
+        function stopAutoCamera() {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                videoStream = null;
+            }
+        }
+
+        startCameraBtn.addEventListener('click', async () => {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = videoStream;
+                captureBtn.disabled = false;
+                startCameraBtn.disabled = true;
+                stopCameraBtn.disabled = false;
+            } catch (err) {
+                alert('Error accessing camera: ' + err.message);
+            }
+        });
+
+        stopCameraBtn.addEventListener('click', () => {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                captureBtn.disabled = true;
+                startCameraBtn.disabled = false;
+                stopCameraBtn.disabled = true;
+                clearInterval(autoCaptureInterval);
+            }
+        });
+
+        captureBtn.addEventListener('click', async () => {
+            canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
+            canvas.toBlob(async (blob) => {
+                const formData = new FormData();
+                formData.append('image', blob, 'capture.jpg');
+                
+                try {
+                    const response = await fetch('/api/employee-attendance', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const data = await response.json();
+                    
+                    // Frame-presence lock: already marked for this continuous
+                    // presence - show a calm status, not an error.
+                    if (data.success && data.locked) {
+                        resultDiv.innerHTML = `
+                            <div class="alert alert-info">
+                                <h5><i class="bi bi-lock"></i> Attendance Already Marked</h5>
+                                <p>${data.message}</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    if (data.success) {
+                        resultDiv.innerHTML = `
+                            <div class="alert alert-success">
+                                <h5>✓ Attendance Marked Successfully!</h5>
+                                <p><strong>Action:</strong> ${data.message}</p>
+                                ${data.in_time ? `<p><strong>IN Time:</strong> ${data.in_time}</p>` : ''}
+                                ${data.out_time ? `<p><strong>OUT Time:</strong> ${data.out_time}</p>` : ''}
+                                ${data.working_hours ? `<p><strong>Working Hours:</strong> ${data.working_hours}</p>` : ''}
+                                <p class="mt-2"><em>Page will refresh in 2 seconds...</em></p>
+                            </div>
+                        `;
+                        setTimeout(() => reloadPage(), 2000);
+                    } else {
+                        resultDiv.innerHTML = `
+                            <div class="alert alert-danger">
+                                <h5>Attendance Not Marked</h5>
+                                <p><strong>Reason:</strong> ${data.message}</p>
+                            </div>
+                        `;
+                    }
+                } catch (err) {
+                    resultDiv.innerHTML = `
+                        <div class="alert alert-danger">
+                            <h5>Error</h5>
+                            <p>${err.message}</p>
+                        </div>
+                    `;
+                }
+            }, 'image/jpeg');
+        });
+
+        function reloadPage() {
+            location.reload();
+        }
+
+        // Auto-start camera when page loads
+        window.addEventListener('load', () => {
+            autoStartCamera();
+        });
+    </script>
+</body>
+</html>

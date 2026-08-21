@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reports - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employees') }}">
+                            <i class="bi bi-people"></i> Employees
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance') }}">
+                            <i class="bi bi-calendar-check"></i> Attendance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('payroll') }}">
+                            <i class="bi bi-cash"></i> Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('settings') }}">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.admin_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h2 class="mb-4">Reports</h2>
+            </div>
+        </div>
+
+        <!-- Report Filters -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Generate Report</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('reports') }}">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Date From</label>
+                                        <input type="date" class="form-control" name="start_date" value="{{ start_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Date To</label>
+                                        <input type="date" class="form-control" name="end_date" value="{{ end_date }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Department</label>
+                                        <select class="form-select" name="department">
+                                            <option value="">All Departments</option>
+                                            {% for dept in all_departments %}
+                                            <option value="{{ dept }}" {{ 'selected' if department == dept else '' }}>{{ dept }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Employee</label>
+                                        <select class="form-select" name="employee_id">
+                                            <option value="">All Employees</option>
+                                            {% for emp in employees %}
+                                            <option value="{{ emp.id }}" {{ 'selected' if employee_id|string == emp.id|string else '' }}>{{ emp.name }} ({{ emp.employee_id }})</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Designation</label>
+                                        <select class="form-select" name="designation">
+                                            <option value="">All Designations</option>
+                                            {% for desig in all_designations %}
+                                            <option value="{{ desig }}" {{ 'selected' if designation == desig else '' }}>{{ desig }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Attendance Status</label>
+                                        <select class="form-select" name="status">
+                                            <option value="">All Statuses</option>
+                                            <option value="present" {{ 'selected' if status == 'present' else '' }}>Present</option>
+                                            <option value="absent" {{ 'selected' if status == 'absent' else '' }}>Absent</option>
+                                            <option value="half_day" {{ 'selected' if status == 'half_day' else '' }}>Half Day</option>
+                                            <option value="late" {{ 'selected' if status == 'late' else '' }}>Late</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">&nbsp;</label>
+                                        <div class="d-flex gap-2">
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="bi bi-search"></i> Apply Filters
+                                            </button>
+                                            {% if attendances %}
+                                            <a href="{{ url_for('export_report', start_date=start_date, end_date=end_date, employee_id=employee_id, department=department, designation=designation, status=status) }}" class="btn btn-success">
+                                                <i class="bi bi-file-earmark-pdf"></i> Export PDF
+                                            </a>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Report Results -->
+        {% if attendances %}
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">Attendance Report
+                            {% if start_date and end_date %}
+                            ({{ start_date }} to {{ end_date }})
+                            {% endif %}
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Summary Stats -->
+                        <div class="row mb-4">
+                            <div class="col-md-2">
+                                <div class="card bg-primary text-white">
+                                    <div class="card-body text-center">
+                                        <h6>Total Employees</h6>
+                                        <h3>{{ summary.total_employees }}</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-success text-white">
+                                    <div class="card-body text-center">
+                                        <h6>Present</h6>
+                                        <h3>{{ summary.present }}</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-danger text-white">
+                                    <div class="card-body text-center">
+                                        <h6>Absent</h6>
+                                        <h3>{{ summary.absent }}</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-warning text-white">
+                                    <div class="card-body text-center">
+                                        <h6>Half Days</h6>
+                                        <h3>{{ summary.half_day }}</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-info text-white">
+                                    <div class="card-body text-center">
+                                        <h6>Late</h6>
+                                        <h3>{{ summary.late }}</h3>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="card bg-secondary text-white">
+                                    <div class="card-body text-center">
+                                        <h6>Attendance %</h6>
+                                        <h3>{{ summary.attendance_percentage|round(1) }}%</h3>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Department-wise Analytics -->
+                        {% if department_analytics %}
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">Department-wise Analytics</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="table-responsive">
+                                            <table class="table table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Department</th>
+                                                        <th>Total Employees</th>
+                                                        <th>Present</th>
+                                                        <th>Absent</th>
+                                                        <th>Half Day</th>
+                                                        <th>Late</th>
+                                                        <th>Total Hours</th>
+                                                        <th>Avg Hours</th>
+                                                        <th>Attendance %</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for dept, stats in department_analytics.items() %}
+                                                    <tr>
+                                                        <td>{{ dept }}</td>
+                                                        <td>{{ stats.total_employees }}</td>
+                                                        <td>{{ stats.present }}</td>
+                                                        <td>{{ stats.absent }}</td>
+                                                        <td>{{ stats.half_day }}</td>
+                                                        <td>{{ stats.late }}</td>
+                                                        <td>{{ stats.total_working_hours }}</td>
+                                                        <td>{{ stats.average_working_hours }}</td>
+                                                        <td>{{ stats.attendance_percentage }}%</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Employee Rankings -->
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="card-title mb-0">Most Present</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if rankings.most_present %}
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Rank</th>
+                                                        <th>Employee</th>
+                                                        <th>Department</th>
+                                                        <th>Present Days</th>
+                                                        <th>Attendance %</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in rankings.most_present[:10] %}
+                                                    <tr>
+                                                        <td>{{ item.rank }}</td>
+                                                        <td>{{ item.name }}</td>
+                                                        <td>{{ item.department }}</td>
+                                                        <td>{{ item.present }}</td>
+                                                        <td>{{ item.attendance_percentage }}%</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% else %}
+                                        <p class="text-muted">No data available</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="card-title mb-0">Most Absent</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if rankings.most_absent %}
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Rank</th>
+                                                        <th>Employee</th>
+                                                        <th>Department</th>
+                                                        <th>Absent Days</th>
+                                                        <th>Attendance %</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in rankings.most_absent[:10] %}
+                                                    <tr>
+                                                        <td>{{ item.rank }}</td>
+                                                        <td>{{ item.name }}</td>
+                                                        <td>{{ item.department }}</td>
+                                                        <td>{{ item.absent }}</td>
+                                                        <td>{{ item.attendance_percentage }}%</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% else %}
+                                        <p class="text-muted">No data available</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="card-title mb-0">Most Half Days</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if rankings.most_half_day %}
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Rank</th>
+                                                        <th>Employee</th>
+                                                        <th>Department</th>
+                                                        <th>Half Days</th>
+                                                        <th>Attendance %</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in rankings.most_half_day[:10] %}
+                                                    <tr>
+                                                        <td>{{ item.rank }}</td>
+                                                        <td>{{ item.name }}</td>
+                                                        <td>{{ item.department }}</td>
+                                                        <td>{{ item.half_day }}</td>
+                                                        <td>{{ item.attendance_percentage }}%</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% else %}
+                                        <p class="text-muted">No data available</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="card-title mb-0">Most Late</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if rankings.most_late %}
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Rank</th>
+                                                        <th>Employee</th>
+                                                        <th>Department</th>
+                                                        <th>Late Days</th>
+                                                        <th>Total Late Mins</th>
+                                                        <th>Avg Late Mins</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in rankings.most_late[:10] %}
+                                                    <tr>
+                                                        <td>{{ item.rank }}</td>
+                                                        <td>{{ item.name }}</td>
+                                                        <td>{{ item.department }}</td>
+                                                        <td>{{ item.late }}</td>
+                                                        <td>{{ item.total_late_minutes }}</td>
+                                                        <td>{{ item.avg_late_minutes }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% else %}
+                                        <p class="text-muted">No data available</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="card-title mb-0">Highest Working Hours</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if rankings.highest_working_hours %}
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Rank</th>
+                                                        <th>Employee</th>
+                                                        <th>Department</th>
+                                                        <th>Total Hours</th>
+                                                        <th>Avg Daily Hours</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in rankings.highest_working_hours[:10] %}
+                                                    <tr>
+                                                        <td>{{ item.rank }}</td>
+                                                        <td>{{ item.name }}</td>
+                                                        <td>{{ item.department }}</td>
+                                                        <td>{{ item.total_working_hours }}</td>
+                                                        <td>{{ item.avg_daily_working_hours }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% else %}
+                                        <p class="text-muted">No data available</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h6 class="card-title mb-0">Lowest Working Hours</h6>
+                                    </div>
+                                    <div class="card-body">
+                                        {% if rankings.lowest_working_hours %}
+                                        <div class="table-responsive">
+                                            <table class="table table-sm">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Rank</th>
+                                                        <th>Employee</th>
+                                                        <th>Department</th>
+                                                        <th>Total Hours</th>
+                                                        <th>Avg Daily Hours</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in rankings.lowest_working_hours[:10] %}
+                                                    <tr>
+                                                        <td>{{ item.rank }}</td>
+                                                        <td>{{ item.name }}</td>
+                                                        <td>{{ item.department }}</td>
+                                                        <td>{{ item.total_working_hours }}</td>
+                                                        <td>{{ item.avg_daily_working_hours }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% else %}
+                                        <p class="text-muted">No data available</p>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Employee Summary Table -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">Employee Summary</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="table-responsive">
+                                            <table class="table table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Employee</th>
+                                                        <th>Employee ID</th>
+                                                        <th>Department</th>
+                                                        <th>Designation</th>
+                                                        <th>Total Days</th>
+                                                        <th>Present</th>
+                                                        <th>Absent</th>
+                                                        <th>Half Day</th>
+                                                        <th>Late</th>
+                                                        <th>Total Hours</th>
+                                                        <th>Avg Hours</th>
+                                                        <th>Attendance %</th>
+                                                        <th>Punctuality %</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for emp in employee_summary %}
+                                                    <tr>
+                                                        <td>{{ emp.name }}</td>
+                                                        <td>{{ emp.employee_id }}</td>
+                                                        <td>{{ emp.department }}</td>
+                                                        <td>{{ emp.designation }}</td>
+                                                        <td>{{ emp.total_working_days }}</td>
+                                                        <td>{{ emp.present }}</td>
+                                                        <td>{{ emp.absent }}</td>
+                                                        <td>{{ emp.half_day }}</td>
+                                                        <td>{{ emp.late }}</td>
+                                                        <td>{{ emp.total_working_hours }}</td>
+                                                        <td>{{ emp.avg_working_hours }}</td>
+                                                        <td>{{ emp.attendance_percentage }}%</td>
+                                                        <td>{{ emp.punctuality_percentage }}%</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Late Analysis -->
+                        {% if late_analysis %}
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">Late Analysis</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="table-responsive">
+                                            <table class="table table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Employee</th>
+                                                        <th>Employee ID</th>
+                                                        <th>Department</th>
+                                                        <th>Late Days</th>
+                                                        <th>Total Late Minutes</th>
+                                                        <th>Avg Late Minutes</th>
+                                                        <th>Max Late Minutes</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for item in late_analysis %}
+                                                    <tr>
+                                                        <td>{{ item.name }}</td>
+                                                        <td>{{ item.employee_id }}</td>
+                                                        <td>{{ item.department }}</td>
+                                                        <td>{{ item.late_days }}</td>
+                                                        <td>{{ item.total_late_minutes }}</td>
+                                                        <td>{{ item.avg_late_minutes }}</td>
+                                                        <td>{{ item.max_late_minutes }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Daily Attendance Trend -->
+                        {% if daily_trend %}
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">Daily Attendance Trend</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="table-responsive">
+                                            <table class="table table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Date</th>
+                                                        <th>Present</th>
+                                                        <th>Absent</th>
+                                                        <th>Half Day</th>
+                                                        <th>Late</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for day in daily_trend %}
+                                                    <tr>
+                                                        <td>{{ day.date.strftime('%Y-%m-%d') }}</td>
+                                                        <td>{{ day.present }}</td>
+                                                        <td>{{ day.absent }}</td>
+                                                        <td>{{ day.half_day }}</td>
+                                                        <td>{{ day.late }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- Detailed Table -->
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        {% if employee is none %}
+                                        <!-- All Employees: Show employee columns -->
+                                        <th>Employee ID</th>
+                                        <th>Name</th>
+                                        <th>Department</th>
+                                        {% endif %}
+                                        <th>Date</th>
+                                        <th>IN Time</th>
+                                        <th>OUT Time</th>
+                                        <th>Total Hours</th>
+                                        <th>Status</th>
+                                        <th>Late</th>
+                                        <th>Overtime</th>
+                                        <th>Activities</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for att in attendances %}
+                                    <tr>
+                                        {% if employee is none %}
+                                        <!-- All Employees: Show employee columns -->
+                                        <td>{{ att.employee.employee_id }}</td>
+                                        <td>{{ att.employee.name }}</td>
+                                        <td>{{ att.employee.department }}</td>
+                                        {% endif %}
+                                        <td>{{ att.date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ att.in_time.strftime('%H:%M:%S') if att.in_time else '-' }}</td>
+                                        <td>{{ att.display_out_time.strftime('%H:%M:%S') if att.display_out_time else '-' }}</td>
+                                        <td>{{ att.total_hours|round(2) if att.total_hours and att.total_hours != 0 else '-' }}</td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if att.status == 'present' else 'warning' if att.status == 'half_day' else 'danger' if att.status == 'absent' else 'secondary' }}">
+                                                {{ att.status|upper }}
+                                            </span>
+                                        </td>
+                                        <td>{{ 'Yes' if att.late_entry else 'No' }}</td>
+                                        <td>{{ att.overtime_hours|round(2) if att.overtime_hours and att.overtime_hours != 0 else '-' }}</td>
+                                        <td>
+                                            {% set activities = activities_by_attendance.get((att.employee.id, att.date), []) %}
+                                            {% if activities %}
+                                                <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#activities-{{ att.employee.id }}-{{ att.date.strftime('%Y%m%d') }}" aria-expanded="false">
+                                                    {{ activities|length }} <i class="bi bi-chevron-down"></i>
+                                                </button>
+                                                <div class="collapse mt-2" id="activities-{{ att.employee.id }}-{{ att.date.strftime('%Y%m%d') }}">
+                                                    <div class="card card-body bg-light">
+                                                        {% for activity in activities %}
+                                                            <div class="d-flex justify-content-between">
+                                                                <span>{{ activity.activity_time.strftime('%H:%M') }}</span>
+                                                                <span class="badge bg-{{ 'success' if activity.action == 'IN' else 'secondary' }}">{{ activity.action }}</span>
+                                                            </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            {% else %}
+                                                <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="row">
+            <div class="col-12">
+                {% if joining_date_message %}
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i> {{ joining_date_message }}
+                </div>
+                {% else %}
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i> Select date range and employee to generate report.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

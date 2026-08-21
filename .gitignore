@@ -1,0 +1,27 @@
+# Python Environment & Cache
+venv/
+__pycache__/
+*.pyc
+
+# Environment Variables & Security
+.env
+
+# Database Files
+*.db
+instance/*.db
+
+# Log Files
+*.log
+
+# Sensitive/User Generated Data (Folders match exact code paths)
+dataset/*
+!dataset/.gitkeep
+
+uploads/*
+!uploads/.gitkeep
+
+payrolls/*
+!payrolls/.gitkeep
+
+trained_model/*
+!trained_model/.gitkeep

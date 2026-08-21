@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employees') }}">
+                            <i class="bi bi-people"></i> Employees
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance') }}">
+                            <i class="bi bi-calendar-check"></i> Attendance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('payroll') }}">
+                            <i class="bi bi-cash"></i> Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('settings') }}">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.admin_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h2 class="mb-4">System Settings</h2>
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% if email_test %}
+        <div class="alert alert-{{ 'success' if email_test.success else 'danger' }}">
+            <i class="bi bi-{{ 'check-circle' if email_test.success else 'x-circle' }}"></i>
+            {{ email_test.message }}
+        </div>
+        {% endif %}
+
+        <div class="row">
+            <div class="col-lg-8">
+                <form method="POST" action="{{ url_for('settings') }}" enctype="multipart/form-data">
+                    <!-- Company Settings -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Company Settings</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Company Name</label>
+                                        <input type="text" class="form-control" name="company_name" value="{{ settings.company_name }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Company Logo</label>
+                                        <input type="file" class="form-control" name="company_logo" accept="image/*">
+                                        {% if settings.company_logo %}
+                                            <small class="text-muted">Current: {{ settings.company_logo }}</small>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Office Timing -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Office Timing</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Office Start Time</label>
+                                        <input type="time" class="form-control" name="office_start_time" value="{{ settings.office_start_time }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Office End Time</label>
+                                        <input type="time" class="form-control" name="office_end_time" value="{{ settings.office_end_time }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Grace Period (minutes)</label>
+                                        <input type="number" class="form-control" name="grace_period_minutes" value="{{ settings.grace_period_minutes }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">Working Hours/Day</label>
+                                        <input type="number" class="form-control" name="working_hours_per_day" step="0.5" value="{{ settings.working_hours_per_day }}" required>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Salary Calculation -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Salary Calculation</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3 form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" name="late_deduction_enabled" id="lateDeduction" {{ 'checked' if settings.late_deduction_enabled else '' }}>
+                                        <label class="form-check-label" for="lateDeduction">Enable Late Deduction</label>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Late Deduction per Occurrence</label>
+                                        <input type="number" class="form-control" name="late_deduction_per_occurrence" step="0.01" value="{{ settings.late_deduction_per_occurrence }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3 form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" name="overtime_enabled" id="overtimeEnabled" {{ 'checked' if settings.overtime_enabled else '' }}>
+                                        <label class="form-check-label" for="overtimeEnabled">Enable Overtime Bonus</label>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Overtime Rate (multiplier)</label>
+                                        <input type="number" class="form-control" name="overtime_rate" step="0.1" value="{{ settings.overtime_rate }}">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI Settings -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Face Recognition Settings</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Recognition Tolerance (0.0-1.0)</label>
+                                        <input type="number" class="form-control" name="face_recognition_tolerance" step="0.1" min="0" max="1" value="{{ settings.face_recognition_tolerance }}" required>
+                                        <small class="text-muted">Lower = stricter, Higher = more lenient</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Minimum Face Images Required</label>
+                                        <input type="number" class="form-control" name="min_face_images_required" value="{{ settings.min_face_images_required }}" required>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save"></i> Save Settings
+                        </button>
+                        <a href="{{ url_for('settings', test_email=1) }}" class="btn btn-info">
+                            <i class="bi bi-envelope"></i> Test Email Connection
+                        </a>
+                        <a href="{{ url_for('train_ai') }}" class="btn btn-warning">
+                            <i class="bi bi-cpu"></i> Retrain AI Model
+                        </a>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="col-lg-4">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Email Configuration</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i> Configure SMTP settings in .env file for email functionality.
+                        </div>
+                        <h6>Required .env variables:</h6>
+                        <ul class="list-unstyled">
+                            <li><code>MAIL_SERVER</code></li>
+                            <li><code>MAIL_PORT</code></li>
+                            <li><code>MAIL_USE_TLS</code></li>
+                            <li><code>MAIL_USERNAME</code></li>
+                            <li><code>MAIL_PASSWORD</code></li>
+                            <li><code>MAIL_DEFAULT_SENDER</code></li>
+                        </ul>
+                        <p class="small text-muted">For Gmail, use App Password instead of regular password.</p>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Database Configuration</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted">Current database: SQLite</p>
+                        <p class="small text-muted">To use MySQL, set <code>DATABASE_URL</code> in .env file:</p>
+                        <code class="d-block small">mysql+pymysql://user:pass@localhost/dbname</code>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">System Info</h5>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>Version:</strong> 1.0.0</p>
+                        <p><strong>Python:</strong> 3.10.11</p>
+                        <p><strong>Flask:</strong> Latest</p>
+                        <p><strong>AI Engine:</strong> DeepFace (Facenet512) + OpenCV</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

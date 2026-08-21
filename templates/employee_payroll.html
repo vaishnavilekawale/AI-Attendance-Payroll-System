@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Payroll - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('employee_dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_attendance') }}">
+                            <i class="bi bi-calendar-check"></i> My Attendance
+                        </a>
+                    </li>
+                    
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('employee_payroll') }}">
+                            <i class="bi bi-cash"></i> My Payroll
+                        </a>
+                    </li>
+                    {% if current_user and current_user.designation == 'Manager' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('manager_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> My Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_profile') }}">
+                            <i class="bi bi-person"></i> My Profile
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.employee_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('employee_profile') }}">
+                                <i class="bi bi-person"></i> My Profile
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('employee_change_password') }}">
+                                <i class="bi bi-key"></i> Change Password
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Logout
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12">
+                <h2><i class="bi bi-cash"></i> My Payroll</h2>
+                <p class="text-muted">{{ employee.name }} - {{ employee.employee_id }}</p>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">Payroll Records</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Month</th>
+                                        <th>Year</th>
+                                        <th>Working Days</th>
+                                        <th>Present</th>
+                                        <th>Half</th>
+                                        <th>Absent</th>
+                                        <th>Late</th>
+                                        <th>Paid</th>
+                                        <th>LOP</th>
+                                        <th>Net Salary</th>
+                                        <th>Payslip</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for payroll in payroll_records %}
+                                    <tr>
+                                        <td>{{ payroll.month|month_name }}</td>
+                                        <td>{{ payroll.year }}</td>
+                                        <td>{{ payroll.working_days }}</td>
+                                        <td>{{ payroll.present_days }}</td>
+                                        <td>{{ payroll.half_days }}</td>
+                                        <td>{{ payroll.absent_days }}</td>
+                                        <td>{{ payroll.late_days }}</td>
+                                        <td>{{ payroll.paid_days|round(1) if payroll.paid_days else (payroll.present_days + payroll.half_days * 0.5)|round(1) }}</td>
+                                        <td>{{ payroll.lop_days|round(1) if payroll.lop_days else (payroll.absent_days + payroll.half_days * 0.5)|round(1) }}</td>
+                                        <td><strong>Rs. {{ "{:,.2f}".format(payroll.net_salary) }}</strong></td>
+                                        <td>
+                                            {% if payroll.payslip_generated %}
+                                                <a href="/uploads/{{ payroll.payslip_path.split('/')[-1] }}" class="btn btn-sm btn-primary" target="_blank">
+                                                    <i class="bi bi-download"></i> Download
+                                                </a>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Not Generated</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="13" class="text-center">No payroll records found.</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

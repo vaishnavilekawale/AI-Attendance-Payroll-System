@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payroll Settings - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employees') }}">
+                            <i class="bi bi-people"></i> Employees
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance') }}">
+                            <i class="bi bi-calendar-check"></i> Attendance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('payroll') }}">
+                            <i class="bi bi-cash"></i> Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('settings') }}">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                    
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.admin_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h2 class="mb-4">Payroll Settings</h2>
+                <p class="text-muted">Configure automatic payroll generation and professional payslip settings</p>
+            </div>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="row">
+            <div class="col-lg-8">
+                <form method="POST" action="{{ url_for('payroll_settings') }}" enctype="multipart/form-data">
+                    <!-- Payroll Automation Settings -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="card-title mb-0"><i class="bi bi-calendar-event"></i> Payroll Automation</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Payroll Generation Day</label>
+                                        <select class="form-select" name="payroll_generation_day" required>
+                                            {% for day in range(1, 32) %}
+                                                <option value="{{ day }}" {{ 'selected' if payroll_settings.payroll_generation_day == day else '' }}>
+                                                    {{ day }}{% if day == 31 %} (or last day of month){% endif %}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                        <small class="text-muted">Day of month to generate payroll</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Payroll Generation Time</label>
+                                        <input type="time" class="form-control" name="payroll_generation_time" value="{{ payroll_settings.payroll_generation_time }}" required>
+                                        <small class="text-muted">Time in HH:MM format (24-hour)</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Payslip Storage Path</label>
+                                        <input type="text" class="form-control" name="payslip_storage_path" value="{{ payroll_settings.payslip_storage_path }}" required>
+                                        <small class="text-muted">Relative path (e.g., payrolls)</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3 form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" name="auto_generate_payroll" id="autoGeneratePayroll" {{ 'checked' if payroll_settings.auto_generate_payroll else '' }}>
+                                        <label class="form-check-label" for="autoGeneratePayroll">Enable Auto Payroll Generation</label>
+                                        <small class="d-block text-muted">Automatically generate payroll on scheduled date/time</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3 form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" name="auto_send_payslip_email" id="autoSendEmail" {{ 'checked' if payroll_settings.auto_send_payslip_email else '' }}>
+                                        <label class="form-check-label" for="autoSendEmail">Enable Auto Email Payslip</label>
+                                        <small class="d-block text-muted">Automatically email payslip to employees</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Professional Tax Settings -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-info text-white">
+                            <h5 class="card-title mb-0"><i class="bi bi-cash-coin"></i> Professional Tax (Monthly)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> Professional tax is deducted monthly from employee salary. February typically has higher tax in many regions.
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">January</label>
+                                        <input type="number" class="form-control" name="professional_tax_jan" step="0.01" value="{{ payroll_settings.professional_tax_jan }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">February</label>
+                                        <input type="number" class="form-control" name="professional_tax_feb" step="0.01" value="{{ payroll_settings.professional_tax_feb }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">March</label>
+                                        <input type="number" class="form-control" name="professional_tax_mar" step="0.01" value="{{ payroll_settings.professional_tax_mar }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">April</label>
+                                        <input type="number" class="form-control" name="professional_tax_apr" step="0.01" value="{{ payroll_settings.professional_tax_apr }}">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">May</label>
+                                        <input type="number" class="form-control" name="professional_tax_may" step="0.01" value="{{ payroll_settings.professional_tax_may }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">June</label>
+                                        <input type="number" class="form-control" name="professional_tax_jun" step="0.01" value="{{ payroll_settings.professional_tax_jun }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">July</label>
+                                        <input type="number" class="form-control" name="professional_tax_jul" step="0.01" value="{{ payroll_settings.professional_tax_jul }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">August</label>
+                                        <input type="number" class="form-control" name="professional_tax_aug" step="0.01" value="{{ payroll_settings.professional_tax_aug }}">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">September</label>
+                                        <input type="number" class="form-control" name="professional_tax_sep" step="0.01" value="{{ payroll_settings.professional_tax_sep }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">October</label>
+                                        <input type="number" class="form-control" name="professional_tax_oct" step="0.01" value="{{ payroll_settings.professional_tax_oct }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">November</label>
+                                        <input type="number" class="form-control" name="professional_tax_nov" step="0.01" value="{{ payroll_settings.professional_tax_nov }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <div class="mb-3">
+                                        <label class="form-label">December</label>
+                                        <input type="number" class="form-control" name="professional_tax_dec" step="0.01" value="{{ payroll_settings.professional_tax_dec }}">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Company Settings for Payslip -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="card-title mb-0"><i class="bi bi-building"></i> Company Details (for Payslip)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Company Name</label>
+                                        <input type="text" class="form-control" name="company_name" value="{{ company_settings.company_name }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Company Logo</label>
+                                        <input type="file" class="form-control" name="company_logo" accept="image/*">
+                                        {% if company_settings.company_logo %}
+                                            <small class="text-muted">Current: {{ company_settings.company_logo }}</small>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Company Address</label>
+                                <textarea class="form-control" name="company_address" rows="3" required>{{ company_settings.company_address }}</textarea>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Phone</label>
+                                        <input type="text" class="form-control" name="company_phone" value="{{ company_settings.company_phone }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Email</label>
+                                        <input type="email" class="form-control" name="company_email" value="{{ company_settings.company_email }}" required>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Website</label>
+                                        <input type="text" class="form-control" name="company_website" value="{{ company_settings.company_website }}">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="bi bi-save"></i> Save Payroll Settings
+                        </button>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-lg">
+                            <i class="bi bi-x-circle"></i> Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="col-lg-4">
+                <div class="card mb-4">
+                    <div class="card-header bg-warning">
+                        <h5 class="card-title mb-0"><i class="bi bi-lightbulb"></i> Quick Guide</h5>
+                    </div>
+                    <div class="card-body">
+                        <h6>Automatic Payroll</h6>
+                        <p class="small text-muted">Set the day and time for automatic payroll generation. The system will generate payroll for all active employees without manual intervention.</p>
+                        
+                        <h6 class="mt-3">Professional Tax</h6>
+                        <p class="small text-muted">Configure monthly professional tax amounts. These are deducted from employee salary before calculating net pay.</p>
+                        
+                        <h6 class="mt-3">Company Details</h6>
+                        <p class="small text-muted">These details appear on the professional payslip PDF sent to employees.</p>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header bg-secondary text-white">
+                        <h5 class="card-title mb-0"><i class="bi bi-info-circle"></i> Important Notes</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled small">
+                            <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Payroll will not be generated if it already exists for the month</li>
+                            <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Payslips are saved in YYYY/MM format</li>
+                            <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Email requires SMTP configuration in .env</li>
+                            <li class="mb-2"><i class="bi bi-check-circle text-success"></i> Scheduler runs automatically with Flask app</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Scheduler Status</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-success">
+                            <i class="bi bi-check-circle"></i> Payroll scheduler is running
+                        </div>
+                        <p class="small text-muted">Next scheduled run:</p>
+                        <p class="fw-bold">Day {{ payroll_settings.payroll_generation_day }} at {{ payroll_settings.payroll_generation_time }}</p>
+                        {% if payroll_settings.auto_generate_payroll %}
+                            <span class="badge bg-success">Auto Generation: Enabled</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Auto Generation: Disabled</span>
+                        {% endif %}
+                        {% if payroll_settings.auto_send_payslip_email %}
+                            <span class="badge bg-success ms-2">Auto Email: Enabled</span>
+                        {% else %}
+                            <span class="badge bg-secondary ms-2">Auto Email: Disabled</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

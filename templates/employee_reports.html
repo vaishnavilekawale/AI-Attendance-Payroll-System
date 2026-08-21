@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Reports - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('employee_dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_attendance') }}">
+                            <i class="bi bi-calendar-check"></i> My Attendance
+                        </a>
+                    </li>
+                    
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_payroll') }}">
+                            <i class="bi bi-cash"></i> My Payroll
+                        </a>
+                    </li>
+                    {% if current_user and current_user.designation == 'Manager' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('manager_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('employee_reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> My Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employee_profile') }}">
+                            <i class="bi bi-person"></i> My Profile
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.employee_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('employee_profile') }}">
+                                <i class="bi bi-person"></i> My Profile
+                            </a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('employee_change_password') }}">
+                                <i class="bi bi-key"></i> Change Password
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Logout
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-md-12">
+                <h2><i class="bi bi-file-earmark-bar-graph"></i> My Attendance Reports</h2>
+                <p class="text-muted">{{ employee.name }} - {{ employee.employee_id }}</p>
+            </div>
+        </div>
+
+        <!-- Date Filter -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">Filter by Date Range and Status</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if validation_error %}
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle"></i> {{ validation_error }}
+                        </div>
+                        {% endif %}
+                        <form method="GET" action="{{ url_for('employee_reports') }}">
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <label for="start_date" class="form-label">From Date</label>
+                                    <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="end_date" class="form-label">To Date</label>
+                                    <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="status" class="form-label">Status</label>
+                                    <select class="form-select" id="status" name="status">
+                                        <option value="">All Statuses</option>
+                                        <option value="present" {% if status_filter == 'present' %}selected{% endif %}>Present</option>
+                                        <option value="absent" {% if status_filter == 'absent' %}selected{% endif %}>Absent</option>
+                                        <option value="half_day" {% if status_filter == 'half_day' %}selected{% endif %}>Half Day</option>
+                                        <option value="late" {% if status_filter == 'late' %}selected{% endif %}>Late</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">&nbsp;</label>
+                                    <button type="submit" class="btn btn-primary w-100">
+                                        <i class="bi bi-filter"></i> Apply Filter
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Button -->
+        <div class="row mb-4">
+            <div class="col-md-12">
+                {% if start_date and end_date %}
+                <a href="{{ url_for('employee_export_report', start_date=start_date, end_date=end_date, status=status_filter) }}" class="btn btn-success">
+                    <i class="bi bi-file-earmark-pdf"></i> Export to PDF
+                </a>
+                {% else %}
+                <button class="btn btn-success" disabled>
+                    <i class="bi bi-file-earmark-pdf"></i> Export to PDF (Apply filter first)
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Attendance Report Table -->
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="card-title mb-0">
+                            {% if start_date and end_date %}
+                                Attendance Report ({{ start_date }} to {{ end_date }})
+                            {% else %}
+                                Attendance Report (All Records from Joining Date)
+                            {% endif %}
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        {% if attendances %}
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Status</th>
+                                        <th>IN Time</th>
+                                        <th>OUT Time</th>
+                                        <th>Working Hours</th>
+                                        <th>Late Entry</th>
+                                        <th>Overtime</th>
+                                        <th>Activities</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for att in attendances %}
+                                    <tr>
+                                        <td>{{ att.date.strftime('%Y-%m-%d') }}</td>
+                                        <td>
+                                            <span class="badge bg-{{ 'success' if att.status == 'present' else 'warning' if att.status == 'half_day' else 'danger' }}">
+                                                {{ att.status|title }}
+                                            </span>
+                                        </td>
+                                        <td>{{ att.in_time.strftime('%H:%M:%S') if att.in_time else 'N/A' }}</td>
+                                        <td>{{ att.display_out_time.strftime('%H:%M:%S') if att.display_out_time else '-' }}</td>
+                                        <td>{{ att.total_hours|round(2) if att.total_hours else '0.0' }}</td>
+                                        <td>
+                                            {% if att.late_entry %}
+                                                <span class="badge bg-warning">Yes</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">No</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ att.overtime_hours|round(2) if att.overtime_hours else '0.0' }}</td>
+                                        <td>
+                                            {% set activities = activities_by_attendance.get((att.employee.id, att.date), []) %}
+                                            {% if activities %}
+                                                <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#activities-{{ att.date.strftime('%Y%m%d') }}" aria-expanded="false">
+                                                    {{ activities|length }} <i class="bi bi-chevron-down"></i>
+                                                </button>
+                                                <div class="collapse mt-2" id="activities-{{ att.date.strftime('%Y%m%d') }}">
+                                                    <div class="card card-body bg-light">
+                                                        {% for activity in activities %}
+                                                            <div class="d-flex justify-content-between">
+                                                                <span>{{ activity.activity_time.strftime('%H:%M') }}</span>
+                                                                <span class="badge bg-{{ 'success' if activity.action == 'IN' else 'secondary' }}">{{ activity.action }}</span>
+                                                            </div>
+                                                        {% endfor %}
+                                                    </div>
+                                                </div>
+                                            {% else %}
+                                                <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i> No attendance records found for the selected period.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

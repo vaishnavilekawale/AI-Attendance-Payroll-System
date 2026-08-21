@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employees - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('employees') }}">
+                            <i class="bi bi-people"></i> Employees
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance') }}">
+                            <i class="bi bi-calendar-check"></i> Attendance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('payroll') }}">
+                            <i class="bi bi-cash"></i> Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('settings') }}">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('admin_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.admin_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>Employee Management</h2>
+                    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addEmployeeModal">
+                        <i class="bi bi-plus-circle"></i> Add Employee
+                    </button>
+                </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <!-- Search -->
+                {% if search is defined %}
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <form method="GET" action="{{ url_for('employees') }}">
+                            <div class="input-group">
+                                <input type="text" class="form-control" name="search" placeholder="Search employees..." value="{{ search }}">
+                                <button class="btn btn-outline-primary" type="submit">Search</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Employee List -->
+                <div class="card">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Employee ID</th>
+                                        <th>Name</th>
+                                        <th>Department</th>
+                                        <th>Designation</th>
+                                        <th>Email</th>
+                                        <th>Face Images</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for emp in (employees.items if employees.items is defined else employees) %}
+                                    <tr>
+                                        <td>{{ emp.employee_id }}</td>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                {% if emp.profile_photo %}
+                                                    <img src="/uploads/{{ emp.profile_photo.split('/')[-1] }}" class="rounded-circle me-2" width="45" height="45" style="object-fit: cover;" onerror="this.src='https://ui-avatars.com/api/?name={{ emp.name }}&background=6c757d&color=fff&size=45';">
+                                                {% else %}
+                                                    <img src="https://ui-avatars.com/api/?name={{ emp.name }}&background=6c757d&color=fff&size=45" class="rounded-circle me-2" width="45" height="45" style="object-fit: cover;">
+                                                {% endif %}
+                                                {{ emp.name }}
+                                            </div>
+                                        </td>
+                                        <td>{{ emp.department }}</td>
+                                        <td>{{ emp.designation }}</td>
+                                        <td>{{ emp.email }}</td>
+                                        <td>
+                                            {% set current_count = employee_image_counts.get(emp.id, 0) if employee_image_counts else 0 %}
+                                            {% set required_count = min_face_images if min_face_images else 20 %}
+                                            <span class="badge bg-{{ 'success' if current_count >= required_count else 'warning' }}">
+                                                {{ current_count }}/{{ required_count }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="btn-group">
+                                                <a href="{{ url_for('view_employee', id=emp.id) }}" class="btn btn-sm btn-info">
+                                                    <i class="bi bi-eye"></i>
+                                                </a>
+                                                <a href="{{ url_for('face_registration', id=emp.id) }}" class="btn btn-sm btn-warning">
+                                                    <i class="bi bi-camera"></i>
+                                                </a>
+                                                <a href="{{ url_for('edit_employee', id=emp.id) }}" class="btn btn-sm btn-primary">
+                                                    <i class="bi bi-pencil"></i>
+                                                </a>
+                                                <a href="{{ url_for('delete_employee', id=emp.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure?')">
+                                                    <i class="bi bi-trash"></i>
+                                                </a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Pagination -->
+                        {% if employees is defined and employees.pages is defined and employees.pages > 1 %}
+                        <nav>
+                            <ul class="pagination justify-content-center">
+                                {% if employees.has_prev %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('employees', page=employees.prev_num, search=search) }}">Previous</a>
+                                    </li>
+                                {% endif %}
+                                {% for page in employees.iter_pages() %}
+                                    {% if page %}
+                                        <li class="page-item {{ 'active' if page == employees.page else '' }}">
+                                            <a class="page-link" href="{{ url_for('employees', page=page, search=search) }}">{{ page }}</a>
+                                        </li>
+                                    {% else %}
+                                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                                    {% endif %}
+                                {% endfor %}
+                                {% if employees.has_next %}
+                                    <li class="page-item">
+                                        <a class="page-link" href="{{ url_for('employees', page=employees.next_num, search=search) }}">Next</a>
+                                    </li>
+                                {% endif %}
+                            </ul>
+                        </nav>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Employee Modal -->
+    <div class="modal fade" id="addEmployeeModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add New Employee</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST" action="{{ url_for('add_employee') }}" enctype="multipart/form-data">
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Full Name</label>
+                                    <input type="text" class="form-control" name="name" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Department</label>
+                                    <select class="form-select" name="department" required>
+                                        <option value="">Select Department</option>
+                                        <option value="IT">IT</option>
+                                        <option value="HR">HR</option>
+                                        <option value="Finance">Finance</option>
+                                        <option value="Marketing">Marketing</option>
+                                        <option value="Operations">Operations</option>
+                                        <option value="Sales">Sales</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Designation</label>
+                                    <input type="text" class="form-control" name="designation" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Basic Salary</label>
+                                    <input type="number" class="form-control" name="basic_salary" step="0.01" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Joining Date</label>
+                                    <input type="date" class="form-control" name="joining_date" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Date of Birth</label>
+                                    <input type="date" class="form-control" name="dob">
+                                    <small class="text-muted">Used to generate the payslip PDF password.</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" class="form-control" name="email" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Phone</label>
+                                    <input type="tel" class="form-control" name="phone" required>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="mb-3">
+                                    <label class="form-label">Address</label>
+                                    <textarea class="form-control" name="address" rows="2" required></textarea>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Office Location</label>
+                                    <input type="text" class="form-control" name="office_location">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Bank Name</label>
+                                    <input type="text" class="form-control" name="bank_name">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Bank Account Number</label>
+                                    <input type="text" class="form-control" name="bank_account_number">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <hr>
+                                <h6 class="mb-3">Statutory Details</h6>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">PAN Number</label>
+                                    <input type="text" class="form-control text-uppercase" name="pan_number" placeholder="e.g. ABCDE1234F" maxlength="20">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">UAN Number</label>
+                                    <input type="text" class="form-control" name="uan_number" placeholder="e.g. 101234567890" maxlength="20">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">PF Account Number</label>
+                                    <input type="text" class="form-control" name="pf_number" placeholder="e.g. MH/PUN/1234567/000/0001234" maxlength="20">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <hr>
+                                <h6 class="mb-3">Salary Allowances</h6>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">HRA</label>
+                                    <input type="number" class="form-control" name="hra" step="0.01" min="0" value="0.0">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">DA</label>
+                                    <input type="number" class="form-control" name="da" step="0.01" min="0" value="0.0">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Medical Allowance</label>
+                                    <input type="number" class="form-control" name="medical_allowance" step="0.01" min="0" value="0.0">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Travel Allowance</label>
+                                    <input type="number" class="form-control" name="travel_allowance" step="0.01" min="0" value="0.0">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Special Allowance</label>
+                                    <input type="number" class="form-control" name="special_allowance" step="0.01" min="0" value="0.0">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Other Allowances</label>
+                                    <input type="number" class="form-control" name="other_allowances" step="0.01" min="0" value="0.0">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <hr>
+                                <h6 class="mb-3">Salary Deductions</h6>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">TDS (Income Tax) %</label>
+                                    <input type="number" class="form-control" name="tds_percentage" step="0.01" min="0" value="0.0">
+                                    <small class="text-muted">Applied as a % of earned gross salary.</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Bus Charges / Transport</label>
+                                    <input type="number" class="form-control" name="bus_charges" step="0.01" min="0" value="0.0">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Other Deductions</label>
+                                    <input type="number" class="form-control" name="other_deduction" step="0.01" min="0" value="0.0">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="mb-3">
+                                    <label class="form-label">Profile Photo</label>
+                                    <input type="file" class="form-control" name="profile_photo" accept="image/*">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Add Employee</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Employee Modal -->
+    {% if employee %}
+    <div class="modal fade" id="editEmployeeModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Employee</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST" action="{{ url_for('edit_employee', id=employee.id) }}" enctype="multipart/form-data">
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Full Name</label>
+                                    <input type="text" class="form-control" name="name" value="{{ employee.name }}" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Department</label>
+                                    <select class="form-select" name="department" required>
+                                        <option value="">Select Department</option>
+                                        <option value="IT" {{ 'selected' if employee.department == 'IT' else '' }}>IT</option>
+                                        <option value="HR" {{ 'selected' if employee.department == 'HR' else '' }}>HR</option>
+                                        <option value="Finance" {{ 'selected' if employee.department == 'Finance' else '' }}>Finance</option>
+                                        <option value="Marketing" {{ 'selected' if employee.department == 'Marketing' else '' }}>Marketing</option>
+                                        <option value="Operations" {{ 'selected' if employee.department == 'Operations' else '' }}>Operations</option>
+                                        <option value="Sales" {{ 'selected' if employee.department == 'Sales' else '' }}>Sales</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Designation</label>
+                                    <input type="text" class="form-control" name="designation" value="{{ employee.designation }}" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Basic Salary</label>
+                                    <input type="number" class="form-control" name="basic_salary" step="0.01" value="{{ employee.basic_salary }}" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Date of Birth</label>
+                                    <input type="date" class="form-control" name="dob" value="{{ employee.dob.strftime('%Y-%m-%d') if employee.dob else '' }}">
+                                    <small class="text-muted">Used to generate the payslip PDF password.</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" class="form-control" name="email" value="{{ employee.email }}" required>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Phone</label>
+                                    <input type="tel" class="form-control" name="phone" value="{{ employee.phone }}" required>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="mb-3">
+                                    <label class="form-label">Address</label>
+                                    <textarea class="form-control" name="address" rows="2" required>{{ employee.address }}</textarea>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Office Location</label>
+                                    <input type="text" class="form-control" name="office_location" value="{{ employee.office_location or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Bank Name</label>
+                                    <input type="text" class="form-control" name="bank_name" value="{{ employee.bank_name or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Bank Account Number</label>
+                                    <input type="text" class="form-control" name="bank_account_number" value="{{ employee.bank_account_number or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <hr>
+                                <h6 class="mb-3">Statutory Details</h6>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">PAN Number</label>
+                                    <input type="text" class="form-control text-uppercase" name="pan_number" placeholder="e.g. ABCDE1234F" maxlength="20" value="{{ employee.pan_number or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">UAN Number</label>
+                                    <input type="text" class="form-control" name="uan_number" placeholder="e.g. 101234567890" maxlength="20" value="{{ employee.uan_number or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">PF Account Number</label>
+                                    <input type="text" class="form-control" name="pf_number" placeholder="e.g. MH/PUN/1234567/000/0001234" maxlength="20" value="{{ employee.pf_number or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <hr>
+                                <h6 class="mb-3">Salary Allowances</h6>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">HRA</label>
+                                    <input type="number" class="form-control" name="hra" step="0.01" min="0" value="{{ employee.hra if employee.hra is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">DA</label>
+                                    <input type="number" class="form-control" name="da" step="0.01" min="0" value="{{ employee.da if employee.da is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Medical Allowance</label>
+                                    <input type="number" class="form-control" name="medical_allowance" step="0.01" min="0" value="{{ employee.medical_allowance if employee.medical_allowance is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Travel Allowance</label>
+                                    <input type="number" class="form-control" name="travel_allowance" step="0.01" min="0" value="{{ employee.travel_allowance if employee.travel_allowance is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Special Allowance</label>
+                                    <input type="number" class="form-control" name="special_allowance" step="0.01" min="0" value="{{ employee.special_allowance if employee.special_allowance is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Other Allowances</label>
+                                    <input type="number" class="form-control" name="other_allowances" step="0.01" min="0" value="{{ employee.other_allowances if employee.other_allowances is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <hr>
+                                <h6 class="mb-3">Salary Deductions</h6>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">TDS (Income Tax) %</label>
+                                    <input type="number" class="form-control" name="tds_percentage" step="0.01" min="0" value="{{ employee.tds_percentage if employee.tds_percentage is not none else 0.0 }}">
+                                    <small class="text-muted">Applied as a % of earned gross salary.</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Bus Charges / Transport</label>
+                                    <input type="number" class="form-control" name="bus_charges" step="0.01" min="0" value="{{ employee.bus_charges if employee.bus_charges is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Other Deductions</label>
+                                    <input type="number" class="form-control" name="other_deduction" step="0.01" min="0" value="{{ employee.other_deduction if employee.other_deduction is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="mb-3">
+                                    <label class="form-label">Profile Photo</label>
+                                    <input type="file" class="form-control" name="profile_photo" accept="image/*">
+                                    {% if employee.profile_photo %}
+                                        <small class="text-muted">Current: {{ employee.profile_photo }}</small>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Update Employee</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var editModal = new bootstrap.Modal(document.getElementById('editEmployeeModal'));
+            editModal.show();
+        });
+    </script>
+    {% endif %}
+
+    <!-- Face Registration Modal -->
+    {% if face_registration %}
+    <div class="modal fade" id="faceRegistrationModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Face Registration - {{ employee.name }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 
+                        Current face images: <strong>{{ current_face_images if current_face_images is defined else 0 }}</strong>
+                        Required: <strong>{{ min_face_images if min_face_images is defined else 20 }}</strong>
+                        {% if remaining_images is defined and remaining_images > 0 %}
+                        <br>Capturing <strong>{{ remaining_images }}</strong> additional images.
+                        {% elif remaining_images is defined and remaining_images == 0 %}
+                        <br>Employee already has sufficient face images.
+                        {% endif %}
+                    </div>
+                    
+                    {% if remaining_images is defined and remaining_images > 0 %}
+                    <div class="mb-3">
+                        <label class="form-label">Number of Images to Capture</label>
+                        <input type="number" class="form-control" id="numImages" value="{{ remaining_images }}" min="1" max="{{ remaining_images }}" readonly data-remaining="{{ remaining_images }}">
+                        <small class="text-muted">System will capture {{ remaining_images }} remaining images to reach {{ min_face_images if min_face_images is defined else 20 }} total</small>
+                    </div>
+                    
+                    <div class="video-container mb-3" id="videoContainer" style="display: none;">
+                        <video id="webcam" autoplay playsinline style="width: 100%; border-radius: 10px;"></video>
+                    </div>
+                    
+                    <div class="text-center mb-3">
+                        <button type="button" class="btn btn-primary" id="startCameraBtn">
+                            <i class="bi bi-camera-video"></i> Start Camera
+                        </button>
+                        <button type="button" class="btn btn-success" id="captureBtn" style="display: none;">
+                            <i class="bi bi-camera"></i> Capture Images
+                        </button>
+                        <button type="button" class="btn btn-danger" id="stopCameraBtn" style="display: none;">
+                            <i class="bi bi-stop-circle"></i> Stop
+                        </button>
+                    </div>
+                    
+                    <div class="progress mb-3" style="display: none;" id="progressContainer">
+                        <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%">0 / 0</div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> Click "Start Camera" to open webcam. Ensure good lighting and face is clearly visible. The system will automatically capture images.
+                    </div>
+                    {% else %}
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle"></i> Employee already has {{ current_face_images if current_face_images is defined else 0 }} face images. No additional capture needed.
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var faceModal = new bootstrap.Modal(document.getElementById('faceRegistrationModal'));
+            faceModal.show();
+            
+            let video = document.getElementById('webcam');
+            let stream = null;
+            let capturing = false;
+            let capturedCount = 0;
+            let numImages = parseInt(document.getElementById('numImages').value) || 20;
+            const employeeId = {{ employee.id | tojson }};
+            
+            document.getElementById('startCameraBtn').addEventListener('click', async function() {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    video.srcObject = stream;
+                    document.getElementById('videoContainer').style.display = 'block';
+                    document.getElementById('startCameraBtn').style.display = 'none';
+                    document.getElementById('captureBtn').style.display = 'inline-block';
+                    document.getElementById('stopCameraBtn').style.display = 'inline-block';
+                } catch (err) {
+                    alert('Could not access webcam: ' + err.message);
+                }
+            });
+            
+            document.getElementById('captureBtn').addEventListener('click', function() {
+                if (capturing) return;
+                
+                numImages = parseInt(document.getElementById('numImages').value);
+                capturedCount = 0;
+                capturing = true;
+                
+                document.getElementById('progressContainer').style.display = 'block';
+                document.getElementById('captureBtn').disabled = true;
+                
+                captureImages();
+            });
+            
+            document.getElementById('stopCameraBtn').addEventListener('click', function() {
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                }
+                document.getElementById('videoContainer').style.display = 'none';
+                document.getElementById('startCameraBtn').style.display = 'inline-block';
+                document.getElementById('captureBtn').style.display = 'none';
+                document.getElementById('stopCameraBtn').style.display = 'none';
+                capturing = false;
+            });
+            
+            function captureImages() {
+                if (capturedCount >= numImages) {
+                    capturing = false;
+                    document.getElementById('captureBtn').disabled = false;
+                    
+                    // Train the face recognition model after capturing all images
+                    document.getElementById('progressBar').textContent = 'Training model...';
+                    
+                    const trainFormData = new FormData();
+                    trainFormData.append('employee_id', employeeId);
+                    
+                    fetch('/api/train-face-model', {
+                        method: 'POST',
+                        body: trainFormData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Successfully captured ' + capturedCount + ' images and trained face recognition model!');
+                            document.getElementById('progressBar').textContent = 'Training complete!';
+                        } else {
+                            alert('Images captured but training failed: ' + data.message);
+                        }
+                    })
+                    .catch(err => {
+                        alert('Images captured but training error: ' + err.message);
+                    });
+                    
+                    return;
+                }
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0);
+                
+                canvas.toBlob(function(blob) {
+                    const formData = new FormData();
+                    formData.append('image', blob);
+                    formData.append('employee_id', employeeId);
+                    
+                    fetch('/api/upload-face-image', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            capturedCount++;
+                            document.getElementById('progressBar').style.width = (capturedCount / numImages * 100) + '%';
+                            document.getElementById('progressBar').textContent = capturedCount + ' / ' + numImages;
+                            
+                            // Capture next image after a short delay
+                            setTimeout(captureImages, 500);
+                        } else {
+                            alert('Error capturing image: ' + data.message);
+                            capturing = false;
+                            document.getElementById('captureBtn').disabled = false;
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Error:', err);
+                        capturing = false;
+                        document.getElementById('captureBtn').disabled = false;
+                    });
+                }, 'image/jpeg', 0.8);
+            }
+        });
+    </script>
+    {% endif %}
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

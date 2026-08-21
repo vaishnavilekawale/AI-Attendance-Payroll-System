@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow-x: hidden;
+        }
+        
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .login-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 450px;
+            padding: 40px;
+            animation: fadeInUp 0.6s ease-out;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .company-logo {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .company-logo i {
+            font-size: 40px;
+            color: white;
+        }
+        
+        .login-title {
+            color: #1e3c72;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+        
+        .login-subtitle {
+            color: #6c757d;
+            font-size: 0.9rem;
+            margin-bottom: 30px;
+        }
+        
+        .role-selector {
+            margin-bottom: 25px;
+        }
+        
+        .role-selector label {
+            color: #1e3c72;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 10px;
+            display: block;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn-role {
+            border: 2px solid #667eea;
+            color: #667eea;
+            font-weight: 600;
+            padding: 10px 20px;
+            transition: all 0.3s ease;
+            flex: 1;
+            background: white;
+        }
+        
+        .btn-role:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+        
+        .btn-role.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+            color: white;
+        }
+        
+        .form-label {
+            color: #1e3c72;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        
+        .input-group {
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        
+        .input-group-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+        }
+        
+        .form-control {
+            border: 2px solid #e9ecef;
+            border-left: none;
+            padding: 12px 15px;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+        
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        
+        .btn-outline-secondary {
+            border: none;
+            background: #f8f9fa;
+            color: #6c757d;
+        }
+        
+        .btn-outline-secondary:hover {
+            background: #e9ecef;
+            color: #495057;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px;
+            font-weight: 600;
+            font-size: 1rem;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+        
+        .form-check-input:checked {
+            background-color: #667eea;
+            border-color: #667eea;
+        }
+        
+        .text-decoration-none {
+            color: #667eea;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .text-decoration-none:hover {
+            color: #764ba2;
+        }
+        
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            border-radius: 10px;
+            border: none;
+            font-size: 0.9rem;
+        }
+        
+        @media (max-width: 576px) {
+            .login-card {
+                padding: 30px 20px;
+                margin: 10px;
+            }
+            
+            .company-logo {
+                width: 60px;
+                height: 60px;
+            }
+            
+            .company-logo i {
+                font-size: 30px;
+            }
+            
+            .login-title {
+                font-size: 1.5rem;
+            }
+            
+            .login-subtitle {
+                font-size: 0.85rem;
+            }
+            
+            .role-selector label {
+                font-size: 0.85rem;
+            }
+            
+            .btn-group .btn {
+                padding: 8px 12px;
+                font-size: 0.9rem;
+            }
+            
+            .form-label {
+                font-size: 0.85rem;
+            }
+            
+            .form-control {
+                padding: 10px 12px;
+                font-size: 0.9rem;
+            }
+            
+            .btn-primary {
+                padding: 10px;
+                font-size: 0.95rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+    </div>
+    
+    <div class="login-container">
+        <div class="login-card">
+            <div class="text-center">
+                <div class="company-logo">
+                    <i class="bi bi-building"></i>
+                </div>
+                <h2 class="login-title">AI Attendance System</h2>
+                <p class="login-subtitle">Employee Attendance & Payroll Management</p>
+            </div>
+            
+            <!-- Role Selector -->
+            <div class="role-selector">
+                <label>Login As</label>
+                <div class="btn-group w-100" role="group">
+                    <button type="button" class="btn btn-role active" id="btnAdmin" data-role="admin">
+                        <i class="bi bi-shield-lock me-2"></i> Admin
+                    </button>
+                    <button type="button" class="btn btn-role" id="btnEmployee" data-role="employee">
+                        <i class="bi bi-person me-2"></i> Employee
+                    </button>
+                </div>
+            </div>
+            
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            <i class="bi bi-{% if category == 'success' %}check-circle{% elif category == 'danger' %}exclamation-circle{% elif category == 'warning' %}exclamation-triangle{% else %}info-circle{% endif %} me-2"></i>
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            
+            <form method="POST" action="{{ url_for('login') }}" id="loginForm" novalidate>
+                <input type="hidden" name="role" id="roleInput" value="admin">
+                
+                <div class="mb-3">
+                    <label for="username" class="form-label" id="usernameLabel">Username</label>
+                    <div class="input-group">
+                        <span class="input-group-text">
+                            <i class="bi bi-person" id="usernameIcon"></i>
+                        </span>
+                        <input type="text" class="form-control" id="username" name="username" required minlength="3" maxlength="50" placeholder="Enter username">
+                        <div class="invalid-feedback" id="usernameFeedback">
+                            Username is required (minimum 3 characters)
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="password" class="form-label">Password</label>
+                    <div class="input-group">
+                        <span class="input-group-text">
+                            <i class="bi bi-lock"></i>
+                        </span>
+                        <input type="password" class="form-control" id="password" name="password" required minlength="6" maxlength="100" placeholder="Enter password">
+                        <button class="btn btn-outline-secondary" type="button" id="togglePassword">
+                            <i class="bi bi-eye" id="eyeIcon"></i>
+                        </button>
+                        <div class="invalid-feedback">
+                            Password is required (minimum 6 characters)
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                    <label class="form-check-label" for="remember">Remember me</label>
+                </div>
+                
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-box-arrow-in-right me-2"></i> Login
+                </button>
+            </form>
+            
+            <div class="text-center mt-4" id="forgotPasswordSection">
+                <a href="{{ url_for('forgot_password') }}" class="text-decoration-none" id="forgotPasswordLink">
+                    <i class="bi bi-question-circle me-1"></i> Forgot Password?
+                </a>
+            </div>
+            
+            <div class="text-center mt-3" id="registerSection">
+                <small class="text-muted">Don't have an admin account? <a href="{{ url_for('register') }}" class="text-decoration-none">Register</a></small>
+            </div>
+            
+            <div class="text-center mt-4">
+                <small class="text-muted" id="defaultCredentials">
+                    Default: admin / admin123
+                </small>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Role Selection Handler
+        const btnAdmin = document.getElementById('btnAdmin');
+        const btnEmployee = document.getElementById('btnEmployee');
+        const roleInput = document.getElementById('roleInput');
+        const usernameLabel = document.getElementById('usernameLabel');
+        const usernameIcon = document.getElementById('usernameIcon');
+        const usernameInput = document.getElementById('username');
+        const usernameFeedback = document.getElementById('usernameFeedback');
+        const forgotPasswordSection = document.getElementById('forgotPasswordSection');
+        const forgotPasswordLink = document.getElementById('forgotPasswordLink');
+        const registerSection = document.getElementById('registerSection');
+        const defaultCredentials = document.getElementById('defaultCredentials');
+        
+        function updateFormForRole(role) {
+            console.log('Updating form for role:', role);
+            
+            if (role === 'admin') {
+                btnAdmin.classList.add('active');
+                btnEmployee.classList.remove('active');
+                roleInput.value = 'admin';
+                usernameLabel.textContent = 'Username';
+                usernameIcon.className = 'bi bi-person';
+                usernameInput.placeholder = 'Enter username';
+                usernameFeedback.textContent = 'Username is required (minimum 3 characters)';
+                forgotPasswordSection.style.display = 'block';
+                forgotPasswordLink.href = "{{ url_for('forgot_password') }}";
+                registerSection.style.display = 'block';
+                defaultCredentials.textContent = 'Default: admin / admin123';
+            } else {
+                btnEmployee.classList.add('active');
+                btnAdmin.classList.remove('active');
+                roleInput.value = 'employee';
+                usernameLabel.textContent = 'Employee ID';
+                usernameIcon.className = 'bi bi-person-badge';
+                usernameInput.placeholder = 'Enter Employee ID (e.g., EMP0001)';
+                usernameFeedback.textContent = 'Employee ID is required';
+                forgotPasswordSection.style.display = 'block';
+                forgotPasswordLink.href = "{{ url_for('employee_forgot_password') }}";
+                registerSection.style.display = 'none';
+                defaultCredentials.textContent = 'Default: Your Employee ID (e.g., EMP0001)';
+            }
+        }
+        
+        // Add click handlers for role buttons
+        btnAdmin.addEventListener('click', function() {
+            console.log('Admin button clicked');
+            updateFormForRole('admin');
+        });
+        
+        btnEmployee.addEventListener('click', function() {
+            console.log('Employee button clicked');
+            updateFormForRole('employee');
+        });
+        
+        // Initialize with admin role (default)
+        updateFormForRole('admin');
+        
+        // Show/Hide Password
+        document.getElementById('togglePassword').addEventListener('click', function() {
+            const passwordInput = document.getElementById('password');
+            const eyeIcon = document.getElementById('eyeIcon');
+            
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                eyeIcon.classList.remove('bi-eye');
+                eyeIcon.classList.add('bi-eye-slash');
+            } else {
+                passwordInput.type = 'password';
+                eyeIcon.classList.remove('bi-eye-slash');
+                eyeIcon.classList.add('bi-eye');
+            }
+        });
+        
+        // Form Validation and Loading Animation
+        (function() {
+            'use strict';
+            const form = document.getElementById('loginForm');
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            
+            form.addEventListener('submit', function(event) {
+                if (!form.checkValidity()) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                } else {
+                    // Show loading animation
+                    loadingOverlay.style.display = 'flex';
+                }
+                form.classList.add('was-validated');
+            }, false);
+        })();
+    </script>
+</body>
+</html>
