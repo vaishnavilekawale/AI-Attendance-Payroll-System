@@ -24,6 +24,10 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+    - name: Create Required Directories
+      run: |
+        mkdir -p instance dataset uploads trained_model payrolls
+
     - name: Check Database & App Launch
       env:
         SECRET_KEY: "test-secret-key-for-ci"
