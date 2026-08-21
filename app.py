@@ -1153,11 +1153,14 @@ def add_employee():
                 pass
         else:
             pass
-        
+
+        temporary_password = "Welcome@123"
+
         employee = Employee(
             employee_id=new_id,
             username=new_id,
             name=name,
+            password_hash=generate_password_hash(temporary_password),
             department=department,
             designation=designation,
             basic_salary=basic_salary,
