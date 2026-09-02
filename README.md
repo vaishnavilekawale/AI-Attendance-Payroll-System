@@ -485,7 +485,7 @@ Deleting an employee cleanly removes, in order: `LogoutApprovalRequest` (referen
 | Job | Schedule | Behavior |
 |---|---|---|
 | Auto-logout regularization | Daily, 23:59 | Closes out anyone still clocked in, raises a regularization request for manager/admin review |
-| Payroll generation | Monthly, last day of month (time configurable) | Calculates payroll and, if auto-send is enabled, distributes encrypted payslips via email; missed runs are reconciled on next startup |
+| Payroll generation | 1st day of every month (for the previous month) | Calculates payroll and, if auto-send is enabled, distributes encrypted payslips via email; missed runs are reconciled on next startup |
 
 ## Mobile Responsive Design
 
