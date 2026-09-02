@@ -292,9 +292,9 @@
         new Chart(attCtx, {
             type: 'doughnut',
             data: {
-                labels: ['Present', 'Half Day', 'Absent', 'Late'],
+                labels: ['Present', 'Absent', 'Half Day', 'Late'],
                 datasets: [{
-                    data: [presentCount, halfDayCount, absentCount, lateCount],
+                    data: [presentCount, absentCount, halfDayCount, lateCount],
                     backgroundColor: [
                         'rgba(54, 162, 235, 0.8)',
                         'rgba(255, 99, 132, 0.8)',
