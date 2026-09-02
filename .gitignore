@@ -25,3 +25,5 @@ payrolls/*
 
 trained_model/*
 !trained_model/.gitkeep
+
+/static/images/
