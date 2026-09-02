@@ -630,7 +630,7 @@ This project is proprietary software. All rights reserved.
 ## Contact
 
 For support and inquiries:
-- Email: support@company.com
+- Email: lekawalevaishnavi@gmail.com
 
 ---
 
