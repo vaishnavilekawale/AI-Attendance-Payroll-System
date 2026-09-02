@@ -60,7 +60,7 @@ The AI Employee Attendance Monitoring and Payroll Management System is a three-r
 
 ### Automation
 - **Scheduled Auto-Logout Regularization**: A daily background job (APScheduler, 23:59) closes out anyone still clocked in and raises a regularization request for manager/admin review.
-- **Scheduled Monthly Payroll**: Runs automatically on the last day of every month at a configurable time, generating payroll and distributing encrypted payslips via email when auto-send is enabled; missed runs are reconciled on next startup.
+- **Scheduled Monthly Payroll**: Runs automatically on the 1st of every month to calculate and process the previous full month's payroll, distributing encrypted payslips via email when auto-send is enabled.
 
 ### Platform
 - **Login System**: Secure username/password authentication for admins, with a separate employee login backed by its own `EmployeeLogin` credentials table (including forced password change on first login and temporary-password support with expiry).
