@@ -124,7 +124,7 @@
                                         <td><strong>Rs. {{ "{:,.2f}".format(payroll.net_salary) }}</strong></td>
                                         <td>
                                             {% if payroll.payslip_generated %}
-                                                <a href="/uploads/{{ payroll.payslip_path.split('/')[-1] }}" class="btn btn-sm btn-primary" target="_blank">
+                                                <a href="{{ url_for('generate_payslip', id=payroll.id) }}" class="btn btn-sm btn-primary">
                                                     <i class="bi bi-download"></i> Download
                                                 </a>
                                             {% else %}

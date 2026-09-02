@@ -84,7 +84,7 @@
             <div class="col-12">
                 <div class="card">
                     <div class="card-header bg-warning text-dark">
-                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Pending Requests ({{ pending_requests|length }})</h5>
+                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Pending Logout Requests ({{ pending_requests|length }})</h5>
                     </div>
                     <div class="card-body">
                         {% if pending_requests %}
@@ -131,7 +131,108 @@
                             </table>
                         </div>
                         {% else %}
-                        <p class="text-muted">No pending requests.</p>
+                        <p class="text-muted">No pending logout requests.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pending Manual Attendance Requests -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0"><i class="bi bi-person-check"></i> Pending Manual Attendance Requests ({{ pending_manual_attendance|length }})</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if pending_manual_attendance %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Employee</th>
+                                        <th>Employee ID</th>
+                                        <th>Department</th>
+                                        <th>Date</th>
+                                        <th>IN Time</th>
+                                        <th>Submission Timestamp</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for att in pending_manual_attendance %}
+                                    <tr>
+                                        <td>{{ att.employee.name }}</td>
+                                        <td>{{ att.employee.employee_id }}</td>
+                                        <td>{{ att.employee.department }}</td>
+                                        <td>{{ att.date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ att.in_time.strftime('%H:%M:%S') if att.in_time else '-' }}</td>
+                                        <td><strong>{{ att.submission_timestamp.strftime('%Y-%m-%d %H:%M:%S') if att.submission_timestamp else '-' }}</strong></td>
+                                        <td>
+                                            <div class="d-flex gap-1 flex-wrap">
+                                                <button class="btn btn-sm btn-success"
+                                                        onclick="approveManualAttendance('{{ att.id }}')">
+                                                    <i class="bi bi-check"></i> Approve
+                                                </button>
+                                                <button class="btn btn-sm btn-danger"
+                                                        onclick="rejectManualAttendance('{{ att.id }}')">
+                                                    <i class="bi bi-x"></i> Reject
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted">No pending manual attendance requests.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Rejected Manual Attendance (Regularization) Requests -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-danger text-white">
+                        <h5 class="mb-0"><i class="bi bi-x-circle"></i> Rejected Manual Attendance Requests ({{ rejected_manual_attendance|length }})</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if rejected_manual_attendance %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Employee</th>
+                                        <th>Employee ID</th>
+                                        <th>Department</th>
+                                        <th>Date</th>
+                                        <th>Submission Timestamp</th>
+                                        <th>Rejected At</th>
+                                        <th>Remarks</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for att in rejected_manual_attendance %}
+                                    <tr>
+                                        <td>{{ att.employee.name }}</td>
+                                        <td>{{ att.employee.employee_id }}</td>
+                                        <td>{{ att.employee.department }}</td>
+                                        <td>{{ att.date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ att.submission_timestamp.strftime('%Y-%m-%d %H:%M:%S') if att.submission_timestamp else '-' }}</td>
+                                        <td>{{ att.updated_at.strftime('%Y-%m-%d %H:%M') if att.updated_at else '-' }}</td>
+                                        <td>{{ att.rejection_remarks or '-' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted">No rejected manual attendance requests.</p>
                         {% endif %}
                     </div>
                 </div>
@@ -309,6 +410,54 @@
                     alert('Logout request rejected successfully!');
                     var modal = bootstrap.Modal.getInstance(document.getElementById('rejectModal'));
                     modal.hide();
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error);
+            });
+        }
+
+        function approveManualAttendance(attendanceId) {
+            if (confirm('Are you sure you want to approve this manual attendance request? This will make the attendance visible on dashboard, reports, and payroll.')) {
+                fetch(`/manual-attendance/approve/${attendanceId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('Manual attendance approved successfully!');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error);
+                });
+            }
+        }
+
+        function rejectManualAttendance(attendanceId) {
+            var remarks = prompt('Enter reason for rejection (optional):');
+            if (remarks === null) return; // User cancelled
+            
+            fetch(`/manual-attendance/reject/${attendanceId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ remarks: remarks })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Manual attendance rejected successfully!');
                     location.reload();
                 } else {
                     alert('Error: ' + data.message);

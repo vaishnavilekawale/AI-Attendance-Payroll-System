@@ -1,7 +1,7 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, send_from_directory, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, send_from_directory, flash, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from functools import wraps
@@ -24,38 +24,6 @@ import logging
 import atexit
 import threading
 import time as time_module
-
-# ============================================================
-# LOGGING CONFIGURATION
-# ============================================================
-
-# 1. मुख्य Logging Level CRITICAL करा (ज्यामुळे INFO/WARNING लॉग्ज बंद होतील)
-# logging.basicConfig(
-#     level=logging.CRITICAL,
-#     format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
-#     datefmt='%Y-%m-%d %H:%M:%S',
-#     force=True
-# )
-
-# logger = logging.getLogger(__name__)
-
-# # 2. Flask/Werkzeug सर्व्हरचे लॉग्ज बंद करण्यासाठी
-# werkzeug_logger = logging.getLogger("werkzeug")
-# werkzeug_logger.setLevel(logging.ERROR)
-
-# # 3. APScheduler चे लॉग्ज बंद करण्यासाठी
-# logging.getLogger("apscheduler").setLevel(logging.CRITICAL)
-# logging.getLogger("apscheduler.scheduler").setLevel(logging.CRITICAL)
-# logging.getLogger("scheduler_service").setLevel(logging.CRITICAL)
-
-# # 4. Services (Attendance, Admin Reports, Approval) चे सर्व लॉग्ज बंद करा
-# for custom_logger in [
-#     'services.admin_reports_service',
-#     'services.attendance_calculator',
-#     'services.approval_service',
-#     'email_service'
-# ]:
-#     logging.getLogger(custom_logger).setLevel(logging.CRITICAL)
 
 # ============================================================
 # LOGGING CONFIGURATION
@@ -407,32 +375,34 @@ def employee_required(f):
 
 @app.route('/uploads/<path:filename>')
 def serve_upload(filename):
-    """Serve files from uploads folder for profile photos"""
+    """Serve files from uploads folder for profile photos and payslips"""
     uploads_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-    return send_file(os.path.join(uploads_folder, filename))
+    file_path = os.path.join(uploads_folder, filename)
+    
+    # If file doesn't exist at the expected path, try to find it in the uploads root
+    # This handles the case where payslips are stored directly in uploads/ instead of payrolls/ subdirectory
+    if not os.path.exists(file_path):
+        # Extract just the filename from the path
+        filename_only = os.path.basename(filename)
+        alternative_path = os.path.join(uploads_folder, filename_only)
+        
+        if os.path.exists(alternative_path):
+            file_path = alternative_path
+        else:
+            # Try alternative naming convention for payslips (e.g., payslip_EMP0001_8_2026.pdf vs payslip_EMP0001_2026_8.pdf)
+            if 'payslip' in filename_only:
+                # Extract employee_id, month, year from filename
+                parts = filename_only.replace('payslip_', '').replace('.pdf', '').split('_')
+                if len(parts) == 3:
+                    employee_id, month, year = parts
+                    # Try swapping month and year
+                    alt_filename = f"payslip_{employee_id}_{year}_{month}.pdf"
+                    alt_path = os.path.join(uploads_folder, alt_filename)
+                    if os.path.exists(alt_path):
+                        file_path = alt_path
+    
+    return send_file(file_path)
 
-# @app.route('/uploads/<path:filename>')
-# def serve_upload(filename):
-#     """Serve files from uploads folder for profile photos"""
-
-#     uploads_folder = os.path.join(
-#         os.path.dirname(os.path.abspath(__file__)),
-#         'uploads'
-#     )
-
-#     # Handle old DB values like:
-#     # uploads/EMP0005_photo.jpg
-#     # and new values like:
-#     # EMP0005_photo.jpg
-
-#     filename = filename.replace('\\', '/')
-
-#     if filename.startswith('uploads/'):
-#         filename = filename[len('uploads/'):]
-
-#     file_path = os.path.join(uploads_folder, filename)
-
-#     return send_file(file_path)
 
 @app.route('/dataset/<path:filename>')
 def serve_dataset(filename):
@@ -442,11 +412,17 @@ def serve_dataset(filename):
 
 @app.route('/')
 def index():
-    if 'admin_id' in session:
-        return redirect(url_for('dashboard'))
-    elif 'employee_id' in session:
-        return redirect(url_for('employee_dashboard'))
-    return redirect(url_for('login'))
+    """
+    Public kiosk landing page.
+
+    The core Face Recognition / Mark Attendance interface is now the
+    application's default entry point, bypassing the login screen
+    entirely - anyone can walk up and mark attendance immediately. Admin
+    and Employee login remain one click away via the unobtrusive login
+    link/sidebar rendered on this same page (see home_attendance.html),
+    rather than gating the root route behind a session check.
+    """
+    return render_template('home_attendance.html')
 
 @app.route("/test-log")
 def test_log():
@@ -575,7 +551,10 @@ def login():
 def logout():
     """Unified logout for both Admin and Employee"""
     session.clear()
-    return redirect(url_for('login'))
+    # Land back on the public kiosk attendance page rather than the login
+    # form, consistent with the attendance page being the app's default
+    # entry point.
+    return redirect(url_for('index'))
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
@@ -923,8 +902,13 @@ def employee_dashboard():
     # Initialize services
     am, _, _, _ = get_services()
     
-    # Get today's attendance for this employee
-    today_attendance = Attendance.query.filter_by(employee_id=employee_id, date=today).first()
+    # Get today's attendance for this employee (exclude pending manual attendance)
+    today_attendance = Attendance.query.filter_by(employee_id=employee_id, date=today).filter(
+        db.or_(
+            Attendance.attendance_type != 'MANUAL_PASSWORD',
+            Attendance.approval_status == 'approved'
+        )
+    ).first()
 
     # Add display_out_time for UI
     if today_attendance:
@@ -978,8 +962,13 @@ def employee_dashboard():
     
     logger.info("EMPLOYEE DASHBOARD ABSENT COUNT: %s", absent_days)
     
-    # Get recent attendance for this employee (last 10 records)
-    recent_attendance = Attendance.query.filter_by(employee_id=employee_id).order_by(
+    # Get recent attendance for this employee (last 10 records, exclude pending manual attendance)
+    recent_attendance = Attendance.query.filter_by(employee_id=employee_id).filter(
+        db.or_(
+            Attendance.attendance_type != 'MANUAL_PASSWORD',
+            Attendance.approval_status == 'approved'
+        )
+    ).order_by(
         Attendance.date.desc()
     ).limit(10).all()
 
@@ -1120,9 +1109,11 @@ def add_employee():
         other_allowances = _parse_allowance('other_allowances')
 
         # Salary Deductions - same safe-parsing pattern as allowances.
-        # tds_percentage is a PERCENTAGE (applied to earned gross salary
-        # inside payroll.compute_payroll_amounts); bus_charges and
-        # other_deduction are flat monthly amounts.
+        # employee_pf_percentage and esic_percentage are PERCENTAGES (applied to
+        # earned gross salary inside payroll.compute_payroll_amounts); tds_percentage
+        # is also a PERCENTAGE; bus_charges and other_deduction are flat monthly amounts.
+        employee_pf_percentage = _parse_allowance('employee_pf_percentage')
+        esic_percentage = _parse_allowance('esic_percentage')
         tds_percentage = _parse_allowance('tds_percentage')
         bus_charges = _parse_allowance('bus_charges')
         other_deduction = _parse_allowance('other_deduction')
@@ -1153,14 +1144,11 @@ def add_employee():
                 pass
         else:
             pass
-
-        temporary_password = "Welcome@123"
-
+        
         employee = Employee(
             employee_id=new_id,
             username=new_id,
             name=name,
-            password_hash=generate_password_hash(temporary_password),
             department=department,
             designation=designation,
             basic_salary=basic_salary,
@@ -1182,6 +1170,8 @@ def add_employee():
             travel_allowance=travel_allowance,
             special_allowance=special_allowance,
             other_allowances=other_allowances,
+            employee_pf_percentage=employee_pf_percentage,
+            esic_percentage=esic_percentage,
             tds_percentage=tds_percentage,
             bus_charges=bus_charges,
             other_deduction=other_deduction,
@@ -1227,7 +1217,23 @@ def add_employee():
 @admin_required
 def edit_employee(id):
     employee = Employee.query.get_or_404(id)
-    employees = Employee.query.filter_by(status='active').all()
+    employees = Employee.query.filter_by(status='active').order_by(Employee.created_at.desc()).all()
+    
+    # Get minimum face images required from Settings
+    settings = Settings.get_settings()
+    min_face_images = settings.min_face_images_required if settings else 20
+    
+    # Calculate face image counts for all employees
+    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+    employee_image_counts = {}
+    
+    for emp in employees:
+        emp_folder = os.path.join(dataset_folder, str(emp.id))
+        if os.path.exists(emp_folder):
+            image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+            employee_image_counts[emp.id] = len(image_files)
+        else:
+            employee_image_counts[emp.id] = 0
     
     if request.method == 'POST':
         name = request.form.get('name')
@@ -1274,6 +1280,11 @@ def edit_employee(id):
         other_allowances = _parse_allowance('other_allowances')
 
         # Salary Deductions - same safe-parsing pattern as allowances.
+        # employee_pf_percentage and esic_percentage are PERCENTAGES (applied to
+        # earned gross salary inside payroll.compute_payroll_amounts); tds_percentage
+        # is also a PERCENTAGE; bus_charges and other_deduction are flat monthly amounts.
+        employee_pf_percentage = _parse_allowance('employee_pf_percentage')
+        esic_percentage = _parse_allowance('esic_percentage')
         tds_percentage = _parse_allowance('tds_percentage')
         bus_charges = _parse_allowance('bus_charges')
         other_deduction = _parse_allowance('other_deduction')
@@ -1317,6 +1328,8 @@ def edit_employee(id):
         employee.travel_allowance = travel_allowance
         employee.special_allowance = special_allowance
         employee.other_allowances = other_allowances
+        employee.employee_pf_percentage = employee_pf_percentage
+        employee.esic_percentage = esic_percentage
         employee.tds_percentage = tds_percentage
         employee.bus_charges = bus_charges
         employee.other_deduction = other_deduction
@@ -1334,7 +1347,7 @@ def edit_employee(id):
         flash('Employee updated successfully', 'success')
         return redirect(url_for('employees'))
     
-    return render_template('add_employee.html', employee=employee, employees=employees)
+    return render_template('add_employee.html', employee=employee, employees=employees, edit_mode=True, min_face_images=min_face_images, employee_image_counts=employee_image_counts)
 
 @app.route('/employees/delete/<int:id>')
 @login_required
@@ -1446,8 +1459,44 @@ def delete_employee(id):
 def view_employee(id):
     employee = Employee.query.get_or_404(id)
     attendance = Attendance.query.filter_by(employee_id=id).order_by(Attendance.date.desc()).limit(30).all()
-    employees = Employee.query.filter_by(status='active').all()
-    return render_template('add_employee.html', employee=employee, attendance=attendance, employees=employees)
+    employees = Employee.query.filter_by(status='active').order_by(Employee.created_at.desc()).all()
+    
+    # Get minimum face images required from Settings
+    settings = Settings.get_settings()
+    min_face_images = settings.min_face_images_required if settings else 20
+    
+    # Calculate face image counts for all employees
+    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+    employee_image_counts = {}
+    
+    for emp in employees:
+        emp_folder = os.path.join(dataset_folder, str(emp.id))
+        if os.path.exists(emp_folder):
+            image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+            employee_image_counts[emp.id] = len(image_files)
+        else:
+            employee_image_counts[emp.id] = 0
+    
+    # Get face images from dataset folder for the specific employee
+    emp_folder = os.path.join(dataset_folder, str(employee.id))
+    
+    face_images = []
+    current_count = 0
+    if os.path.exists(emp_folder):
+        image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        image_files.sort()  # Sort to ensure consistent ordering
+        current_count = len(image_files)
+        face_images = image_files
+    
+    return render_template('add_employee.html', 
+                         employee=employee, 
+                         attendance=attendance, 
+                         employees=employees,
+                         view_mode=True,
+                         face_images=face_images,
+                         current_face_images=current_count,
+                         min_face_images=min_face_images,
+                         employee_image_counts=employee_image_counts)
 
 # ==================== FACE REGISTRATION ROUTES ====================
 
@@ -1456,14 +1505,25 @@ def view_employee(id):
 @admin_required
 def face_registration(id):
     employee = Employee.query.get_or_404(id)
-    employees = Employee.query.filter_by(status='active').all()
+    employees = Employee.query.filter_by(status='active').order_by(Employee.created_at.desc()).all()
     
     # Get minimum face images required from Settings
     settings = Settings.get_settings()
     min_face_images = settings.min_face_images_required if settings else 20
     
-    # Calculate current face image count from dataset folder
+    # Calculate face image counts for all employees
     dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+    employee_image_counts = {}
+    
+    for emp in employees:
+        emp_folder = os.path.join(dataset_folder, str(emp.id))
+        if os.path.exists(emp_folder):
+            image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+            employee_image_counts[emp.id] = len(image_files)
+        else:
+            employee_image_counts[emp.id] = 0
+    
+    # Calculate current face image count from dataset folder for the specific employee
     emp_folder = os.path.join(dataset_folder, str(employee.id))
     
     current_count = 0
@@ -1471,7 +1531,6 @@ def face_registration(id):
         image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
         current_count = len(image_files)
     
-    # Calculate remaining images to capture
     remaining_images = max(0, min_face_images - current_count)
     
     return render_template('add_employee.html', 
@@ -1480,7 +1539,8 @@ def face_registration(id):
                          face_registration=True,
                          min_face_images=min_face_images,
                          current_face_images=current_count,
-                         remaining_images=remaining_images)
+                         remaining_images=remaining_images,
+                         employee_image_counts=employee_image_counts)
 
 @app.route('/capture-face/<int:id>', methods=['POST'])
 @login_required
@@ -1555,6 +1615,55 @@ def train_ai():
     
     return redirect(url_for('dashboard'))
 
+@app.route('/delete-face-image/<int:employee_id>/<string:image_name>', methods=['POST'])
+@login_required
+@admin_required
+def delete_face_image(employee_id, image_name):
+    """Delete a single face image for an employee"""
+    employee = Employee.query.get_or_404(employee_id)
+    
+    # Secure the filename
+    image_name = secure_filename(image_name)
+    
+    # Construct the full path to the image
+    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+    emp_folder = os.path.join(dataset_folder, str(employee_id))
+    image_path = os.path.join(emp_folder, image_name)
+    
+    # Verify the image exists and is within the employee's folder
+    if not os.path.exists(image_path) or not os.path.abspath(image_path).startswith(os.path.abspath(emp_folder)):
+        return jsonify({'success': False, 'message': 'Image not found or invalid path'}), 404
+    
+    try:
+        # Delete ONLY the specific image file - do NOT use directory-level deletion
+        os.remove(image_path)
+        
+        # Count remaining images after deletion
+        remaining_images = []
+        if os.path.exists(emp_folder):
+            remaining_images = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        
+        remaining_count = len(remaining_images)
+        
+        # Retrain the face recognition model with remaining images
+        # Do NOT remove the entire employee - only retrain with remaining images
+        if remaining_images:
+            recognizer = get_face_recognizer()
+            image_paths = [os.path.join(emp_folder, img) for img in remaining_images]
+            recognizer.train_employee(str(employee_id), employee.name, image_paths)
+        else:
+            # If no images remain, remove employee from face recognition
+            recognizer = get_face_recognizer()
+            recognizer.remove_employee(str(employee_id))
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Face image deleted successfully',
+            'remaining_count': remaining_count
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 # ==================== ATTENDANCE ROUTES ====================
 
 @app.route('/attendance')
@@ -1562,7 +1671,12 @@ def train_ai():
 @admin_required
 def attendance():
     today = date.today()
-    attendances = Attendance.query.filter_by(date=today).order_by(Attendance.in_time.desc()).all()
+    attendances = Attendance.query.filter_by(date=today).filter(
+        db.or_(
+            Attendance.attendance_type != 'MANUAL_PASSWORD',
+            Attendance.approval_status == 'approved'
+        )
+    ).order_by(Attendance.in_time.desc()).all()
     
     # Add display_out_time for UI (show "-" after new IN until next OUT)
     am, _, _, _ = get_services()
@@ -1602,7 +1716,12 @@ def attendance_history():
         end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
         attendances = am.get_attendance_by_date_range(start_date, end_date, employee_id)
     else:
-        attendances = Attendance.query.order_by(Attendance.date.desc()).limit(100).all()
+        attendances = Attendance.query.filter(
+            db.or_(
+                Attendance.attendance_type != 'MANUAL_PASSWORD',
+                Attendance.approval_status == 'approved'
+            )
+        ).order_by(Attendance.date.desc()).limit(100).all()
     
     # Apply display-only auto checkout for past attendance records with missing OUT times
     today = date.today()
@@ -1672,7 +1791,17 @@ def generate_payslip(id):
     db.session.refresh(payroll)
 
     filename = f"payslip_{employee.employee_id}_{payroll.month}_{payroll.year}.pdf"
-    output_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    
+    # Use the same path structure as scheduler_service for consistency
+    from models import PayrollSettings
+    payroll_settings = PayrollSettings.get_settings()
+    base_path = payroll_settings.payslip_storage_path or 'payrolls'
+    payslip_dir = os.path.join(app.config['UPLOAD_FOLDER'], base_path, str(payroll.year), f"{payroll.month:02d}")
+    
+    # Create directory if it doesn't exist
+    os.makedirs(payslip_dir, exist_ok=True)
+    
+    output_path = os.path.join(payslip_dir, filename)
 
     _, _, _, pg = get_services()
     company_settings = CompanySettings.query.first()
@@ -1683,6 +1812,9 @@ def generate_payslip(id):
     # It is never stored in the database; it's recomputed on demand.
     payslip_password = generate_payslip_password(employee)
 
+    if os.path.exists(output_path):
+        os.remove(output_path)
+
     pg.generate_payslip(
         payroll,
         employee,
@@ -1692,15 +1824,26 @@ def generate_payslip(id):
     )
 
     payroll.payslip_generated = True
-    payroll.payslip_path = f"uploads/{filename}"
+    
+    # Ha line badal:
+    # payroll.payslip_path = f"uploads/{filename}"
+    
+    # Asya padhhati ne purna relative path save kar:
+    payroll.payslip_path = f"payrolls/{payroll.year}/{payroll.month:02d}/{filename}"
+    
     db.session.commit()
+    # payroll.payslip_generated = True
+    # # Tip: Path madhe jar nested folders astil tar yevaji full relative path save kela tari chalel, 
+    # # pan sathyala ha code run karun bagh.
+    # payroll.payslip_path = f"uploads/{filename}"
+    # db.session.commit()
 
-    flash(
-        f'Payslip generated. It is password-protected - open password: {payslip_password}',
-        'info'
-    )
-
-    return send_file(output_path, as_attachment=True, download_name=filename)
+    # 2. Browser cache disable karanyasathi he use kara
+    response = make_response(send_file(output_path, as_attachment=True, download_name=filename))
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @app.route('/payroll/send-email/<int:id>')
 @login_required
@@ -1910,7 +2053,8 @@ def export_report():
     
     # Generate PDF using dedicated Admin Reports PDF generator
     _, _, _, pg = get_services()
-    pg.generate_admin_reports_pdf(report_data, filters, output_path)
+    company_settings = Settings.get_settings()
+    pg.generate_admin_reports_pdf(report_data, filters, output_path, company_settings=company_settings)
     
     if not os.path.exists(output_path):
         logger.error("[ADMIN REPORT PDF] PDF generation failed - file not created")
@@ -1978,12 +2122,26 @@ def employee_export_report():
             attendances = [att for att in attendances if att.status == status_filter]
     
     # Add display_out_time for PDF export (show "-" after new IN until next OUT)
-    for att in attendances:
-        am._add_display_out_time(att, att.date)
+    # for att in attendances:
+    #     am._add_display_out_time(att, att.date)
     
+    # Add display_out_time for PDF export using the actual Attendance record
+    for att in attendances:
+        actual_attendance = Attendance.query.filter_by(
+            employee_id=employee.id,
+            date=att.date
+        ).first()
+
+        if actual_attendance:
+            am._add_display_out_time(actual_attendance, att.date)
+            att.display_out_time = actual_attendance.display_out_time
+        else:
+            att.display_out_time = None
+
     filename = f"attendance_report_{employee.employee_id}_{start_date}_to_{end_date}.pdf"
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    pg.generate_attendance_report(attendances, employee, str(effective_start_date), str(end_date), output_path)
+    company_settings = Settings.get_settings()
+    pg.generate_attendance_report(attendances, employee, str(effective_start_date), str(end_date), output_path, company_settings=company_settings)
     
     if not os.path.exists(output_path):
         return jsonify({'success': False, 'message': 'PDF generation failed'})
@@ -2002,14 +2160,38 @@ def settings():
         settings.company_name = request.form.get('company_name')
         settings.office_start_time = request.form.get('office_start_time')
         settings.office_end_time = request.form.get('office_end_time')
-        settings.grace_period_minutes = int(request.form.get('grace_period_minutes'))
-        settings.working_hours_per_day = float(request.form.get('working_hours_per_day'))
+        
+        # Safe parsing for numeric fields
+        def _parse_int(field_name, default=0):
+            value = request.form.get(field_name, '').strip()
+            if not value:
+                return default
+            try:
+                return int(value)
+            except ValueError:
+                return default
+        
+        def _parse_float(field_name, default=0.0):
+            value = request.form.get(field_name, '').strip()
+            if not value:
+                return default
+            try:
+                return float(value)
+            except ValueError:
+                return default
+        
+        settings.grace_period_minutes = _parse_int('grace_period_minutes')
+        settings.working_hours_per_day = _parse_float('working_hours_per_day')
         settings.late_deduction_enabled = request.form.get('late_deduction_enabled') == 'on'
-        settings.late_deduction_per_occurrence = float(request.form.get('late_deduction_per_occurrence'))
+        settings.late_deduction_per_occurrence = _parse_float('late_deduction_per_occurrence')
+        settings.half_day_deduction_enabled = request.form.get('half_day_deduction_enabled') == 'on'
+        settings.half_day_deduction_per_occurrence = _parse_float('half_day_deduction_per_occurrence')
+        settings.absent_deduction_enabled = request.form.get('absent_deduction_enabled') == 'on'
+        settings.absent_deduction_per_occurrence = _parse_float('absent_deduction_per_occurrence')
         settings.overtime_enabled = request.form.get('overtime_enabled') == 'on'
-        settings.overtime_rate = float(request.form.get('overtime_rate'))
-        settings.face_recognition_tolerance = float(request.form.get('face_recognition_tolerance'))
-        settings.min_face_images_required = int(request.form.get('min_face_images_required'))
+        settings.overtime_rate = _parse_float('overtime_rate')
+        settings.face_recognition_tolerance = _parse_float('face_recognition_tolerance')
+        settings.min_face_images_required = _parse_int('min_face_images_required')
         
         # Handle logo upload
         if 'company_logo' in request.files:
@@ -2128,8 +2310,13 @@ def employee_attendance():
     # Initialize attendance manager services
     am, _, _, _ = get_services()
 
-    # Get today's attendance for this employee
-    today_attendance = Attendance.query.filter_by(employee_id=employee_id, date=today).first()
+    # Get today's attendance for this employee (exclude pending manual attendance)
+    today_attendance = Attendance.query.filter_by(employee_id=employee_id, date=today).filter(
+        db.or_(
+            Attendance.attendance_type != 'MANUAL_PASSWORD',
+            Attendance.approval_status == 'approved'
+        )
+    ).first()
     
     # Pass current_user to template for manager check
     current_user = employee
@@ -2177,8 +2364,13 @@ def employee_attendance():
     else:
         attendance_status['can_check_in'] = True
     
-    # Get attendance history for this employee
-    attendance_records = Attendance.query.filter_by(employee_id=employee_id).order_by(
+    # Get attendance history for this employee (exclude pending manual attendance)
+    attendance_records = Attendance.query.filter_by(employee_id=employee_id).filter(
+        db.or_(
+            Attendance.attendance_type != 'MANUAL_PASSWORD',
+            Attendance.approval_status == 'approved'
+        )
+    ).order_by(
         Attendance.date.desc()
     ).limit(100).all()
 
@@ -2625,11 +2817,19 @@ def recognize_face_api():
     })
 
 @app.route('/api/auto-scan-attendance', methods=['POST'])
-@login_required
-@admin_required
 def auto_scan_attendance_api():
     """
     Real-time, no-emp_id attendance scanning endpoint.
+
+    Intentionally PUBLIC (no @login_required / @admin_required): this is
+    the endpoint the public kiosk landing page ('/') polls continuously so
+    anyone can walk up and be recognized with no login step at all. Identity
+    is never taken from a session - it comes purely from face recognition
+    against the trained employee dataset, so there is nothing an
+    authenticated session would add here. The kiosk device itself should
+    still be physically/network secured (e.g. deployed on a trusted LAN or
+    behind a reverse-proxy allow-list) since this endpoint accepts frames
+    from anyone who can reach it.
 
     Designed to be called continuously (every ~1.5-2s) by the camera feed
     on the Attendance page. For every frame it:
@@ -2884,10 +3084,16 @@ def mark_attendance_api():
     return jsonify(result)
 
 @app.route('/mark_manual_attendance', methods=['POST'])
-@login_required
 def mark_manual_attendance():
     """
     Secure manual attendance fallback for the camera page.
+
+    Intentionally PUBLIC (no @login_required): this is the fallback action
+    on the public kiosk landing page ('/'), which has no browser session at
+    all. It is still fully secured on its own terms - every call is
+    authenticated inline against the Employee ID + account password below,
+    exactly like the login page, so removing the outer session check does
+    not weaken it.
 
     Used ONLY when face recognition fails to identify someone. Requires
     BOTH the Employee ID and that employee's own account password (the
@@ -2953,6 +3159,7 @@ def mark_manual_attendance():
         })
 
     today = datetime.now().date()
+    now = datetime.now()
     existing_attendance = Attendance.query.filter_by(employee_id=employee.id, date=today).first()
 
     if existing_attendance:
@@ -2969,8 +3176,129 @@ def mark_manual_attendance():
                            "You cannot mark attendance again today."
             })
 
-    am, _, _, _ = get_services()
+    am, _, email_service, _ = get_services()
 
+    # Record the exact timestamp when the employee clicked "Mark Attendance"
+    submission_timestamp = now
+
+    # `is_manager` drives which email(s) get sent (employee-only vs
+    # employee+Admin). `designation` (not `role`) is the field used
+    # everywhere else in this app to identify a Manager, so it's used here
+    # too for consistency.
+    is_manager = (employee.designation == 'Manager')
+
+    # ------------------------------------------------------------------
+    # Manual attendance state machine for TODAY's record (if one already
+    # exists as a MANUAL_PASSWORD request from an earlier click today).
+    # ------------------------------------------------------------------
+    if existing_attendance and existing_attendance.attendance_type == 'MANUAL_PASSWORD':
+
+        if existing_attendance.approval_status == 'pending':
+            # Pending State Restriction: while the Mark IN request is still
+            # awaiting approval, NO further action (OUT or any secondary
+            # punch) is allowed for that day.
+            logger.warning(
+                f"[Manual Attendance Blocked] Employee ID: {employee.id}, "
+                f"Attendance ID: {existing_attendance.id}, Reason: Manual attendance still pending approval"
+            )
+            return jsonify({
+                'success': False,
+                'message': "Your manual attendance request for today is still pending approval. "
+                           "You can't mark OUT or submit another request until it is approved or rejected."
+            })
+
+        if existing_attendance.approval_status == 'rejected':
+            # Retry Window: a rejected request may be corrected and
+            # resubmitted for the SAME day, any time up until office end
+            # time.
+            settings = Settings.get_settings()
+            office_end = am._parse_time(settings.office_end_time)
+            if now.time() > office_end:
+                logger.warning(
+                    f"[Manual Attendance Blocked] Employee ID: {employee.id}, "
+                    f"Attendance ID: {existing_attendance.id}, Reason: Retry window closed (past office end time)"
+                )
+                return jsonify({
+                    'success': False,
+                    'message': "Your manual attendance request for today was rejected, and the retry window "
+                               "(office end time) has passed. Please contact your manager or administrator."
+                })
+
+            # Start this day's record fresh: clear the activities logged
+            # under the rejected attempt and re-open it as a brand-new
+            # pending Mark IN request.
+            AttendanceActivity.query.filter_by(
+                employee_id=employee.id,
+                attendance_date=today
+            ).delete()
+
+            existing_attendance.in_time = now
+            existing_attendance.out_time = None
+            existing_attendance.total_hours = 0.0
+            existing_attendance.overtime_hours = 0.0
+            existing_attendance.early_exit = False
+            existing_attendance.status = 'present'
+            existing_attendance.confidence = 1.0
+            existing_attendance.attendance_type = 'MANUAL_PASSWORD'
+            existing_attendance.approval_status = 'pending'
+            existing_attendance.submission_timestamp = submission_timestamp
+            existing_attendance.late_entry = am.calculator.calculate_late_status(existing_attendance)
+
+            db.session.add(AttendanceActivity(
+                employee_id=employee.id,
+                attendance_date=today,
+                activity_time=now.time(),
+                action='IN'
+            ))
+            db.session.commit()
+
+            logger.info(
+                f"[Manual Password Attendance Retry] Employee ID: {employee.id} "
+                f"({employee.employee_id}) resubmitted attendance at {submission_timestamp} after an earlier rejection"
+            )
+
+            try:
+                if email_service:
+                    email_service.send_manual_attendance_submission_notification(
+                        employee_email=employee.email,
+                        employee_name=employee.name,
+                        employee_id=employee.employee_id,
+                        submission_timestamp=submission_timestamp,
+                        is_manager=is_manager
+                    )
+            except Exception as e:
+                logger.error(f"[Manual Attendance Email] Failed to send notification: {e}")
+
+            return jsonify({
+                'success': True,
+                'message': f'IN marked successfully for {employee.name}',
+                'attendance_id': existing_attendance.id,
+                'in_time': now.strftime('%H:%M:%S'),
+                'is_late': existing_attendance.late_entry,
+                'status': existing_attendance.status
+            })
+
+        # approval_status == 'approved' -> Post-Approval Freedom: the day
+        # was already vetted and is already visible everywhere, so further
+        # IN/OUT/adjustments proceed normally and do NOT get reset back to
+        # 'pending'.
+        result = am.mark_attendance(employee.id, confidence=1.0)
+        if result.get('success'):
+            existing_attendance.submission_timestamp = submission_timestamp
+            db.session.commit()
+            logger.info(
+                f"[Manual Password Attendance] Employee ID: {employee.id} "
+                f"({employee.employee_id}) recorded a post-approval update at {submission_timestamp}"
+            )
+        return jsonify(result)
+
+    # ------------------------------------------------------------------
+    # No pending/rejected/approved MANUAL_PASSWORD record already governs
+    # today - this click starts a brand-new manual attendance request
+    # (either the very first attendance of the day, or a manual fallback
+    # action on top of an already-approved FACE_RECOGNITION record). Either
+    # way it must go through the full Hidden-Until-Approved approval cycle.
+    # ------------------------------------------------------------------
     # confidence=1.0: this identity has been verified by password, which is
     # a stronger proof than an unverified camera match, so it's recorded
     # at maximum confidence.
@@ -2985,12 +3313,28 @@ def mark_manual_attendance():
         attendance_row = Attendance.query.filter_by(employee_id=employee.id, date=today).first()
         if attendance_row:
             attendance_row.attendance_type = 'MANUAL_PASSWORD'
+            attendance_row.approval_status = 'pending'
+            attendance_row.submission_timestamp = submission_timestamp
             db.session.commit()
 
         logger.info(
             f"[Manual Password Attendance] Employee ID: {employee.id} "
-            f"({employee.employee_id}) marked attendance via password fallback"
+            f"({employee.employee_id}) marked attendance via password fallback at {submission_timestamp}"
         )
+
+        # Send email notification to employee (and Admin, if a Manager)
+        # with the exact clicked timestamp as proof of check-in time.
+        try:
+            if email_service:
+                email_service.send_manual_attendance_submission_notification(
+                    employee_email=employee.email,
+                    employee_name=employee.name,
+                    employee_id=employee.employee_id,
+                    submission_timestamp=submission_timestamp,
+                    is_manager=is_manager
+                )
+        except Exception as e:
+            logger.error(f"[Manual Attendance Email] Failed to send notification: {e}")
 
     return jsonify(result)
 
@@ -3054,7 +3398,7 @@ def manager_approvals():
     
     from services.approval_service import approval_service
     
-    # Get all requests for this manager
+    # Get all logout requests for this manager
     all_requests = approval_service.get_all_requests_for_manager(employee_id)
 
     from datetime import timedelta
@@ -3070,10 +3414,22 @@ def manager_approvals():
     approved_requests = [r for r in all_requests if r.status == 'approved']
     rejected_requests = [r for r in all_requests if r.status == 'rejected']
     
+    # Get pending manual attendance requests for this manager's department
+    pending_manual_attendance = approval_service.get_pending_manual_attendance_requests(manager_id=employee_id, admin_view=False)
+
+    # Get already-approved/rejected manual attendance requests so rejection
+    # remarks are visible in a history table on this dashboard.
+    approved_manual_attendance, rejected_manual_attendance = approval_service.get_processed_manual_attendance_requests(
+        manager_id=employee_id, admin_view=False
+    )
+    
     return render_template('manager_approvals.html',
                          pending_requests=pending_requests,
                          approved_requests=approved_requests,
                          rejected_requests=rejected_requests,
+                         pending_manual_attendance=pending_manual_attendance,
+                         approved_manual_attendance=approved_manual_attendance,
+                         rejected_manual_attendance=rejected_manual_attendance,
                          manager=employee)
 
 @app.route('/manager/approve-logout/<int:request_id>', methods=['POST'])
@@ -3269,7 +3625,110 @@ def reject_logout_request(request_id):
             'success': False,
             'message': str(e)
         }), 500
+
+@app.route('/manual-attendance/approve/<int:attendance_id>', methods=['POST'])
+@login_required
+def approve_manual_attendance(attendance_id):
+    """Approve a manual attendance request"""
+    from services.approval_service import approval_service
     
+    # Check if user is manager or admin
+    user_role = session.get('user_role')
+    if user_role not in ['employee', 'admin']:
+        return jsonify({'success': False, 'message': 'Access denied'}), 403
+    
+    approver_id = None
+    if user_role == 'employee':
+        approver_id = session.get('employee_id')
+        manager = Employee.query.get(approver_id)
+        if not manager or manager.designation != 'Manager':
+            return jsonify({'success': False, 'message': 'Only managers can approve manual attendance'}), 403
+
+        # A Manager's own manual attendance must ONLY be finalized by the
+        # Admin - never by a manager (self or peer).
+        target = Attendance.query.get(attendance_id)
+        if target and target.employee and target.employee.designation == 'Manager':
+            return jsonify({'success': False, 'message': "A Manager's manual attendance can only be approved by the Admin"}), 403
+    elif user_role == 'admin':
+        approver_id = session.get('admin_id')
+    
+    result = approval_service.approve_manual_attendance(attendance_id, approver_id)
+    
+    if result.get('success'):
+        return jsonify(result), 200
+    else:
+        return jsonify(result), 400
+
+@app.route('/manual-attendance/reject/<int:attendance_id>', methods=['POST'])
+@login_required
+def reject_manual_attendance(attendance_id):
+    """Reject a manual attendance request"""
+    from services.approval_service import approval_service
+    
+    # Check if user is manager or admin
+    user_role = session.get('user_role')
+    if user_role not in ['employee', 'admin']:
+        return jsonify({'success': False, 'message': 'Access denied'}), 403
+    
+    approver_id = None
+    if user_role == 'employee':
+        approver_id = session.get('employee_id')
+        manager = Employee.query.get(approver_id)
+        if not manager or manager.designation != 'Manager':
+            return jsonify({'success': False, 'message': 'Only managers can reject manual attendance'}), 403
+
+        # A Manager's own manual attendance must ONLY be finalized by the
+        # Admin - never by a manager (self or peer).
+        target = Attendance.query.get(attendance_id)
+        if target and target.employee and target.employee.designation == 'Manager':
+            return jsonify({'success': False, 'message': "A Manager's manual attendance can only be rejected by the Admin"}), 403
+    elif user_role == 'admin':
+        approver_id = session.get('admin_id')
+    
+    data = request.get_json(silent=True) or {}
+    remarks = data.get('remarks', None)
+    
+    result = approval_service.reject_manual_attendance(attendance_id, approver_id, remarks)
+    
+    if result.get('success'):
+        return jsonify(result), 200
+    else:
+        return jsonify(result), 400
+
+@app.route('/manager/pending-manual-attendance')
+@login_required
+def manager_pending_manual_attendance():
+    """Manager view for pending manual attendance requests"""
+    # Check if user is a manager
+    if session.get('user_role') != 'employee':
+        flash('Access denied.', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    employee_id = session.get('employee_id')
+    manager = Employee.query.get(employee_id)
+    
+    if not manager or manager.designation != 'Manager':
+        flash('Access denied. Only managers can view pending manual attendance.', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    from services.approval_service import approval_service
+    pending_requests = approval_service.get_pending_manual_attendance_requests(manager_id=employee_id, admin_view=False)
+    
+    return render_template('manager_pending_manual_attendance.html', 
+                          pending_requests=pending_requests,
+                          manager=manager)
+
+@app.route('/admin/pending-manual-attendance')
+@login_required
+@admin_required
+def admin_pending_manual_attendance():
+    """Admin view for all pending manual attendance requests"""
+    from services.approval_service import approval_service
+    pending_requests = approval_service.get_pending_manual_attendance_requests(admin_view=True)
+    
+    return render_template('admin_pending_manual_attendance.html', 
+                          pending_requests=pending_requests)
+
 @app.route('/manager/edit-attendance/<int:attendance_id>', methods=['GET', 'POST'])
 @login_required
 def manager_edit_attendance(attendance_id):
@@ -3370,6 +3829,17 @@ def admin_edit_attendance(attendance_id):
                     last_out_activity.activity_time = attendance.out_time.time()
                     logger.info(f"Updated last OUT activity: {old_activity_time} -> {last_out_activity.activity_time}")
             
+            # Clear any rejected logout approval request when admin manually edits attendance
+            # Admin's manual edit overrides the automatic rejection
+            from models import LogoutApprovalRequest
+            rejected_request = LogoutApprovalRequest.query.filter_by(
+                attendance_id=attendance.id,
+                status='rejected'
+            ).first()
+            if rejected_request:
+                logger.info(f"Clearing rejected logout approval request ID: {rejected_request.id} for Attendance ID: {attendance.id}")
+                db.session.delete(rejected_request)
+            
             # Recalculate attendance fields
             from attendance import AttendanceManager
             am = AttendanceManager()
@@ -3456,13 +3926,25 @@ def admin_approvals():
     for att in week_attendance:
         am._add_display_out_time(att, att.date)
     
+    # Get pending manual attendance requests for admin view (all departments)
+    pending_manual_attendance = approval_service.get_pending_manual_attendance_requests(admin_view=True)
+
+    # Get already-approved/rejected manual attendance requests (all departments)
+    # so rejection remarks are visible in a history table on this dashboard.
+    approved_manual_attendance, rejected_manual_attendance = approval_service.get_processed_manual_attendance_requests(
+        admin_view=True
+    )
+    
     return render_template('admin_approvals.html',
                          pending_requests=pending_requests,
                          approved_requests=approved_requests,
                          rejected_requests=rejected_requests,
                          employee_approval_history=employee_approval_history,
                          approval_history=approval_history,
-                         week_attendance=week_attendance)
+                         week_attendance=week_attendance,
+                         pending_manual_attendance=pending_manual_attendance,
+                         approved_manual_attendance=approved_manual_attendance,
+                         rejected_manual_attendance=rejected_manual_attendance)
 
 @app.route('/admin/approve-logout/<int:request_id>', methods=['POST'])
 @login_required
@@ -3607,6 +4089,15 @@ if __name__ == '__main__':
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     os.makedirs(app.config['DATASET_FOLDER'], exist_ok=True)
     os.makedirs(app.config['TRAINED_MODEL_FOLDER'], exist_ok=True)
+
+    # Load face recognition model and employee face data on startup
+    print("\n" + "=" * 50)
+    print("🔍 Loading face recognition model and employee face data...")
+    print("=" * 50)
+    recognizer = get_face_recognizer()
+    logger.info(f"Face recognition engine initialized with {len(recognizer.known_face_ids)} registered employees")
+    print(f"✅ Face recognition loaded: {len(recognizer.known_face_ids)} employees registered")
+    print("=" * 50 + "\n")
 
     # Use explicit variables so the printed URL always matches the actual
     # server address that Flask binds to.

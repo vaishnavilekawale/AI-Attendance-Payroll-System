@@ -1,9 +1,10 @@
 """
 Approval Service for Manager Auto Logout Approval Workflow
 Handles creation, approval, and rejection of logout approval requests
+Also handles manual attendance approval workflow
 """
 from datetime import datetime, time
-from models import Employee, Attendance, LogoutApprovalRequest, AttendanceActivity
+from models import Employee, Attendance, LogoutApprovalRequest, AttendanceActivity, Admin
 from database import db
 from sqlalchemy.exc import IntegrityError
 import logging
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class ApprovalService:
-    """Service for managing logout approval requests"""
+    """Service for managing logout approval requests and manual attendance approvals"""
     
     def find_department_manager(self, department):
         """
@@ -634,7 +635,339 @@ class ApprovalService:
         logger.info("=" * 60)
         
         return {'created': requests_created, 'skipped': requests_skipped}
+    
+    def approve_manual_attendance(self, attendance_id, approver_id):
+        """
+        Approve a manual attendance request
+        
+        Args:
+            attendance_id: ID of the attendance record to approve
+            approver_id: ID of the manager/admin approving the request
+            
+        Returns:
+            dict with success status and message
+        """
+        logger.info(f"approve_manual_attendance called for Attendance ID: {attendance_id}")
+        
+        attendance = Attendance.query.get(attendance_id)
+        if not attendance:
+            logger.error(f"Attendance record not found: {attendance_id}")
+            return {'success': False, 'message': 'Attendance record not found'}
+        
+        if attendance.attendance_type != 'MANUAL_PASSWORD':
+            logger.error(f"Attendance ID {attendance_id} is not a manual attendance request")
+            return {'success': False, 'message': 'This is not a manual attendance request'}
+        
+        if attendance.approval_status == 'approved':
+            logger.warning(f"Attendance ID {attendance_id} is already approved")
+            return {'success': False, 'message': 'Attendance is already approved'}
+        
+        try:
+            attendance.approval_status = 'approved'
+            # Clear any stale rejection remark from a previous cycle on this record.
+            attendance.rejection_remarks = None
+            attendance.updated_at = datetime.utcnow()
+            db.session.commit()
+            
+            logger.info(f"Manual attendance approved - Attendance ID: {attendance_id}, Approver ID: {approver_id}")
+            
+            # Send approval notification to employee
+            self._send_manual_attendance_approval_notification(attendance, approved=True)
+            
+            return {'success': True, 'message': 'Manual attendance approved successfully'}
+        except Exception as e:
+            logger.error(f"Error approving manual attendance: {e}")
+            db.session.rollback()
+            return {'success': False, 'message': str(e)}
+    
+    def reject_manual_attendance(self, attendance_id, approver_id, remarks=None):
+        """
+        Reject a manual attendance request
+        
+        Args:
+            attendance_id: ID of the attendance record to reject
+            approver_id: ID of the manager/admin rejecting the request
+            remarks: Optional remarks for the rejection
+            
+        Returns:
+            dict with success status and message
+        """
+        logger.info(f"reject_manual_attendance called for Attendance ID: {attendance_id}")
+        
+        attendance = Attendance.query.get(attendance_id)
+        if not attendance:
+            logger.error(f"Attendance record not found: {attendance_id}")
+            return {'success': False, 'message': 'Attendance record not found'}
+        
+        if attendance.attendance_type != 'MANUAL_PASSWORD':
+            logger.error(f"Attendance ID {attendance_id} is not a manual attendance request")
+            return {'success': False, 'message': 'This is not a manual attendance request'}
+        
+        if attendance.approval_status == 'rejected':
+            logger.warning(f"Attendance ID {attendance_id} is already rejected")
+            return {'success': False, 'message': 'Attendance is already rejected'}
+        
+        try:
+            attendance.approval_status = 'rejected'
+            # Persist the remark so it is visible on the Manager/Admin
+            # approval dashboards (previously this was only logged/emailed
+            # and never saved, so it never rendered anywhere).
+            attendance.rejection_remarks = remarks
+            attendance.updated_at = datetime.utcnow()
+            db.session.commit()
+            
+            logger.info(f"Manual attendance rejected - Attendance ID: {attendance_id}, Approver ID: {approver_id}, Remarks: {remarks}")
+            
+            # Send rejection notification to employee
+            self._send_manual_attendance_approval_notification(attendance, approved=False, remarks=remarks)
+            
+            return {'success': True, 'message': 'Manual attendance rejected successfully'}
+        except Exception as e:
+            logger.error(f"Error rejecting manual attendance: {e}")
+            db.session.rollback()
+            return {'success': False, 'message': str(e)}
+    
+    def get_pending_manual_attendance_requests(self, manager_id=None, admin_view=False):
+        """
+        Get pending manual attendance requests for approval
+        
+        Args:
+            manager_id: ID of the manager (for manager view)
+            admin_view: If True, returns all pending requests (for admin view)
+            
+        Returns:
+            list of Attendance objects with pending manual attendance
+        """
+        logger.info(f"get_pending_manual_attendance_requests called - manager_id: {manager_id}, admin_view: {admin_view}")
+        
+        query = Attendance.query.filter_by(
+            attendance_type='MANUAL_PASSWORD',
+            approval_status='pending'
+        )
+        
+        if not admin_view and manager_id:
+            # For manager view, only show employees from their department.
+            # A Manager's OWN manual attendance must ONLY ever be approved by
+            # the Admin, so any request belonging to an employee whose
+            # designation is 'Manager' (including the manager themselves) is
+            # excluded here regardless of department match.
+            manager = Employee.query.get(manager_id)
+            if manager:
+                query = query.join(Employee).filter(
+                    Employee.department == manager.department,
+                    Employee.designation != 'Manager'
+                )
+        
+        requests = query.order_by(Attendance.submission_timestamp.desc()).all()
+        logger.info(f"Found {len(requests)} pending manual attendance requests")
+        
+        return requests
+
+    def get_processed_manual_attendance_requests(self, manager_id=None, admin_view=False):
+        """
+        Get already-processed (approved/rejected) manual attendance requests,
+        split by status, for the Manager/Admin approval dashboard history
+        sections. Mirrors the same visibility rules as
+        get_pending_manual_attendance_requests (department scoping for
+        managers, and a Manager's own requests are excluded from the manager
+        view since only Admin can act on those).
+
+        Args:
+            manager_id: ID of the manager (for manager view)
+            admin_view: If True, returns all processed requests (for admin view)
+
+        Returns:
+            tuple(approved_requests, rejected_requests) - lists of Attendance objects
+        """
+        query = Attendance.query.filter(
+            Attendance.attendance_type == 'MANUAL_PASSWORD',
+            Attendance.approval_status.in_(['approved', 'rejected'])
+        )
+
+        if not admin_view and manager_id:
+            manager = Employee.query.get(manager_id)
+            if manager:
+                query = query.join(Employee).filter(
+                    Employee.department == manager.department,
+                    Employee.designation != 'Manager'
+                )
+
+        requests = query.order_by(Attendance.updated_at.desc()).all()
+
+        approved_requests = [r for r in requests if r.approval_status == 'approved']
+        rejected_requests = [r for r in requests if r.approval_status == 'rejected']
+
+        return approved_requests, rejected_requests
+    
+    def _send_manual_attendance_approval_notification(self, attendance, approved=True, remarks=None):
+        """Send email notification to employee about manual attendance approval/rejection"""
+        try:
+            from email_service import EmailService
+            email_service = EmailService()
+            
+            employee = attendance.employee
+            formatted_timestamp = attendance.submission_timestamp.strftime('%Y-%m-%d %H:%M:%S') if attendance.submission_timestamp else 'N/A'
+            
+            if approved:
+                subject = f"Manual Attendance Approved - {self.company_name if hasattr(self, 'company_name') else 'AI Attendance System'}"
+                status_text = "approved"
+                status_color = "#28a745"
+            else:
+                subject = f"Manual Attendance Rejected - {self.company_name if hasattr(self, 'company_name') else 'AI Attendance System'}"
+                status_text = "rejected"
+                status_color = "#dc3545"
+            
+            # Plain-text version
+            text_body = f"""
+Manual Attendance {status_text.capitalize()}
+
+Dear {employee.name},
+
+Your manual attendance request has been {status_text}.
+
+Employee ID: {employee.employee_id}
+Submission Timestamp: {formatted_timestamp}
+Date: {attendance.date}
+"""
+            
+            if not approved and remarks:
+                text_body += f"Remarks: {remarks}\n"
+            
+            text_body += f"""
+This attendance will now be visible on your dashboard, reports, and payroll calculations.
+
+If you have any questions, please contact your manager or administrator.
+
+Best regards,
+{self.company_name if hasattr(self, 'company_name') else 'AI Attendance System'} HR Team
+"""
+            
+            # HTML version
+            html_body = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Manual Attendance {status_text.capitalize()}</title>
+                <style>
+                    body {{
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                        background-color: #f4f4f4;
+                        margin: 0;
+                        padding: 20px;
+                    }}
+                    .container {{
+                        max-width: 600px;
+                        margin: 0 auto;
+                        background-color: #ffffff;
+                        border-radius: 10px;
+                        overflow: hidden;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    }}
+                    .header {{
+                        background-color: {status_color};
+                        color: white;
+                        padding: 30px;
+                        text-align: center;
+                    }}
+                    .header h1 {{
+                        margin: 0;
+                        font-size: 24px;
+                        font-weight: 600;
+                    }}
+                    .content {{
+                        padding: 30px;
+                    }}
+                    .content h2 {{
+                        color: #1e3c72;
+                        font-size: 20px;
+                        margin-top: 0;
+                    }}
+                    .info-box {{
+                        background-color: #f8f9fa;
+                        border-left: 4px solid {status_color};
+                        padding: 20px;
+                        margin: 20px 0;
+                        border-radius: 5px;
+                    }}
+                    .info-box p {{
+                        margin: 10px 0;
+                        font-size: 16px;
+                    }}
+                    .timestamp {{
+                        background-color: #e9ecef;
+                        padding: 15px;
+                        border-radius: 5px;
+                        font-family: 'Courier New', monospace;
+                        font-size: 18px;
+                        font-weight: bold;
+                        text-align: center;
+                        letter-spacing: 2px;
+                        margin: 10px 0;
+                        color: {status_color};
+                    }}
+                    .footer {{
+                        background-color: #f8f9fa;
+                        padding: 20px;
+                        text-align: center;
+                        color: #6c757d;
+                        font-size: 14px;
+                        border-top: 1px solid #e9ecef;
+                    }}
+                    .footer p {{
+                        margin: 5px 0;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>Manual Attendance {status_text.capitalize()}</h1>
+                    </div>
+                    <div class="content">
+                        <h2>Dear {employee.name},</h2>
+                        <p>Your manual attendance request has been <strong>{status_text}</strong>.</p>
+                        
+                        <div class="info-box">
+                            <p><strong>Employee ID:</strong> {employee.employee_id}</p>
+                            <p><strong>Submission Timestamp:</strong></p>
+                            <div class="timestamp">{formatted_timestamp}</div>
+                            <p><strong>Date:</strong> {attendance.date}</p>
+                        </div>
+"""
+            
+            if not approved and remarks:
+                html_body += f"""
+                        <div class="info-box">
+                            <p><strong>Remarks:</strong> {remarks}</p>
+                        </div>
+"""
+            
+            html_body += f"""
+                        <p>This attendance will now be visible on your dashboard, reports, and payroll calculations.</p>
+                        <p>If you have any questions, please contact your manager or administrator.</p>
+                        
+                        <p>Best regards,<br>{self.company_name if hasattr(self, 'company_name') else 'AI Attendance System'} HR Team</p>
+                    </div>
+                    <div class="footer">
+                        <p>&copy; {self.company_name if hasattr(self, 'company_name') else 'AI Attendance System'}. All rights reserved.</p>
+                        <p>This is an automated email. Please do not reply.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            email_service.send_email(employee.email, subject, html_body, text_body)
+            logger.info(f"Manual attendance {status_text} notification sent to {employee.email}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send manual attendance approval notification: {e}")
 
 
 # Global approval service instance
 approval_service = ApprovalService()
+

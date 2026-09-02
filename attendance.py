@@ -6,7 +6,7 @@ from flask import current_app
 from database import db
 from models import Attendance, Employee, Settings, AttendanceActivity
 from services.attendance_calculator import AttendanceCalculator
-from services.attendance_stats import has_rejected_approval
+from services.attendance_stats import has_rejected_approval, is_hidden_manual_attendance
 
 logger = logging.getLogger(__name__)
 
@@ -689,7 +689,13 @@ class AttendanceManager:
         all_active_employees = Employee.query.filter_by(status='active').all()
         
         # Get attendance records for target date
+        # Filter out pending AND rejected manual attendance - pending stays
+        # hidden until a decision is made, rejected never reflects anywhere
+        # (Hidden-Until-Approved Rule / No Dashboard Reflection Rule).
         attendances = Attendance.query.filter_by(date=target_date).all()
+        attendances = [att for att in attendances if not is_hidden_manual_attendance(
+            att.attendance_type, att.approval_status
+        )]
         attendance_by_employee = {att.employee_id: att for att in attendances}
         
         result = []
@@ -772,14 +778,16 @@ class AttendanceManager:
                             'is_dummy': True
                         })
                     else:
-                        # Today is NOT marked ABSENT until the day ends
-                        # (evaluated starting midnight / next day).
+                        # After office end time with no clock-in/clock-out at
+                        # all - align with the automated absent-detection
+                        # logic (auto checkout treats a missing IN as ABSENT)
+                        # instead of leaving it as "Pending" on the dashboard.
                         dummy_attendance = type('obj', (object,), {
                             'employee': employee,
                             'date': target_date,
                             'in_time': None,
                             'out_time': None,
-                            'status': 'Pending',
+                            'status': 'absent',
                             'total_hours': 0,
                             'late_entry': False,
                             'overtime_hours': 0,

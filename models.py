@@ -118,6 +118,16 @@ class Attendance(db.Model):
     # Nullable/defaulted so existing rows and other call sites that don't
     # set it explicitly are unaffected.
     attendance_type = db.Column(db.String(30), default='FACE_RECOGNITION')
+    # Approval status for manual attendance: 'approved', 'pending', 'rejected'
+    # Only applies to MANUAL_PASSWORD attendance type. FACE_RECOGNITION is always 'approved'.
+    approval_status = db.Column(db.String(20), default='approved')
+    # Remark typed by the Manager/Admin when a manual attendance (regularization)
+    # request is rejected. Displayed on the Manager and Admin approval dashboards
+    # so the employee/approver history shows WHY the request was rejected.
+    rejection_remarks = db.Column(db.Text)
+    # The exact timestamp when the employee clicked "Mark Attendance" (for manual attendance)
+    # This serves as proof of check-in time and is included in email notifications
+    submission_timestamp = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -188,6 +198,10 @@ class Settings(db.Model):
     half_day_hours = db.Column(db.Float, default=4.5)  # Half of working hours by default
     late_deduction_enabled = db.Column(db.Boolean, default=False)
     late_deduction_per_occurrence = db.Column(db.Float, default=0.0)
+    half_day_deduction_enabled = db.Column(db.Boolean, default=True)
+    half_day_deduction_per_occurrence = db.Column(db.Float, default=200.0)
+    absent_deduction_enabled = db.Column(db.Boolean, default=True)
+    absent_deduction_per_occurrence = db.Column(db.Float, default=500.0)
     overtime_enabled = db.Column(db.Boolean, default=True)
     overtime_rate = db.Column(db.Float, default=1.5)
     face_recognition_tolerance = db.Column(db.Float, default=0.6)

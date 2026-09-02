@@ -815,6 +815,215 @@ Regards,
         
         return self.send_email(to_email, subject, html_body, text_body)
     
+    def send_manual_attendance_submission_notification(self, employee_email, employee_name, employee_id, submission_timestamp, is_manager=False):
+        """
+        Send email notification when an employee submits manual attendance.
+        
+        This email includes the exact timestamp when the employee clicked "Mark Attendance"
+        as proof of check-in time.
+        
+        For regular employees: notification sent to employee (confirming submission to manager)
+        For managers: notification sent to employee and Admin (confirming submission to Admin)
+        """
+        formatted_timestamp = submission_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        
+        if is_manager:
+            subject = f"Manual Attendance Submitted - {employee_name} ({employee_id})"
+            approver = "Admin"
+        else:
+            subject = f"Manual Attendance Submitted - {self.company_name}"
+            approver = "your manager"
+
+        def _build_bodies(greeting_name, intro_line):
+            """Build the plain-text and HTML bodies for a given recipient.
+
+            greeting_name: who the email is addressed to ("Dear ...,")
+            intro_line: the first confirmation sentence, which differs
+                between the employee's own copy and the Admin's copy so the
+                broken pattern of string-replacing an already-interpolated
+                f-string (which never matched anything) is avoided entirely.
+            """
+            text = f"""
+Manual Attendance Submission Confirmation
+
+Dear {greeting_name},
+
+{intro_line}
+
+Employee ID: {employee_id}
+Submission Timestamp: {formatted_timestamp}
+
+This attendance will be visible on the dashboard, reports, and payroll calculations only after it is approved by {approver}.
+
+"""
+            if is_manager:
+                text += """
+A copy of this notification has been sent to the Admin for approval.
+
+"""
+            text += f"""
+This timestamp serves as proof of the check-in time.
+
+If this request was not submitted intentionally, please contact your administrator immediately.
+
+Best regards,
+{self.company_name} HR Team
+"""
+
+            html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Manual Attendance Submitted</title>
+            <style>
+                body {{
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    background-color: #f4f4f4;
+                    margin: 0;
+                    padding: 20px;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background-color: #ffffff;
+                    border-radius: 10px;
+                    overflow: hidden;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    text-align: center;
+                }}
+                .header h1 {{
+                    margin: 0;
+                    font-size: 24px;
+                    font-weight: 600;
+                }}
+                .content {{
+                    padding: 30px;
+                }}
+                .content h2 {{
+                    color: #1e3c72;
+                    font-size: 20px;
+                    margin-top: 0;
+                }}
+                .info-box {{
+                    background-color: #f8f9fa;
+                    border-left: 4px solid #667eea;
+                    padding: 20px;
+                    margin: 20px 0;
+                    border-radius: 5px;
+                }}
+                .info-box p {{
+                    margin: 10px 0;
+                    font-size: 16px;
+                }}
+                .timestamp {{
+                    background-color: #e9ecef;
+                    padding: 15px;
+                    border-radius: 5px;
+                    font-family: 'Courier New', monospace;
+                    font-size: 18px;
+                    font-weight: bold;
+                    text-align: center;
+                    letter-spacing: 2px;
+                    margin: 10px 0;
+                    color: #667eea;
+                }}
+                .important {{
+                    background-color: #fff3cd;
+                    border-left: 4px solid #ffc107;
+                    padding: 15px;
+                    margin: 20px 0;
+                    border-radius: 5px;
+                }}
+                .footer {{
+                    background-color: #f8f9fa;
+                    padding: 20px;
+                    text-align: center;
+                    color: #6c757d;
+                    font-size: 14px;
+                    border-top: 1px solid #e9ecef;
+                }}
+                .footer p {{
+                    margin: 5px 0;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>{self.company_name}</h1>
+                </div>
+                <div class="content">
+                    <h2>Manual Attendance Submitted</h2>
+                    <p>Dear {greeting_name},</p>
+                    <p>{intro_line}</p>
+                    
+                    <div class="info-box">
+                        <p><strong>Employee ID:</strong> {employee_id}</p>
+                        <p><strong>Submission Timestamp:</strong></p>
+                        <div class="timestamp">{formatted_timestamp}</div>
+                    </div>
+                    
+                    <div class="important">
+                        <p><strong>Important:</strong> This attendance will be visible on the dashboard, reports, and payroll calculations only after it is approved by {approver}.</p>
+                    </div>
+                    
+                    <p>This timestamp serves as proof of the check-in time.</p>
+"""
+            if is_manager:
+                html += """
+                    <div class="important">
+                        <p>A copy of this notification has been sent to the Admin for approval.</p>
+                    </div>
+"""
+            html += f"""
+                    <p>If this request was not submitted intentionally, please contact your administrator immediately.</p>
+                    
+                    <p>Best regards,<br>{self.company_name} HR Team</p>
+                </div>
+                <div class="footer">
+                    <p>&copy; {self.company_name}. All rights reserved.</p>
+                    <p>This is an automated email. Please do not reply.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+            return text, html
+
+        # Employee's own copy - always sent.
+        employee_text, employee_html = _build_bodies(
+            greeting_name=employee_name,
+            intro_line="Your manual attendance request has been submitted successfully."
+        )
+        result = self.send_email(employee_email, subject, employee_html, employee_text)
+
+        # If a Manager submitted their OWN manual attendance, the Admin also
+        # gets a distinct, properly-addressed copy (not a broken find/replace
+        # of the employee's already-interpolated email) so they can review
+        # and approve/reject it - Managers' manual attendance may only be
+        # finalized by the Admin.
+        if is_manager and result.get('success'):
+            from models import Admin
+            admin = Admin.query.first()
+            if admin and admin.email:
+                admin_subject = f"Manager Manual Attendance - {employee_name} ({employee_id})"
+                admin_text, admin_html = _build_bodies(
+                    greeting_name="Administrator",
+                    intro_line=f"Manager {employee_name} ({employee_id}) has submitted a manual attendance request."
+                )
+                self.send_email(admin.email, admin_subject, admin_html, admin_text)
+        
+        return result
+    
     def test_email_connection(self):
         """Test email connection"""
         if not self.smtp_username or not self.smtp_password:

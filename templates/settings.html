@@ -179,6 +179,26 @@
                                 </div>
                                 <div class="col-md-6">
                                     <div class="mb-3 form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" name="half_day_deduction_enabled" id="halfDayDeduction" {{ 'checked' if settings.half_day_deduction_enabled else '' }}>
+                                        <label class="form-check-label" for="halfDayDeduction">Enable Half Day Deduction</label>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Half Day Deduction per Occurrence</label>
+                                        <input type="number" class="form-control" name="half_day_deduction_per_occurrence" step="0.01" value="{{ settings.half_day_deduction_per_occurrence }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3 form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" name="absent_deduction_enabled" id="absentDeduction" {{ 'checked' if settings.absent_deduction_enabled else '' }}>
+                                        <label class="form-check-label" for="absentDeduction">Enable Absent / LOP Deduction</label>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Absent / LOP Deduction per Occurrence</label>
+                                        <input type="number" class="form-control" name="absent_deduction_per_occurrence" step="0.01" value="{{ settings.absent_deduction_per_occurrence }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3 form-check form-switch">
                                         <input class="form-check-input" type="checkbox" name="overtime_enabled" id="overtimeEnabled" {{ 'checked' if settings.overtime_enabled else '' }}>
                                         <label class="form-check-label" for="overtimeEnabled">Enable Overtime Bonus</label>
                                     </div>

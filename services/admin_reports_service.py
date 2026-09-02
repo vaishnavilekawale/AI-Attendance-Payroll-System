@@ -11,6 +11,7 @@ from collections import defaultdict
 from database import db
 from models import Employee, Attendance, AttendanceActivity, Settings
 from services.attendance_calculator import AttendanceCalculator
+from services.attendance_stats import is_hidden_manual_attendance
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,13 @@ class AdminReportsService:
                     logger.info(f"  Processing date: {current_date}")
                     daily_attendance = am.calculate_attendance_with_absent(current_date)
                     employee_attendance = [att for att in daily_attendance if att.employee.id == employee.id]
+                    # Belt-and-suspenders: calculate_attendance_with_absent already
+                    # excludes pending/rejected manual attendance, but re-apply the
+                    # same rule here so reports never regress even if the source
+                    # query changes upstream.
+                    employee_attendance = [att for att in employee_attendance if not is_hidden_manual_attendance(
+                        getattr(att, 'attendance_type', None), getattr(att, 'approval_status', 'approved')
+                    )]
                     logger.info(f"  Attendance count for {current_date}: {len(employee_attendance)}")
                     attendances.extend(employee_attendance)
                     current_date += timedelta(days=1)
@@ -416,7 +424,7 @@ class AdminReportsService:
             
             # FIX: Calculate absent days consistently with rankings
             absent = max(0, total_working_days - (present + half_day))
-            
+
             avg_working_hours = total_working_hours / total_working_days if total_working_days > 0 else 0
             attendance_percentage = (present / total_working_days * 100) if total_working_days > 0 else 0
             punctuality_percentage = ((total_working_days - late) / total_working_days * 100) if total_working_days > 0 else 0

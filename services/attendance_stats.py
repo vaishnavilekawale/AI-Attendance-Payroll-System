@@ -3,6 +3,24 @@
 from datetime import date, timedelta
 
 
+def is_hidden_manual_attendance(attendance_type, approval_status):
+    """
+    Manual (Employee ID + Password) attendance requests must remain
+    completely hidden from dashboards, reports, and payroll until they are
+    finalized as 'approved'.
+
+    - 'pending'  -> not yet decided, must stay hidden (Hidden-Until-Approved Rule)
+    - 'rejected' -> permanently hidden, will never reflect anywhere (No
+      Dashboard Reflection Rule), even though the employee may still be
+      allowed to submit a fresh retry for the same day
+    - 'approved' -> visible everywhere instantly (Instant Sync Rule)
+
+    FACE_RECOGNITION attendance is always visible (approval_status defaults
+    to 'approved' and is never set to anything else for that type).
+    """
+    return attendance_type == 'MANUAL_PASSWORD' and approval_status in ('pending', 'rejected')
+
+
 def has_rejected_approval(attendance):
     """
     Return True when this attendance record has a REJECTED logout
@@ -58,16 +76,24 @@ def classify_attendance_record(attendance, office_hours=9.0, half_day_threshold=
     - Half day: total_hours >= half_day_threshold and < office_hours OR status is half_day
     - Absent: total_hours < half_day_threshold OR no IN time / no record
     - Late: late_entry is True OR status is late (independent counter)
+    - Pending manual attendance: excluded from all counts until approved
 
     Returns:
         tuple: (category, is_late) where category is 'present', 'half_day', 'absent',
-               or None when the day should not be counted (e.g. pending/future)
+               or None when the day should not be counted (e.g. pending/future/manual pending)
     """
     raw_status = getattr(attendance, 'status', None)
     normalized = normalize_attendance_status(raw_status)
     total_hours = float(getattr(attendance, 'total_hours', None) or 0.0)
     has_in = bool(getattr(attendance, 'in_time', None))
     is_late = bool(getattr(attendance, 'late_entry', False)) or normalized == 'late'
+
+    # Exclude pending/rejected manual attendance from all counts - hidden
+    # until approved, and never counted at all if rejected.
+    attendance_type = getattr(attendance, 'attendance_type', None)
+    approval_status = getattr(attendance, 'approval_status', 'approved')
+    if is_hidden_manual_attendance(attendance_type, approval_status):
+        return None, is_late
 
     if normalized in ('pending',) or raw_status == '-':
         return None, is_late

@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 from models import PayrollSettings, CompanySettings, Payroll, Employee
 from payroll import PayrollCalculator, is_payroll_eligible
-from pdf_generator import PDFGenerator
+from pdf_generator import PDFGenerator, generate_payslip_password
 from email_service import EmailService
 from database import db
 import os
@@ -121,11 +121,15 @@ class PayrollScheduler:
             # Parse time (HH:MM format)
             hour, minute = map(int, settings.payroll_generation_time.split(':'))
             
-            # Create cron trigger - runs on the LAST DAY of every month
-            # APScheduler supports day='last' for the last day of the month
-            # This ensures payroll runs at the end of every month automatically
+            # Create cron trigger - runs on the 1ST DAY of every month.
+            # Running a day later (instead of on the last day of the month
+            # that is still being calculated) guarantees the month being
+            # paid out has FULLY ended, so its last day's attendance is
+            # complete and correctly included in the payroll/payslip
+            # calculation (see calculate_monthly_payroll / attendance_stats,
+            # which otherwise clamp the evaluation window to "yesterday").
             trigger = CronTrigger(
-                day='last',
+                day=1,
                 hour=hour,
                 minute=minute
             )
@@ -136,7 +140,7 @@ class PayrollScheduler:
                 func=self.generate_monthly_payroll,
                 trigger=trigger,
                 id='payroll_generation',
-                name='Monthly Payroll Generation (End of Month)',
+                name='Monthly Payroll Generation (1st of Next Month)',
                 replace_existing=True
             )
 
@@ -145,7 +149,7 @@ class PayrollScheduler:
                 logger.info(f"Payroll Job: {payroll_job}")
                 logger.info(f"Payroll Next Run: {payroll_job.next_run_time}")
             
-            logger.info(f"Payroll generation scheduled for last day of month at {settings.payroll_generation_time}")
+            logger.info(f"Payroll generation scheduled for the 1st of every month (for the just-completed previous month) at {settings.payroll_generation_time}")
     
     def reschedule_payroll_generation(self):
         """Reschedule payroll generation when settings change"""
@@ -154,7 +158,12 @@ class PayrollScheduler:
     def generate_monthly_payroll(self):
         """Generate payroll for all active employees
         
-        Runs automatically at the end of every month (last day of month).
+        Runs automatically on the 1st of every month (at the configured
+        payroll_generation_time), and always generates payroll for the
+        PREVIOUS month - i.e. the month that just fully ended. Running a
+        day after month-end (instead of on the month's own last day)
+        guarantees that last day's attendance has already happened and is
+        included in the calculation.
         Auto-calculates payroll, generates PDF payslips, and sends payslip
         emails to all employees.
         """
@@ -170,24 +179,18 @@ class PayrollScheduler:
                     logger.info("Auto payroll generation is disabled - skipping")
                     return
                 
-                # Get current date
+                # Get current date. This job now always runs on the 1st of
+                # the month, so the period to pay out is always the
+                # PREVIOUS (just-completed) month - no more "day >= 28"
+                # guessing, which used to run against the in-progress
+                # current month and clip off its last day.
+                from datetime import timedelta
                 now = datetime.now()
-                current_month = now.month
-                current_year = now.year
+                prev_month_date = now.replace(day=1) - timedelta(days=1)
+                month = prev_month_date.month
+                year = prev_month_date.year
                 
-                # If we're running on the last day of month, generate for current month
-                # Otherwise, generate for previous month
-                if now.day >= 28:
-                    month = current_month
-                    year = current_year
-                else:
-                    # Generate for previous month
-                    from datetime import timedelta
-                    prev_month = now.replace(day=1) - timedelta(days=1)
-                    month = prev_month.month
-                    year = prev_month.year
-                
-                logger.info(f"Generating payroll for {month}/{year}")
+                logger.info(f"Generating payroll for {month}/{year} (previous month, triggered on {now.date()})")
                 
                 # Get settings
                 company_settings = CompanySettings.get_settings()
@@ -228,12 +231,21 @@ class PayrollScheduler:
 
                                 logger.info(f"[AUTO EMAIL] Sending payslip to {employee.email}")
 
+                                # Same deterministic password used everywhere payslips
+                                # are protected (first 4 letters of name + DOB DDMM,
+                                # falling back to Employee ID + DOB DDMM) - see
+                                # pdf_generator.generate_payslip_password(). Passed here
+                                # so the auto-email correctly tells the employee how to
+                                # open their already-generated, password-protected PDF.
+                                payslip_password = generate_payslip_password(employee)
+
                                 result = self.email_service.send_payslip(
                                     employee_email=employee.email,
                                     employee_name=employee.name,
                                     payslip_path=existing_payroll.payslip_path,
                                     month=month_name,
-                                    year=year
+                                    year=year,
+                                    pdf_password=payslip_password
                                 )
 
                                 if result["success"]:
@@ -275,11 +287,19 @@ class PayrollScheduler:
                         os.makedirs(os.path.dirname(payslip_path), exist_ok=True)
                         
                         # Generate PDF with new signature
+                        # Password-protect the payslip PDF - same deterministic
+                        # password rule used everywhere else (first 4 letters of
+                        # name + DOB DDMM, falling back to Employee ID + DOB
+                        # DDMM). Never persisted; recomputed on demand from the
+                        # employee record. See pdf_generator.generate_payslip_password().
+                        payslip_password = generate_payslip_password(employee)
+
                         self.pdf_generator.generate_payslip(
                             payroll=payroll,
                             employee=employee,
                             company_settings=company_settings,
-                            output_path=payslip_path
+                            output_path=payslip_path,
+                            password=payslip_password
                         )
                         
                         # Update payroll record
@@ -297,7 +317,8 @@ class PayrollScheduler:
                                 employee_name=employee.name,
                                 payslip_path=payslip_path,
                                 month=month_name,
-                                year=year
+                                year=year,
+                                pdf_password=payslip_password
                             )
                             
                             if result['success']:
@@ -348,13 +369,14 @@ class PayrollScheduler:
         Reconcile missed payroll periods on application startup.
         
         Detects payroll periods that should have been generated according to
-        the payroll_generation_day schedule but were missed because the server
-        was OFF at the scheduled time.
+        the payroll schedule (1st of the month following the period, at
+        payroll_generation_time) but were missed because the server was OFF
+        at the scheduled time.
         
         This function:
         - Determines which payroll periods should already have been generated
         - Checks if payroll for those periods exists
-        - Generates missed payroll using existing generate_monthly_payroll()
+        - Generates missed payroll using the existing calculate_monthly_payroll()
         - Is idempotent - safe to run multiple times
         - Has no arbitrary time limits (7/30 days)
         - Works for multiple missed months
@@ -372,47 +394,53 @@ class PayrollScheduler:
                 
                 # Get current date
                 now = datetime.now()
-                current_month = now.month
-                current_year = now.year
                 
-                # Determine the scheduled payroll generation day/time
-                # Payroll runs on the LAST DAY of every month
+                # Determine the scheduled payroll generation time-of-day
                 payroll_time_str = settings.payroll_generation_time
                 hour, minute = map(int, payroll_time_str.split(':'))
                 
-                # Calculate the scheduled datetime for current month (last day of month)
-                from calendar import monthrange
-                last_day_of_month = monthrange(current_year, current_month)[1]
-                scheduled_day = last_day_of_month
+                from datetime import timedelta
                 
-                scheduled_datetime = datetime(current_year, current_month, scheduled_day, hour, minute)
+                def _next_month(check_month, check_year):
+                    """Return (month, year) of the month following the given one."""
+                    if check_month == 12:
+                        return 1, check_year + 1
+                    return check_month + 1, check_year
                 
-                # Check if the scheduled time for current month has already passed
-                if now < scheduled_datetime:
-                    # Scheduled time hasn't passed yet - no payroll should exist for current month
-                    logger.info(f"Current month payroll scheduled for {scheduled_datetime} - not yet due")
-                    # Check previous month
-                    from datetime import timedelta
-                    prev_month = now.replace(day=1) - timedelta(days=1)
-                    months_to_check = [(prev_month.month, prev_month.year)]
-                else:
-                    # Scheduled time has passed - current month payroll should exist
-                    # Also check previous month in case it was missed
-                    from datetime import timedelta
-                    prev_month = now.replace(day=1) - timedelta(days=1)
-                    months_to_check = [
-                        (current_month, current_year),
-                        (prev_month.month, prev_month.year)
-                    ]
+                def _payroll_deadline(check_month, check_year):
+                    """
+                    Payroll for a given (month, year) period is now due on the
+                    1ST DAY of the FOLLOWING month at the configured time -
+                    NOT the last day of the period's own month. This mirrors
+                    the live schedule (see schedule_payroll_generation) and
+                    guarantees the period being paid out has fully ended
+                    before its deadline, so the last day's attendance is
+                    always included.
+                    """
+                    deadline_month, deadline_year = _next_month(check_month, check_year)
+                    return datetime(deadline_year, deadline_month, 1, hour, minute)
+                
+                # The two most recent periods that could plausibly have been
+                # missed while the server was down: last month (whose
+                # deadline is the 1st of this month) and the month before
+                # that (in case the server was down across two deadlines).
+                prev_month_date = now.replace(day=1) - timedelta(days=1)
+                prev_month, prev_year = prev_month_date.month, prev_month_date.year
+                
+                prev_prev_month_date = prev_month_date.replace(day=1) - timedelta(days=1)
+                prev_prev_month, prev_prev_year = prev_prev_month_date.month, prev_prev_month_date.year
+                
+                months_to_check = [
+                    (prev_month, prev_year),
+                    (prev_prev_month, prev_prev_year),
+                ]
                 
                 # Check each month that should have payroll
                 for check_month, check_year in months_to_check:
                     period = f"{check_month}/{check_year}"
                     
-                    # Calculate scheduled datetime for this month (last day of month)
-                    last_day = monthrange(check_year, check_month)[1]
-                    scheduled_day_check = last_day
-                    scheduled_datetime_check = datetime(check_year, check_month, scheduled_day_check, hour, minute)
+                    # Deadline for this period = 1st of the following month
+                    scheduled_datetime_check = _payroll_deadline(check_month, check_year)
                     
                     logger.info(f"PAYROLL RECONCILIATION CHECK")
                     logger.info(f"Payroll Period: {period}")
@@ -470,11 +498,17 @@ class PayrollScheduler:
                             import os
                             os.makedirs(os.path.dirname(payslip_path), exist_ok=True)
                             
+                            # Password-protect the payslip PDF - same
+                            # deterministic rule used everywhere else. See
+                            # pdf_generator.generate_payslip_password().
+                            payslip_password = generate_payslip_password(employee)
+
                             self.pdf_generator.generate_payslip(
                                 payroll=payroll,
                                 employee=employee,
                                 company_settings=company_settings,
-                                output_path=payslip_path
+                                output_path=payslip_path,
+                                password=payslip_password
                             )
                             
                             payroll.payslip_generated = True
@@ -490,7 +524,8 @@ class PayrollScheduler:
                                     employee_name=employee.name,
                                     payslip_path=payslip_path,
                                     month=month_name,
-                                    year=check_year
+                                    year=check_year,
+                                    pdf_password=payslip_password
                                 )
                                 
                                 if result['success']:

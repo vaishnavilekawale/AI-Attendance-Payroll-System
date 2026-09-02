@@ -360,18 +360,32 @@
                             </div>
                             <div class="col-md-4">
                                 <div class="mb-3">
+                                    <label class="form-label">Employee PF %</label>
+                                    <input type="number" class="form-control" name="employee_pf_percentage" step="0.01" min="0" max="12" value="12.0">
+                                    <small class="text-muted">Employee Provident Fund percentage (default 12%)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">ESIC %</label>
+                                    <input type="number" class="form-control" name="esic_percentage" step="0.01" min="0" max="0.75" value="0.75">
+                                    <small class="text-muted">Employee State Insurance Corporation percentage (default 0.75%)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
                                     <label class="form-label">TDS (Income Tax) %</label>
                                     <input type="number" class="form-control" name="tds_percentage" step="0.01" min="0" value="0.0">
                                     <small class="text-muted">Applied as a % of earned gross salary.</small>
                                 </div>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label">Bus Charges / Transport</label>
                                     <input type="number" class="form-control" name="bus_charges" step="0.01" min="0" value="0.0">
                                 </div>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label">Other Deductions</label>
                                     <input type="number" class="form-control" name="other_deduction" step="0.01" min="0" value="0.0">
@@ -395,7 +409,7 @@
     </div>
 
     <!-- Edit Employee Modal -->
-    {% if employee %}
+    {% if edit_mode %}
     <div class="modal fade" id="editEmployeeModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
@@ -549,18 +563,32 @@
                             </div>
                             <div class="col-md-4">
                                 <div class="mb-3">
+                                    <label class="form-label">Employee PF %</label>
+                                    <input type="number" class="form-control" name="employee_pf_percentage" step="0.01" min="0" max="12" value="{{ employee.employee_pf_percentage if employee.employee_pf_percentage is not none else 12.0 }}">
+                                    <small class="text-muted">Employee Provident Fund percentage (default 12%)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">ESIC %</label>
+                                    <input type="number" class="form-control" name="esic_percentage" step="0.01" min="0" max="0.75" value="{{ employee.esic_percentage if employee.esic_percentage is not none else 0.75 }}">
+                                    <small class="text-muted">Employee State Insurance Corporation percentage (default 0.75%)</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
                                     <label class="form-label">TDS (Income Tax) %</label>
                                     <input type="number" class="form-control" name="tds_percentage" step="0.01" min="0" value="{{ employee.tds_percentage if employee.tds_percentage is not none else 0.0 }}">
                                     <small class="text-muted">Applied as a % of earned gross salary.</small>
                                 </div>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label">Bus Charges / Transport</label>
                                     <input type="number" class="form-control" name="bus_charges" step="0.01" min="0" value="{{ employee.bus_charges if employee.bus_charges is not none else 0.0 }}">
                                 </div>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label">Other Deductions</label>
                                     <input type="number" class="form-control" name="other_deduction" step="0.01" min="0" value="{{ employee.other_deduction if employee.other_deduction is not none else 0.0 }}">
@@ -587,8 +615,11 @@
     </div>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            var editModal = new bootstrap.Modal(document.getElementById('editEmployeeModal'));
-            editModal.show();
+            var editModalElement = document.getElementById('editEmployeeModal');
+            if (editModalElement) {
+                var editModal = new bootstrap.Modal(editModalElement);
+                editModal.show();
+            }
         });
     </script>
     {% endif %}
@@ -658,123 +689,330 @@
     </div>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            var faceModal = new bootstrap.Modal(document.getElementById('faceRegistrationModal'));
-            faceModal.show();
-            
-            let video = document.getElementById('webcam');
-            let stream = null;
-            let capturing = false;
-            let capturedCount = 0;
-            let numImages = parseInt(document.getElementById('numImages').value) || 20;
-            const employeeId = {{ employee.id | tojson }};
-            
-            document.getElementById('startCameraBtn').addEventListener('click', async function() {
-                try {
-                    stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                    video.srcObject = stream;
-                    document.getElementById('videoContainer').style.display = 'block';
-                    document.getElementById('startCameraBtn').style.display = 'none';
-                    document.getElementById('captureBtn').style.display = 'inline-block';
-                    document.getElementById('stopCameraBtn').style.display = 'inline-block';
-                } catch (err) {
-                    alert('Could not access webcam: ' + err.message);
-                }
-            });
-            
-            document.getElementById('captureBtn').addEventListener('click', function() {
-                if (capturing) return;
+            var faceModalElement = document.getElementById('faceRegistrationModal');
+            if (faceModalElement) {
+                var faceModal = new bootstrap.Modal(faceModalElement);
+                faceModal.show();
                 
-                numImages = parseInt(document.getElementById('numImages').value);
-                capturedCount = 0;
-                capturing = true;
+                // Only initialize webcam logic if modal exists
+                let video = document.getElementById('webcam');
+                let stream = null;
+                let capturing = false;
+                let capturedCount = 0;
+                let numImages = parseInt(document.getElementById('numImages').value) || 20;
+                const employeeId = {{ employee.id | tojson }};
                 
-                document.getElementById('progressContainer').style.display = 'block';
-                document.getElementById('captureBtn').disabled = true;
+                document.getElementById('startCameraBtn').addEventListener('click', async function() {
+                    try {
+                        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                        video.srcObject = stream;
+                        document.getElementById('videoContainer').style.display = 'block';
+                        document.getElementById('startCameraBtn').style.display = 'none';
+                        document.getElementById('captureBtn').style.display = 'inline-block';
+                        document.getElementById('stopCameraBtn').style.display = 'inline-block';
+                    } catch (err) {
+                        alert('Could not access webcam: ' + err.message);
+                    }
+                });
                 
-                captureImages();
-            });
-            
-            document.getElementById('stopCameraBtn').addEventListener('click', function() {
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                    stream = null;
-                }
-                document.getElementById('videoContainer').style.display = 'none';
-                document.getElementById('startCameraBtn').style.display = 'inline-block';
-                document.getElementById('captureBtn').style.display = 'none';
-                document.getElementById('stopCameraBtn').style.display = 'none';
-                capturing = false;
-            });
-            
-            function captureImages() {
-                if (capturedCount >= numImages) {
+                document.getElementById('captureBtn').addEventListener('click', function() {
+                    if (capturing) return;
+                    
+                    numImages = parseInt(document.getElementById('numImages').value);
+                    capturedCount = 0;
+                    capturing = true;
+                    
+                    document.getElementById('progressContainer').style.display = 'block';
+                    document.getElementById('captureBtn').disabled = true;
+                    
+                    captureImages();
+                });
+                
+                document.getElementById('stopCameraBtn').addEventListener('click', function() {
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                        stream = null;
+                    }
+                    document.getElementById('videoContainer').style.display = 'none';
+                    document.getElementById('startCameraBtn').style.display = 'inline-block';
+                    document.getElementById('captureBtn').style.display = 'none';
+                    document.getElementById('stopCameraBtn').style.display = 'none';
                     capturing = false;
-                    document.getElementById('captureBtn').disabled = false;
-                    
-                    // Train the face recognition model after capturing all images
-                    document.getElementById('progressBar').textContent = 'Training model...';
-                    
-                    const trainFormData = new FormData();
-                    trainFormData.append('employee_id', employeeId);
-                    
-                    fetch('/api/train-face-model', {
-                        method: 'POST',
-                        body: trainFormData
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            alert('Successfully captured ' + capturedCount + ' images and trained face recognition model!');
-                            document.getElementById('progressBar').textContent = 'Training complete!';
-                        } else {
-                            alert('Images captured but training failed: ' + data.message);
-                        }
-                    })
-                    .catch(err => {
-                        alert('Images captured but training error: ' + err.message);
-                    });
-                    
-                    return;
-                }
+                });
                 
-                const canvas = document.createElement('canvas');
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0);
-                
-                canvas.toBlob(function(blob) {
-                    const formData = new FormData();
-                    formData.append('image', blob);
-                    formData.append('employee_id', employeeId);
-                    
-                    fetch('/api/upload-face-image', {
-                        method: 'POST',
-                        body: formData
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            capturedCount++;
-                            document.getElementById('progressBar').style.width = (capturedCount / numImages * 100) + '%';
-                            document.getElementById('progressBar').textContent = capturedCount + ' / ' + numImages;
-                            
-                            // Capture next image after a short delay
-                            setTimeout(captureImages, 500);
-                        } else {
-                            alert('Error capturing image: ' + data.message);
-                            capturing = false;
-                            document.getElementById('captureBtn').disabled = false;
-                        }
-                    })
-                    .catch(err => {
-                        console.error('Error:', err);
+                function captureImages() {
+                    if (capturedCount >= numImages) {
                         capturing = false;
                         document.getElementById('captureBtn').disabled = false;
-                    });
-                }, 'image/jpeg', 0.8);
+                        
+                        // Train the face recognition model after capturing all images
+                        document.getElementById('progressBar').textContent = 'Training model...';
+                        
+                        const trainFormData = new FormData();
+                        trainFormData.append('employee_id', employeeId);
+                        
+                        fetch('/api/train-face-model', {
+                            method: 'POST',
+                            body: trainFormData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                alert('Successfully captured ' + capturedCount + ' images and trained face recognition model!');
+                                document.getElementById('progressBar').textContent = 'Training complete!';
+                            } else {
+                                alert('Images captured but training failed: ' + data.message);
+                            }
+                        })
+                        .catch(err => {
+                            alert('Images captured but training error: ' + err.message);
+                        });
+                        
+                        return;
+                    }
+                    
+                    const canvas = document.createElement('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(video, 0, 0);
+                    
+                    canvas.toBlob(function(blob) {
+                        const formData = new FormData();
+                        formData.append('image', blob);
+                        formData.append('employee_id', employeeId);
+                        
+                        fetch('/api/upload-face-image', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                capturedCount++;
+                                document.getElementById('progressBar').style.width = (capturedCount / numImages * 100) + '%';
+                                document.getElementById('progressBar').textContent = capturedCount + ' / ' + numImages;
+                                
+                                // Capture next image after a short delay
+                                setTimeout(captureImages, 500);
+                            } else {
+                                alert('Error capturing image: ' + data.message);
+                                capturing = false;
+                                document.getElementById('captureBtn').disabled = false;
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Error:', err);
+                            capturing = false;
+                            document.getElementById('captureBtn').disabled = false;
+                        });
+                    }, 'image/jpeg', 0.8);
+                }
             }
         });
+    </script>
+    {% endif %}
+
+    <!-- View Employee Modal -->
+    {% if view_mode %}
+    <div class="modal fade" id="viewEmployeeModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Employee Details - {{ employee.name }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <!-- Employee Profile Info -->
+                        <div class="col-md-4">
+                            <div class="card mb-3">
+                                <div class="card-body text-center">
+                                    {% if employee.profile_photo %}
+                                        <img src="/uploads/{{ employee.profile_photo.split('/')[-1] }}" class="rounded-circle mb-3" width="120" height="120" style="object-fit: cover;" onerror="this.src='https://ui-avatars.com/api/?name={{ employee.name }}&background=6c757d&color=fff&size=120';">
+                                    {% else %}
+                                        <img src="https://ui-avatars.com/api/?name={{ employee.name }}&background=6c757d&color=fff&size=120" class="rounded-circle mb-3" width="120" height="120" style="object-fit: cover;">
+                                    {% endif %}
+                                    <h5>{{ employee.name }}</h5>
+                                    <p class="text-muted mb-0">{{ employee.designation }}</p>
+                                    <p class="text-muted">{{ employee.department }}</p>
+                                </div>
+                            </div>
+                            
+                            <div class="card">
+                                <div class="card-body">
+                                    <h6 class="card-title">Profile Information</h6>
+                                    <table class="table table-sm">
+                                        <tr>
+                                            <td><strong>Employee ID:</strong></td>
+                                            <td>{{ employee.employee_id }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Email:</strong></td>
+                                            <td>{{ employee.email }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Phone:</strong></td>
+                                            <td>{{ employee.phone }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Joining Date:</strong></td>
+                                            <td>{{ employee.joining_date.strftime('%Y-%m-%d') if employee.joining_date else 'N/A' }}</td>
+                                        </tr>
+                                        <tr>
+                                            <td><strong>Basic Salary:</strong></td>
+                                            <td>Rs. {{ "{:,.2f}".format(employee.basic_salary) }}</td>
+                                        </tr>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Face Images Gallery -->
+                        <div class="col-md-8">
+                            <div class="card">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h6 class="mb-0">Face Images</h6>
+                                    <span class="badge bg-{{ 'success' if current_face_images >= min_face_images else 'warning' }}">
+                                        {{ current_face_images }}/{{ min_face_images }}
+                                    </span>
+                                </div>
+                                <div class="card-body">
+                                    {% if face_images %}
+                                        <div class="row" id="faceImagesGallery">
+                                            {% for image in face_images %}
+                                            <div class="col-3 mb-3" id="image-{{ loop.index }}">
+                                                <div class="card position-relative">
+                                                    <img src="/dataset/{{ employee.id }}/{{ image }}" class="card-img-top" style="height: 100px; object-fit: cover;" alt="Face image {{ loop.index }}">
+                                                    <button class="btn btn-sm btn-danger position-absolute top-0 end-0 m-1" 
+                                                            onclick="deleteFaceImage('{{ employee.id }}', '{{ image }}', {{ loop.index }})"
+                                                            title="Delete this image">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                    <div class="card-footer p-1 text-center">
+                                                        <small class="text-muted">{{ loop.index }}</small>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                    {% else %}
+                                        <div class="alert alert-warning">
+                                            <i class="bi bi-exclamation-triangle"></i> No face images captured yet.
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            
+                            <!-- Recent Attendance -->
+                            {% if attendance is defined %}
+                            <div class="card mt-3">
+                                <div class="card-header">
+                                    <h6 class="mb-0">Recent Attendance</h6>
+                                </div>
+                                <div class="card-body">
+                                    {% if attendance %}
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Date</th>
+                                                        <th>In Time</th>
+                                                        <th>Out Time</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for att in attendance[:10] %}
+                                                    <tr>
+                                                        <td>{{ att.date.strftime('%Y-%m-%d') }}</td>
+                                                        <td>{{ att.in_time.strftime('%H:%M') if att.in_time else '-' }}</td>
+                                                        <td>{{ att.out_time.strftime('%H:%M') if att.out_time else '-' }}</td>
+                                                        <td>
+                                                            <span class="badge bg-{{ 'success' if att.status == 'present' else 'warning' if att.status == 'half_day' else 'danger' }}">
+                                                                {{ att.status.title() if att.status else 'Pending' }}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    {% else %}
+                                        <p class="text-muted mb-0">No attendance records found.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var viewModalElement = document.getElementById('viewEmployeeModal');
+            if (viewModalElement) {
+                var viewModal = new bootstrap.Modal(viewModalElement);
+                viewModal.show();
+            }
+        });
+
+        function deleteFaceImage(employeeId, imageName, imageIndex) {
+            if (!confirm('Are you sure you want to delete this face image?')) {
+                return;
+            }
+
+            fetch(`/delete-face-image/${employeeId}/${imageName}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Remove the image element from the DOM
+                    const imageElement = document.getElementById('image-' + imageIndex);
+                    if (imageElement) {
+                        imageElement.remove();
+                    }
+                    
+                    // Update the count badge using the accurate count from backend
+                    const countBadge = document.querySelector('.badge');
+                    if (countBadge && data.remaining_count !== undefined) {
+                        const currentText = countBadge.textContent;
+                        const parts = currentText.split('/');
+                        if (parts.length === 2) {
+                            const totalCount = parseInt(parts[1]);
+                            const remainingCount = data.remaining_count;
+                            countBadge.textContent = `${remainingCount}/${totalCount}`;
+                            
+                            // Update badge color based on new count
+                            countBadge.classList.remove('bg-success', 'bg-warning');
+                            if (remainingCount >= totalCount) {
+                                countBadge.classList.add('bg-success');
+                            } else {
+                                countBadge.classList.add('bg-warning');
+                            }
+                        }
+                    }
+                    
+                    // Show success message
+                    alert('Face image deleted successfully');
+                } else {
+                    alert('Error deleting face image: ' + data.message);
+                }
+            })
+            .catch(err => {
+                console.error('Error:', err);
+                alert('Error deleting face image: ' + err.message);
+            });
+        }
     </script>
     {% endif %}
 

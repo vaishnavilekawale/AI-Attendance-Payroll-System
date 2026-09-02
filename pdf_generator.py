@@ -340,13 +340,14 @@ class PDFGenerator:
         logo_cell = ''
         if logo_path and os.path.exists(logo_path):
             try:
-                logo_cell = Image(logo_path, width=0.9 * inch, height=0.9 * inch)
+                # Adjusted logo size for better fit on left side
+                logo_cell = Image(logo_path, width=1.2 * inch, height=1.2 * inch, hAlign='CENTER')
             except Exception:
                 logo_cell = ''
 
         header_table = Table(
             [[logo_cell, company_lines]],
-            colWidths=[1.0 * inch, 6.3 * inch],
+            colWidths=[1.5 * inch, 5.8 * inch],
         )
         header_table.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'TOP'),
@@ -355,6 +356,7 @@ class PDFGenerator:
             ('TOPPADDING', (0, 0), (-1, -1), 4),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
             ('LEFTPADDING', (1, 0), (1, 0), 8),
+            ('RIGHTPADDING', (0, 0), (0, 0), 4),
             ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#CCCCCC')),
         ]))
         story.append(header_table)
@@ -747,7 +749,7 @@ class PDFGenerator:
             else:
                 return arab_word + ' Arab'
     
-    def generate_admin_reports_pdf(self, report_data, filters, output_path):
+    def generate_admin_reports_pdf(self, report_data, filters, output_path, company_settings=None):
         """Generate comprehensive Admin Reports PDF with all analytics sections
         
         This is a dedicated function for Admin Reports export, separate from
@@ -765,6 +767,7 @@ class PDFGenerator:
             report_data: Dictionary from AdminReportsService.generate_report_data()
             filters: Dictionary of applied filters
             output_path: Output PDF file path
+            company_settings: Optional Settings object from database (uses Config fallback if None)
         """
         import logging
         from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
@@ -772,8 +775,18 @@ class PDFGenerator:
         from reportlab.lib import colors
         logger = logging.getLogger(__name__)
         
+        # Fetch company settings from database or use Config fallback
+        if company_settings and hasattr(company_settings, 'company_name'):
+            company_name = company_settings.company_name
+            company_logo = company_settings.company_logo
+        else:
+            company_name = self.company_name
+            company_logo = self.company_logo
+        
         logger.info("=" * 60)
         logger.info("[ADMIN REPORT PDF] Starting PDF generation")
+        logger.info(f"Company Name: {company_name}")
+        logger.info(f"Company Logo: {company_logo}")
         logger.info(f"Filters: {filters}")
         logger.info(f"Summary: {report_data.get('summary')}")
         logger.info(f"Department Analytics count: {len(report_data.get('department_analytics', {}))}")
@@ -856,19 +869,67 @@ class PDFGenerator:
             fontName='Helvetica'
         )
         
-        # COMPANY HEADER
-        if self.company_logo and os.path.exists(self.company_logo):
+        # COMPANY HEADER - Logo on right, company name on left
+        company_header_style = ParagraphStyle(
+            'CompanyHeader',
+            parent=self.styles['Normal'],
+            fontSize=14,
+            fontName='Helvetica-Bold',
+            textColor=colors.darkblue,
+            alignment=TA_LEFT,
+            spaceAfter=2
+        )
+        
+        report_title_style = ParagraphStyle(
+            'ReportTitle',
+            parent=self.styles['Normal'],
+            fontSize=11,
+            fontName='Helvetica-Bold',
+            textColor=colors.darkblue,
+            alignment=TA_LEFT,
+            spaceAfter=2
+        )
+        
+        timestamp_style = ParagraphStyle(
+            'Timestamp',
+            parent=self.styles['Normal'],
+            fontSize=8,
+            fontName='Helvetica',
+            textColor=colors.grey,
+            alignment=TA_LEFT
+        )
+        
+        # Build header content
+        company_content = [
+            Paragraph(company_name, company_header_style),
+            Paragraph("ADMIN ATTENDANCE REPORT", report_title_style),
+            Paragraph(f"Generated: {datetime.now().strftime('%d-%b-%Y %H:%M')}", timestamp_style)
+        ]
+        
+        # Add logo on the right if available
+        logo_cell = ''
+        if company_logo and os.path.exists(company_logo):
             try:
-                logo = Image(self.company_logo, width=0.8*inch, height=0.8*inch)
-                logo.hAlign = 'CENTER'
-                story.append(logo)
-                story.append(Spacer(1, 0.05*inch))
+                logo_cell = Image(company_logo, width=1.0*inch, height=1.0*inch, hAlign='CENTER')
             except:
                 pass
         
-        story.append(Paragraph(self.company_name, title_style))
-        story.append(Paragraph("ADMIN ATTENDANCE REPORT", subtitle_style))
-        story.append(Paragraph(f"Generated: {datetime.now().strftime('%d-%b-%Y %H:%M')}", normal_style))
+        # Create header table with logo on right, company info on left
+        header_table = Table(
+            [[company_content, logo_cell]],
+            colWidths=[available_width * 0.75, available_width * 0.25]
+        )
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (0, 0), 0),
+            ('RIGHTPADDING', (1, 0), (1, 0), 0),
+            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#CCCCCC')),
+        ]))
+        story.append(header_table)
         story.append(Spacer(1, 0.1*inch))
         
         # APPLIED FILTERS SECTION
@@ -1465,7 +1526,7 @@ class PDFGenerator:
         logger.info("[ADMIN REPORT PDF] Rendering complete")
         logger.info("=" * 60)
 
-    def generate_attendance_report(self, attendances, employee, start_date, end_date, output_path):
+    def generate_attendance_report(self, attendances, employee, start_date, end_date, output_path, company_settings=None):
         """Generate attendance report PDF with improved layout
         
         Args:
@@ -1474,6 +1535,7 @@ class PDFGenerator:
             start_date: Start date string
             end_date: End date string
             output_path: Output PDF file path
+            company_settings: Optional Settings object from database (uses Config fallback if None)
         """
         # Determine if we need landscape orientation based on column count
         is_all_employees = employee is None
@@ -1518,20 +1580,69 @@ class PDFGenerator:
             spaceAfter=5
         )
         
-        # Company Logo
-        if self.company_logo and os.path.exists(self.company_logo):
+        # Fetch company settings from database or use Config fallback
+        if company_settings and hasattr(company_settings, 'company_name'):
+            company_name = company_settings.company_name
+            company_logo = company_settings.company_logo
+        else:
+            company_name = self.company_name
+            company_logo = self.company_logo
+        
+        # COMPANY HEADER - Logo on right, company info on left
+        company_header_style = ParagraphStyle(
+            'CompanyHeader',
+            parent=self.styles['Normal'],
+            fontSize=16,
+            fontName='Helvetica-Bold',
+            textColor=colors.darkblue,
+            alignment=TA_LEFT,
+            spaceAfter=2
+        )
+        
+        report_title_style = ParagraphStyle(
+            'ReportTitle',
+            parent=self.styles['Normal'],
+            fontSize=14,
+            fontName='Helvetica-Bold',
+            textColor=colors.darkblue,
+            alignment=TA_LEFT,
+            spaceAfter=2
+        )
+        
+        # Build header content
+        company_content = [
+            Paragraph(company_name, company_header_style),
+            Paragraph("Attendance Report", report_title_style)
+        ]
+        
+        # Add logo on the right if available
+        logo_cell = ''
+        if company_logo and os.path.exists(company_logo):
             try:
-                logo = Image(self.company_logo, width=1.2*inch, height=1.2*inch)
-                logo.hAlign = 'CENTER'
-                story.append(logo)
-                story.append(Spacer(1, 0.1*inch))
+                logo_cell = Image(company_logo, width=1.0*inch, height=1.0*inch, hAlign='CENTER')
             except:
                 pass
         
-        # Header
-        story.append(Paragraph(self.company_name, title_style))
-        story.append(Paragraph("Attendance Report", title_style))
-        story.append(Spacer(1, 0.15*inch))
+        # Calculate available width for header table
+        available_width = pagesize[0] - (1.5*inch)
+        
+        # Create header table with logo on right, company info on left
+        header_table = Table(
+            [[company_content, logo_cell]],
+            colWidths=[available_width * 0.75, available_width * 0.25]
+        )
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (0, 0), 0),
+            ('RIGHTPADDING', (1, 0), (1, 0), 0),
+            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#CCCCCC')),
+        ]))
+        story.append(header_table)
+        story.append(Spacer(1, 0.1*inch))
         
         # Report Details
         story.append(Paragraph(f"<b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", normal_style))

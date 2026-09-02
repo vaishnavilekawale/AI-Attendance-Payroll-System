@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        :root {
+            --enterprise-navy: #0f1f3d;
+            --enterprise-navy-light: #16294f;
+            --enterprise-accent: #2f6fed;
+            --enterprise-border: #e3e7ee;
+            --enterprise-bg: #f4f6fa;
+        }
+        * { box-sizing: border-box; }
+        body {
+            background: var(--enterprise-bg);
+            min-height: 100vh;
+            font-family: 'Segoe UI', 'Inter', Roboto, Tahoma, Geneva, Verdana, sans-serif;
+            color: #1c2333;
+        }
+
+        /* ---------- Enterprise top bar ---------- */
+        .kiosk-topbar {
+            background: var(--enterprise-navy);
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 3px solid var(--enterprise-accent);
+        }
+        .kiosk-brand {
+            color: #fff;
+            font-weight: 700;
+            font-size: 1.15rem;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            letter-spacing: 0.2px;
+        }
+        .kiosk-brand-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            background: var(--enterprise-accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+        .kiosk-brand small {
+            display: block;
+            font-weight: 400;
+            font-size: 0.72rem;
+            color: rgba(255, 255, 255, 0.6);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+        .kiosk-topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+        .kiosk-clock {
+            color: rgba(255, 255, 255, 0.85);
+            text-align: right;
+            font-size: 0.85rem;
+            line-height: 1.2;
+        }
+        .kiosk-clock #liveTime {
+            font-weight: 700;
+            font-size: 1rem;
+            color: #fff;
+            font-variant-numeric: tabular-nums;
+        }
+        .btn-login-toggle {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            color: #fff;
+            font-weight: 600;
+            font-size: 0.9rem;
+            padding: 8px 18px;
+            border-radius: 6px;
+            transition: all 0.2s ease;
+        }
+        .btn-login-toggle:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* ---------- Main layout ---------- */
+        .kiosk-main {
+            padding: 36px 20px 50px;
+            max-width: 1080px;
+            margin: 0 auto;
+        }
+        .kiosk-hero {
+            text-align: center;
+            margin-bottom: 26px;
+        }
+        .kiosk-hero h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--enterprise-navy);
+            margin-bottom: 4px;
+        }
+        .kiosk-hero p {
+            color: #6b7280;
+            font-size: 0.95rem;
+            margin: 0;
+        }
+        .kiosk-grid {
+            display: grid;
+            grid-template-columns: 1.6fr 1fr;
+            gap: 22px;
+            align-items: start;
+        }
+        @media (max-width: 860px) {
+            .kiosk-grid { grid-template-columns: 1fr; }
+        }
+        .kiosk-card {
+            background: #fff;
+            border-radius: 10px;
+            border: 1px solid var(--enterprise-border);
+            box-shadow: 0 1px 3px rgba(15, 31, 61, 0.06);
+            overflow: hidden;
+        }
+        .kiosk-card-header {
+            padding: 16px 22px;
+            border-bottom: 1px solid var(--enterprise-border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .kiosk-card-header i {
+            color: var(--enterprise-accent);
+            font-size: 1.1rem;
+        }
+        .kiosk-card-header h2 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--enterprise-navy);
+            margin: 0;
+        }
+        .kiosk-card-body {
+            padding: 20px 22px 24px;
+        }
+        .video-container {
+            border-radius: 8px;
+            overflow: hidden;
+            background: #000;
+            border: 1px solid var(--enterprise-border);
+        }
+        #video {
+            display: block;
+        }
+
+        /* ---------- Side info panel ---------- */
+        .info-panel-item {
+            display: flex;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--enterprise-border);
+            font-size: 0.87rem;
+            color: #3c4457;
+        }
+        .info-panel-item:last-child { border-bottom: none; }
+        .info-panel-item i {
+            color: var(--enterprise-accent);
+            font-size: 1rem;
+            width: 20px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: rgba(34, 197, 94, 0.12);
+            color: #15803d;
+        }
+        .status-pill .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #22c55e;
+            animation: pulse-dot 1.6s infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+
+        /* ---------- Login sidebar ---------- */
+        .offcanvas-header {
+            background: var(--enterprise-navy);
+            color: #fff;
+        }
+        .offcanvas-header .btn-close {
+            filter: invert(1) grayscale(100%) brightness(200%);
+        }
+        .login-option-btn {
+            width: 100%;
+            text-align: left;
+            padding: 16px 18px;
+            border-radius: 10px;
+            border: 1px solid var(--enterprise-border);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            transition: all 0.2s ease;
+        }
+        .login-option-btn i {
+            font-size: 1.5rem;
+            color: var(--enterprise-accent);
+        }
+        .login-option-btn:hover {
+            border-color: var(--enterprise-accent);
+            background: rgba(47, 111, 237, 0.05);
+        }
+
+        .kiosk-footer {
+            text-align: center;
+            color: #9aa2b1;
+            font-size: 0.8rem;
+            padding: 24px 0 10px;
+        }
+        .kiosk-footer a { color: #6b7994; }
+    </style>
+</head>
+<body>
+
+    <!-- Professional top bar: branding, live clock, single unobtrusive Login entry point -->
+    <div class="kiosk-topbar">
+        <div class="kiosk-brand">
+            <span class="kiosk-brand-icon"><i class="bi bi-person-badge"></i></span>
+            <div>
+                AI Attendance System
+                <small>Enterprise Workforce Management</small>
+            </div>
+        </div>
+        <div class="kiosk-topbar-right">
+            <div class="kiosk-clock">
+                <div id="liveTime">--:--:--</div>
+                <div id="liveDate">-</div>
+            </div>
+            <button class="btn btn-login-toggle" type="button" data-bs-toggle="offcanvas" data-bs-target="#loginSidebar" aria-controls="loginSidebar">
+                <i class="bi bi-box-arrow-in-right me-1"></i> Login
+            </button>
+        </div>
+    </div>
+
+    <!-- Side Login Access: a slide-in sidebar, kept out of the way of the -->
+    <!-- main attendance flow until someone actually needs to sign in.     -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="loginSidebar" aria-labelledby="loginSidebarLabel">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title" id="loginSidebarLabel"><i class="bi bi-shield-lock me-2"></i>Login</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            <p class="text-muted">
+                Marking attendance doesn't require an account. If you need dashboards, reports,
+                payroll, or approvals, sign in below.
+            </p>
+            <a href="{{ url_for('login', role='admin') }}" class="login-option-btn text-decoration-none text-dark">
+                <i class="bi bi-shield-lock"></i>
+                <div>
+                    <div class="fw-bold">Admin Login</div>
+                </div>
+            </a>
+            <a href="{{ url_for('login', role='employee') }}" class="login-option-btn text-decoration-none text-dark">
+                <i class="bi bi-person"></i>
+                <div>
+                    <div class="fw-bold">Manager/Employee Login</div>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <!-- Core landing experience: Face Recognition / Mark Attendance -->
+    <div class="kiosk-main">
+        <div class="kiosk-hero">
+            <h1>Mark Your Attendance</h1>
+            <p>Look at the camera - attendance is detected and recorded automatically.</p>
+        </div>
+
+        <div class="kiosk-grid">
+            <div class="kiosk-card">
+                <div class="kiosk-card-header">
+                    <i class="bi bi-camera-video"></i>
+                    <h2>Face Recognition</h2>
+                </div>
+                <div class="kiosk-card-body">
+                    <div class="video-container">
+                        <video id="video" width="100%" height="360" autoplay muted playsinline></video>
+                        <canvas id="canvas" width="640" height="480" style="display:none;"></canvas>
+                    </div>
+                    <div id="autoStatus" class="mt-3">
+                        <div class="alert alert-info">
+                            <h5><i class="bi bi-camera-video"></i> Automatic Attendance</h5>
+                            <p>Starting camera... the system will continuously scan and recognize anyone in view automatically. No Employee ID entry is required.</p>
+                        </div>
+                    </div>
+                    <div id="attendanceResult" class="mt-3"></div>
+                    <div id="liveFacesPanel" class="mt-2"></div>
+                    <div id="employeeIdFallback" class="mt-3" style="display:none;">
+                        <div class="alert alert-warning">
+                            <h5>Face Not Recognized</h5>
+                            <p>If the camera can't recognize your face, you can still mark attendance manually. For security, this requires your Employee ID <strong>and</strong> your account password - Employee ID alone is not accepted.</p>
+                            <div class="row g-2">
+                                <div class="col-md-5">
+                                    <input type="text" id="manualEmployeeIdInput" class="form-control" placeholder="Employee ID (e.g., EMP0001)" autocomplete="username">
+                                </div>
+                                <div class="col-md-5">
+                                    <input type="password" id="manualPasswordInput" class="form-control" placeholder="Password" autocomplete="current-password">
+                                </div>
+                                <div class="col-md-2">
+                                    <button class="btn btn-primary w-100" onclick="markManualAttendance()">
+                                        Mark
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="manualAttendanceStatus" class="mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="kiosk-card">
+                <div class="kiosk-card-header">
+                    <i class="bi bi-info-circle"></i>
+                    <h2>System Status</h2>
+                </div>
+                <div class="kiosk-card-body">
+                    <span class="status-pill"><span class="dot"></span> Live &amp; Scanning</span>
+                    <div class="mt-3">
+                        <div class="info-panel-item">
+                            <i class="bi bi-1-circle"></i>
+                            <div>Position your face clearly in the camera frame.</div>
+                        </div>
+                        <div class="info-panel-item">
+                            <i class="bi bi-2-circle"></i>
+                            <div>Attendance is logged automatically once recognized - no button press needed.</div>
+                        </div>
+                        <div class="info-panel-item">
+                            <i class="bi bi-3-circle"></i>
+                            <div>Not recognized? Use the secure Employee ID + password fallback below the camera.</div>
+                        </div>
+                        <div class="info-panel-item">
+                            <i class="bi bi-shield-check"></i>
+                            <div>Manual entries requiring approval are only visible on dashboards once approved.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="kiosk-footer">
+            Powered by AI Attendance System &middot; <a href="#" data-bs-toggle="offcanvas" data-bs-target="#loginSidebar">Staff Login</a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Live clock in the enterprise top bar
+        function updateClock() {
+            const now = new Date();
+            const timeEl = document.getElementById('liveTime');
+            const dateEl = document.getElementById('liveDate');
+            if (timeEl) timeEl.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            if (dateEl) dateEl.textContent = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        }
+        updateClock();
+        setInterval(updateClock, 1000);
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const resultDiv = document.getElementById('attendanceResult');
+        const autoStatusDiv = document.getElementById('autoStatus');
+        const liveFacesPanel = document.getElementById('liveFacesPanel');
+
+        let videoStream = null;
+        let scanTimer = null;
+        let scanInProgress = false;   // prevents overlapping requests if a scan is slow
+        const SCAN_INTERVAL_MS = 1800; // how often we send a frame for recognition
+
+        // Rolling log of successful marks shown in the UI without a full page reload,
+        // so the camera keeps running continuously for the next person.
+        const recentlyMarked = [];
+        const MAX_RECENT_LOG = 8;
+
+        // ------------------------------------------------------------------
+        // Camera lifecycle - starts automatically, no Employee ID required,
+        // no login required. This is the public kiosk entry point.
+        // ------------------------------------------------------------------
+        async function autoStartCamera() {
+            try {
+                videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = videoStream;
+                setStatus('info', 'bi-camera-video', 'Camera Active',
+                    'Continuously scanning for faces. No Employee ID entry needed - just look at the camera.');
+
+                video.onloadedmetadata = () => {
+                    setTimeout(() => startContinuousScan(), 1500);
+                };
+            } catch (err) {
+                setStatus('danger', 'bi-exclamation-triangle', 'Camera Error',
+                    `Error accessing camera: ${err.message}`);
+            }
+        }
+
+        function stopCamera() {
+            if (scanTimer) {
+                clearInterval(scanTimer);
+                scanTimer = null;
+            }
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                videoStream = null;
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Continuous scanning loop
+        // ------------------------------------------------------------------
+        function startContinuousScan() {
+            if (scanTimer) return; // already running
+            setStatus('info', 'bi-camera-video', 'Scanning...', 'Watching the camera feed for faces.');
+            scanTimer = setInterval(scanFrame, SCAN_INTERVAL_MS);
+            scanFrame(); // kick off immediately, don't wait for first interval tick
+        }
+
+        async function scanFrame() {
+            if (scanInProgress || !videoStream) {
+                return;
+            }
+            scanInProgress = true;
+
+            try {
+                canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
+                const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg'));
+
+                const formData = new FormData();
+                formData.append('image', blob, 'frame.jpg');
+                // NOTE: no employee_id / emp_id is ever sent - identity is
+                // determined purely by the face itself against the whole
+                // registered employee database. This endpoint is public.
+
+                const response = await fetch('/api/auto-scan-attendance', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    handleScanResults(data.faces || []);
+                } else if (data.message) {
+                    console.warn('[auto-scan] ', data.message);
+                }
+            } catch (err) {
+                console.error('Scan error:', err);
+            } finally {
+                scanInProgress = false;
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Handle one frame's worth of (possibly multiple) face results
+        // ------------------------------------------------------------------
+        function handleScanResults(faces) {
+            if (!faces.length) {
+                setStatus('info', 'bi-camera-video', 'Scanning...', 'No face detected. Please look at the camera.');
+                renderLiveFaces([]);
+                return;
+            }
+
+            renderLiveFaces(faces);
+
+            let anyUnknown = false;
+            let anyLogged = false;
+
+            for (const face of faces) {
+                switch (face.status) {
+                    case 'logged':
+                        anyLogged = true;
+                        recordSuccess(face);
+                        break;
+                    case 'already_logged':
+                        // Employee is still in frame; attendance was already
+                        // recorded for this presence - nothing to do until
+                        // they step out and come back.
+                        break;
+                    case 'blocked':
+                        resultDiv.innerHTML = `
+                            <div class="alert alert-warning">
+                                <h5><i class="bi bi-exclamation-triangle"></i> ${escapeHtml(face.name)} recognized, attendance not marked</h5>
+                                <p>${escapeHtml(face.message || 'Attendance could not be recorded.')}</p>
+                            </div>
+                        `;
+                        break;
+                    case 'unknown':
+                    default:
+                        anyUnknown = true;
+                        break;
+                }
+            }
+
+            if (anyLogged) {
+                setStatus('success', 'bi-person-check', 'Attendance Updated', 'Continuing to scan for the next person...');
+            } else if (anyUnknown && faces.every(f => f.status === 'unknown')) {
+                setStatus('danger', 'bi-x-circle', 'Face Not Recognized',
+                    'A face was detected but did not match any registered employee.');
+                document.getElementById('employeeIdFallback').style.display = 'block';
+            } else {
+                setStatus('info', 'bi-camera-video', 'Scanning...', 'Watching the camera feed for faces.');
+            }
+        }
+
+        function recordSuccess(face) {
+            const time = face.in_time || face.out_time || face.time || '';
+            recentlyMarked.unshift({
+                name: face.name,
+                employeeIdStr: face.employee_id_str,
+                department: face.department,
+                confidence: face.confidence,
+                message: face.message,
+                time: time
+            });
+            if (recentlyMarked.length > MAX_RECENT_LOG) {
+                recentlyMarked.pop();
+            }
+            renderRecentLog();
+        }
+
+        function renderRecentLog() {
+            if (!recentlyMarked.length) {
+                resultDiv.innerHTML = '';
+                return;
+            }
+            const rows = recentlyMarked.map(entry => `
+                <div class="alert alert-success py-2 mb-2">
+                    <strong>✓ ${escapeHtml(entry.name)}</strong> (${escapeHtml(entry.employeeIdStr || '')})
+                    - ${escapeHtml(entry.message || '')} at ${escapeHtml(entry.time || '')}
+                    <span class="text-muted">(${Math.round((entry.confidence || 0) * 100)}% confidence)</span>
+                </div>
+            `).join('');
+            resultDiv.innerHTML = `<h6>Recent Attendance Activity</h6>${rows}`;
+        }
+
+        function renderLiveFaces(faces) {
+            if (!faces.length) {
+                liveFacesPanel.innerHTML = '';
+                return;
+            }
+            const badges = faces.map(f => {
+                let cls = 'bg-secondary';
+                let label = 'Unknown';
+                if (f.status === 'logged') { cls = 'bg-success'; label = `${f.name} - marked`; }
+                else if (f.status === 'already_logged') { cls = 'bg-info text-dark'; label = `${f.name} - in frame`; }
+                else if (f.status === 'blocked') { cls = 'bg-warning text-dark'; label = `${f.name} - not marked`; }
+                return `<span class="badge ${cls} me-2 mb-2">${escapeHtml(label)}</span>`;
+            }).join('');
+            liveFacesPanel.innerHTML = `<div class="mt-2">${badges}</div>`;
+        }
+
+        function setStatus(type, icon, title, message) {
+            autoStatusDiv.innerHTML = `
+                <div class="alert alert-${type}">
+                    <h5><i class="bi ${icon}"></i> ${escapeHtml(title)}</h5>
+                    <p>${escapeHtml(message)}</p>
+                </div>
+            `;
+        }
+
+        function escapeHtml(str) {
+            if (str === undefined || str === null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        // ------------------------------------------------------------------
+        // Secure manual fallback: requires BOTH Employee ID and password,
+        // only used when a face genuinely can't be recognized by the
+        // camera. Calls /mark_manual_attendance (JSON, also public) rather
+        // than the old ID-only endpoint, so a co-worker who merely knows
+        // someone's Employee ID can no longer punch attendance on their
+        // behalf.
+        // ------------------------------------------------------------------
+        async function markManualAttendance() {
+            const statusDiv = document.getElementById('manualAttendanceStatus');
+            const employeeIdInput = document.getElementById('manualEmployeeIdInput');
+            const passwordInput = document.getElementById('manualPasswordInput');
+
+            const employeeId = employeeIdInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!employeeId || !password) {
+                statusDiv.innerHTML = `
+                    <div class="alert alert-warning py-2 mb-0">
+                        Please enter both your Employee ID and password.
+                    </div>
+                `;
+                return;
+            }
+
+            statusDiv.innerHTML = `
+                <div class="alert alert-secondary py-2 mb-0">
+                    Verifying...
+                </div>
+            `;
+
+            try {
+                const response = await fetch('/mark_manual_attendance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ employee_id: employeeId, password: password })
+                });
+                const data = await response.json();
+
+                // Always clear the password field after a submit attempt,
+                // whether it succeeded or failed - never leave a password
+                // sitting in the input longer than necessary.
+                passwordInput.value = '';
+
+                if (data.success) {
+                    const time = data.in_time || data.out_time || data.time || '';
+                    statusDiv.innerHTML = `
+                        <div class="alert alert-success py-2 mb-0">
+                            <strong>✓ Attendance Marked Successfully!</strong><br>
+                            ${escapeHtml(data.message || '')}
+                            ${time ? `<br><strong>Time:</strong> ${escapeHtml(time)}` : ''}
+                        </div>
+                    `;
+                    employeeIdInput.value = '';
+                } else {
+                    statusDiv.innerHTML = `
+                        <div class="alert alert-danger py-2 mb-0">
+                            <strong>Attendance Not Marked.</strong> ${escapeHtml(data.message || 'Please try again.')}
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                passwordInput.value = '';
+                statusDiv.innerHTML = `
+                    <div class="alert alert-danger py-2 mb-0">
+                        <strong>Error:</strong> ${escapeHtml(err.message)}
+                    </div>
+                `;
+            }
+        }
+
+        // Auto-start the camera as soon as the page loads - no Employee ID
+        // prompt, no login prompt, no manual "Start Camera" click required.
+        autoStartCamera();
+
+        // Stop the camera cleanly if someone navigates away.
+        window.addEventListener('beforeunload', stopCamera);
+    </script>
+</body>
+</html>

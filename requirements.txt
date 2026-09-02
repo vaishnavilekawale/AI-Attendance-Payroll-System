@@ -13,10 +13,10 @@ PyMySQL==1.1.0
 opencv-python==4.8.1.78
 opencv-contrib-python==4.8.1.78
 deepface==0.0.79
-mediapipe
+mediapipe==0.10.21
 numpy==1.26.2
-tensorflow
-tf-keras
+tensorflow==2.15.0
+tf-keras==2.15.1
 
 # Image Processing
 Pillow==10.1.0
@@ -41,3 +41,4 @@ APScheduler==3.10.4
 # Development (optional)
 pytest==7.4.3
 pytest-flask==1.3.0
+
