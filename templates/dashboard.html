@@ -164,7 +164,7 @@
                     <div class="card-header">
                         <h5 class="card-title mb-0">Today's Attendance Overview</h5>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body" style="position: relative; height: 380px; width: 100%;">
                         <canvas id="attendanceChart"></canvas>
                     </div>
                 </div>
@@ -304,7 +304,24 @@
                 }]
             },
             options: {
-                responsive: true
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: {
+                    padding: {
+                        top: 10,
+                        bottom: 10
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        align: 'center', 
+                        labels: {
+                            boxWidth: 15,
+                            padding: 15
+                        }
+                    }
+                }
             }
         });
     </script>
