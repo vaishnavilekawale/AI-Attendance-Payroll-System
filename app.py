@@ -1148,6 +1148,7 @@ def add_employee():
         employee = Employee(
             employee_id=new_id,
             username=new_id,
+            password_hash=generate_password_hash(phone),
             name=name,
             department=department,
             designation=designation,
@@ -1194,6 +1195,9 @@ def add_employee():
                 is_active=True
             )
             login_creds.set_password(phone)  # Default password is mobile number
+            employee.password_hash = generate_password_hash(phone)  # Default password mobile number set kela
+            employee.username = new_id
+            employee.role = 'employee'
             db.session.add(login_creds)
         else:
             pass
