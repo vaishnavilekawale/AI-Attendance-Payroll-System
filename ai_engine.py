@@ -7,6 +7,7 @@ import logging
 import threading
 from datetime import datetime
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     import cv2
@@ -29,8 +30,13 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-# Global cache for employee face embeddings to avoid repeated disk I/O
+# Global cache for employee face embeddings to avoid repeated disk I/O.
+# Each value is a dict: {'embedding': [...], 'mtime': float, 'employee_id': str}
 _employee_embeddings_cache = {}
+
+# Guards _employee_embeddings_cache since preload_employee_embeddings() and
+# train_employee() can write to it concurrently from multiple threads.
+_embeddings_cache_lock = threading.Lock()
 
 # Consistent parameters across all methods
 DETECTOR_BACKEND = 'retinaface'
@@ -58,11 +64,50 @@ MIN_MATCH_MARGIN = 0.05
 EARLY_EXIT_DISTANCE = 0.18
 
 
+# Where the computed embeddings are persisted between server restarts.
+EMBEDDINGS_CACHE_FILE = os.path.join(Config.TRAINED_MODEL_FOLDER, 'embeddings_cache.pkl')
+
+
 def clear_embeddings_cache():
     """Clear the employee embeddings cache - call when employees are added/removed"""
     global _employee_embeddings_cache
-    _employee_embeddings_cache.clear()
+    with _embeddings_cache_lock:
+        _employee_embeddings_cache.clear()
     logger.info("Employee embeddings cache cleared")
+
+
+def _load_persistent_embeddings_cache():
+    """
+    Load previously computed embeddings from disk into memory so the
+    server does NOT need to re-encode every employee photo after every
+    restart - only new/changed images get (re)encoded.
+    """
+    global _employee_embeddings_cache
+    if not os.path.exists(EMBEDDINGS_CACHE_FILE):
+        return
+    try:
+        with open(EMBEDDINGS_CACHE_FILE, 'rb') as f:
+            data = pickle.load(f)
+        with _embeddings_cache_lock:
+            _employee_embeddings_cache.update(data)
+        logger.info(f"Loaded {len(data)} cached face embeddings from disk")
+    except Exception as e:
+        logger.warning(f"Could not load embeddings cache ({e}); starting fresh")
+
+
+def _save_persistent_embeddings_cache():
+    """Persist the in-memory embeddings cache to disk (atomic write)."""
+    try:
+        os.makedirs(Config.TRAINED_MODEL_FOLDER, exist_ok=True)
+        with _embeddings_cache_lock:
+            snapshot = dict(_employee_embeddings_cache)
+        tmp_path = EMBEDDINGS_CACHE_FILE + '.tmp'
+        with open(tmp_path, 'wb') as f:
+            pickle.dump(snapshot, f)
+        os.replace(tmp_path, EMBEDDINGS_CACHE_FILE)  # atomic on POSIX & Windows
+        logger.info(f"Saved {len(snapshot)} embeddings to disk cache")
+    except Exception as e:
+        logger.error(f"Could not save embeddings cache: {e}")
 
 # def get_employee_images_cached(employee_id):
 #     """
@@ -105,13 +150,32 @@ def clear_embeddings_cache():
 #     return employee_images
 
 def get_employee_embedding_cached(employee_id, img_path):
-    
+    """
+    Return the Facenet512 embedding for a single employee image.
+
+    Two-level cache:
+      1. In-memory dict  - instant, used for the life of the process.
+      2. On-disk pickle  - populated by preload_employee_embeddings() at
+         startup, so a fresh embedding only has to be computed the first
+         time an image is ever seen (or after it changes on disk).
+
+    A file's mtime is stored alongside its embedding, so replacing an
+    employee's photo automatically invalidates the stale cached entry
+    instead of silently reusing an out-of-date embedding.
+    """
     global _employee_embeddings_cache
     cache_key = f"{employee_id}_{os.path.basename(img_path)}"
-    
-    if cache_key in _employee_embeddings_cache:
-        return _employee_embeddings_cache[cache_key]
-    
+
+    try:
+        current_mtime = os.path.getmtime(img_path)
+    except OSError:
+        current_mtime = None
+
+    with _embeddings_cache_lock:
+        cached = _employee_embeddings_cache.get(cache_key)
+        if cached is not None and cached.get('mtime') == current_mtime:
+            return cached['embedding']
+
     try:
         embedding_obj = DeepFace.represent(
             img_path=img_path,
@@ -121,12 +185,112 @@ def get_employee_embedding_cached(employee_id, img_path):
         )
         if embedding_obj:
             embedding = embedding_obj[0]["embedding"]
-            _employee_embeddings_cache[cache_key] = embedding
+            with _embeddings_cache_lock:
+                _employee_embeddings_cache[cache_key] = {
+                    'embedding': embedding,
+                    'mtime': current_mtime,
+                    'employee_id': str(employee_id),
+                }
             return embedding
     except Exception as e:
         logger.error(f"Embedding error for {img_path}: {e}")
-    
+
     return None
+
+
+def preload_employee_embeddings(max_workers=8):
+    """
+    Warm the embeddings cache for every employee image under
+    Config.DATASET_FOLDER, encoding images CONCURRENTLY with a
+    ThreadPoolExecutor, and persist the result to disk.
+
+    Call this once at Flask startup (see app.py). On the very first run
+    every image has to be encoded, so it takes as long as the model needs
+    to process every photo - but in parallel instead of one-by-one. On
+    every run after that, images that haven't changed are served straight
+    from the on-disk cache (near-instant); only brand-new or modified
+    photos are actually re-encoded.
+    """
+    if DeepFace is None:
+        logger.warning("DeepFace not installed. Skipping embeddings preload.")
+        return {'total': 0, 'already_cached': 0, 'encoded': 0, 'errors': 0, 'seconds': 0.0}
+
+    start = time.time()
+
+    # 1) Load whatever was cached on disk from previous runs.
+    _load_persistent_embeddings_cache()
+
+    # 2) Discover every (employee_id, image_path) pair on disk.
+    jobs = []
+    if os.path.exists(Config.DATASET_FOLDER):
+        for employee_folder in sorted(os.listdir(Config.DATASET_FOLDER)):
+            employee_path = os.path.join(Config.DATASET_FOLDER, employee_folder)
+            if not os.path.isdir(employee_path):
+                continue
+            for fname in sorted(os.listdir(employee_path)):
+                if fname.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    jobs.append((employee_folder, os.path.join(employee_path, fname)))
+
+    total = len(jobs)
+    if total == 0:
+        logger.info("No employee images found to preload.")
+        return {'total': 0, 'already_cached': 0, 'encoded': 0, 'errors': 0, 'seconds': 0.0}
+
+    # 3) Figure out how many are already fresh, purely for reporting.
+    already_cached = 0
+    for employee_id, img_path in jobs:
+        cache_key = f"{employee_id}_{os.path.basename(img_path)}"
+        try:
+            mtime = os.path.getmtime(img_path)
+        except OSError:
+            mtime = None
+        with _embeddings_cache_lock:
+            cached = _employee_embeddings_cache.get(cache_key)
+        if cached is not None and cached.get('mtime') == mtime:
+            already_cached += 1
+
+    encoded = 0
+    errors = 0
+
+    # 4) Encode everything that still needs it, in parallel. DeepFace's
+    #    underlying TF/ONNX inference and image decoding release the GIL
+    #    for most of their work, so a thread pool gives a real wall-clock
+    #    speedup here without the cost of loading a separate model per
+    #    worker process (as a ProcessPoolExecutor would require).
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_job = {
+            executor.submit(get_employee_embedding_cached, emp_id, img_path): (emp_id, img_path)
+            for emp_id, img_path in jobs
+        }
+        for future in as_completed(future_to_job):
+            emp_id, img_path = future_to_job[future]
+            try:
+                result = future.result()
+                if result is not None:
+                    encoded += 1
+                else:
+                    errors += 1
+                    logger.warning(f"No embedding produced for {img_path}")
+            except Exception as e:
+                errors += 1
+                logger.error(f"Failed to preload embedding for {img_path}: {e}")
+
+    # 5) Persist everything to disk so the NEXT restart is instant too.
+    _save_persistent_embeddings_cache()
+
+    elapsed = time.time() - start
+    logger.info(
+        f"Embeddings preload complete: {total} images "
+        f"({already_cached} already cached, {encoded} newly encoded, "
+        f"{errors} errors) in {elapsed:.2f}s using {max_workers} workers"
+    )
+    return {
+        'total': total,
+        'already_cached': already_cached,
+        'encoded': encoded,
+        'errors': errors,
+        'seconds': round(elapsed, 2),
+    }
 
 
 def get_recognition_tolerance():
@@ -424,10 +588,22 @@ class FaceRecognitionEngine:
 
             self.save_model()
 
-            # Clear cache for this employee so new images are loaded
+            # Drop any stale cached embeddings for this employee (in case
+            # a photo was replaced) and warm the cache for their current
+            # images in parallel, then persist to disk.
             global _employee_embeddings_cache
-            if employee_id in _employee_embeddings_cache:
-                del _employee_embeddings_cache[employee_id]
+            prefix = f"{employee_id}_"
+            with _embeddings_cache_lock:
+                stale_keys = [k for k in _employee_embeddings_cache if k.startswith(prefix)]
+                for k in stale_keys:
+                    del _employee_embeddings_cache[k]
+
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                list(executor.map(
+                    lambda p: get_employee_embedding_cached(employee_id, p),
+                    image_paths
+                ))
+            _save_persistent_embeddings_cache()
 
             logger.info(f"Registered employee {employee_name} with {valid_images} valid images")
             return valid_images
@@ -617,10 +793,15 @@ class FaceRecognitionEngine:
                 import shutil
                 shutil.rmtree(employee_folder)
 
-            # Clear cache for this employee
+            # Clear all cached embeddings for this employee (keys are
+            # "{employee_id}_{filename}", not the bare employee_id).
             global _employee_embeddings_cache
-            if employee_id in _employee_embeddings_cache:
-                del _employee_embeddings_cache[employee_id]
+            prefix = f"{employee_id}_"
+            with _embeddings_cache_lock:
+                stale_keys = [k for k in _employee_embeddings_cache if k.startswith(prefix)]
+                for k in stale_keys:
+                    del _employee_embeddings_cache[k]
+            _save_persistent_embeddings_cache()
 
             self.save_model()
             return 1

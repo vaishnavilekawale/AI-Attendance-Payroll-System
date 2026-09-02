@@ -13,7 +13,7 @@ import json
 from config import config, Config
 from database import db, init_db
 from models import Admin, Employee, Attendance, Payroll, Settings, EmployeeLogin, AttendanceActivity, PayrollSettings, CompanySettings, LogoutApprovalRequest
-from ai_engine import FaceRecognitionEngine, FaceDetectionEngine, FaceCapture, train_all_employees, get_recognition_tolerance, presence_tracker
+from ai_engine import FaceRecognitionEngine, FaceDetectionEngine, FaceCapture, train_all_employees, get_recognition_tolerance, presence_tracker, preload_employee_embeddings
 from attendance import AttendanceManager
 from payroll import PayrollCalculator
 from email_service import EmailService
@@ -4094,13 +4094,25 @@ if __name__ == '__main__':
     os.makedirs(app.config['DATASET_FOLDER'], exist_ok=True)
     os.makedirs(app.config['TRAINED_MODEL_FOLDER'], exist_ok=True)
 
-    # Load face recognition model and employee face data on startup
+    # Load face recognition model and employee face data on startup.
+    # preload_employee_embeddings() encodes every employee photo in
+    # parallel (ThreadPoolExecutor) and caches the result to disk, so
+    # every restart after the first is near-instant.
     print("\n" + "=" * 50)
     print("🔍 Loading face recognition model and employee face data...")
     print("=" * 50)
     recognizer = get_face_recognizer()
     logger.info(f"Face recognition engine initialized with {len(recognizer.known_face_ids)} registered employees")
     print(f"✅ Face recognition loaded: {len(recognizer.known_face_ids)} employees registered")
+
+    embed_stats = preload_employee_embeddings(max_workers=8)
+    print(
+        f"✅ Face embeddings ready: {embed_stats['total']} image(s) "
+        f"| {embed_stats['already_cached']} from disk cache "
+        f"| {embed_stats['encoded']} newly encoded "
+        f"| {embed_stats['errors']} error(s) "
+        f"| {embed_stats['seconds']}s"
+    )
     print("=" * 50 + "\n")
 
     # Use explicit variables so the printed URL always matches the actual
