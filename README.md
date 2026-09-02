@@ -174,7 +174,7 @@ attendance_ai/
 ### Step 1: Clone the Project
 
 ```bash
-git clone https://github.com/<your-username>/attendance_ai.git
+git clone https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System
 cd attendance_ai
 ```
 
