@@ -168,6 +168,46 @@ def is_payroll_eligible(employee, month, year):
     )
 
 
+# ============================================================
+# APPROVALS DATE-FILTER HELPER FUNCTIONS
+# ============================================================
+# Manager/Admin Approvals pages default to showing only TODAY's
+# requests, with an optional ?date=YYYY-MM-DD query param to view a
+# different day. Request/attendance timestamps are stored as naive UTC
+# (datetime.utcnow()) but displayed to users in IST elsewhere on these
+# pages (see the `created_at_ist` conversion in manager_approvals /
+# admin_approvals below) - these helpers keep the "which day is this
+# record on" check consistent with that same IST conversion.
+
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
+
+def parse_approvals_filter_date():
+    """
+    Read the `date` query parameter (format 'YYYY-MM-DD') used by the
+    Manager/Admin Approvals pages. Defaults to today when the parameter is
+    missing, blank, or not a valid date, so the pages always load safely.
+    """
+    raw_value = request.args.get('date', '').strip()
+    if not raw_value:
+        return date.today()
+    try:
+        return datetime.strptime(raw_value, '%Y-%m-%d').date()
+    except ValueError:
+        return date.today()
+
+
+def matches_ist_date(utc_dt, selected_date):
+    """
+    True if a naive-UTC datetime (e.g. LogoutApprovalRequest.created_at or
+    Attendance.submission_timestamp) falls on `selected_date` once shifted
+    to IST.
+    """
+    if not utc_dt:
+        return False
+    return (utc_dt + IST_OFFSET).date() == selected_date
+
+
 app = Flask(__name__)
 app.config.from_object(config['default'])
 
@@ -3401,7 +3441,10 @@ def manager_approvals():
         return redirect(url_for('employee_dashboard'))
     
     from services.approval_service import approval_service
-    
+
+    # Date filter: defaults to today, or the ?date=YYYY-MM-DD query param.
+    selected_date = parse_approvals_filter_date()
+
     # Get all logout requests for this manager
     all_requests = approval_service.get_all_requests_for_manager(employee_id)
 
@@ -3412,7 +3455,10 @@ def manager_approvals():
             approval_request.created_at_ist = (
                 approval_request.created_at + timedelta(hours=5, minutes=30)
             )
-    
+
+    # Only keep requests CREATED on the selected date
+    all_requests = [r for r in all_requests if matches_ist_date(r.created_at, selected_date)]
+
     # Separate by status
     pending_requests = [r for r in all_requests if r.status == 'pending']
     approved_requests = [r for r in all_requests if r.status == 'approved']
@@ -3420,12 +3466,24 @@ def manager_approvals():
     
     # Get pending manual attendance requests for this manager's department
     pending_manual_attendance = approval_service.get_pending_manual_attendance_requests(manager_id=employee_id, admin_view=False)
+    pending_manual_attendance = [
+        r for r in pending_manual_attendance
+        if matches_ist_date(r.submission_timestamp, selected_date)
+    ]
 
     # Get already-approved/rejected manual attendance requests so rejection
     # remarks are visible in a history table on this dashboard.
     approved_manual_attendance, rejected_manual_attendance = approval_service.get_processed_manual_attendance_requests(
         manager_id=employee_id, admin_view=False
     )
+    approved_manual_attendance = [
+        r for r in approved_manual_attendance
+        if matches_ist_date(r.submission_timestamp, selected_date)
+    ]
+    rejected_manual_attendance = [
+        r for r in rejected_manual_attendance
+        if matches_ist_date(r.submission_timestamp, selected_date)
+    ]
     
     return render_template('manager_approvals.html',
                          pending_requests=pending_requests,
@@ -3434,7 +3492,9 @@ def manager_approvals():
                          pending_manual_attendance=pending_manual_attendance,
                          approved_manual_attendance=approved_manual_attendance,
                          rejected_manual_attendance=rejected_manual_attendance,
-                         manager=employee)
+                         manager=employee,
+                         selected_date=selected_date,
+                         today=date.today())
 
 @app.route('/manager/approve-logout/<int:request_id>', methods=['POST'])
 @login_required
@@ -3881,6 +3941,9 @@ def admin_approvals():
     
     from services.approval_service import approval_service
     
+    # Date filter: defaults to today, or the ?date=YYYY-MM-DD query param.
+    selected_date = parse_approvals_filter_date()
+
     # Get all requests across all managers/departments
     all_requests = approval_service.get_all_requests_for_admin()
 
@@ -3891,6 +3954,9 @@ def admin_approvals():
             approval_request.created_at_ist = (
                 approval_request.created_at + timedelta(hours=5, minutes=30)
             )
+
+    # Only keep requests CREATED on the selected date
+    all_requests = [r for r in all_requests if matches_ist_date(r.created_at, selected_date)]
     
     # Filter to show ONLY Manager requests in top sections (employee.designation == 'Manager')
     manager_requests = [r for r in all_requests if r.employee.designation == 'Manager']
@@ -3912,18 +3978,20 @@ def admin_approvals():
     # ============================================================
     approval_history = [r for r in all_requests if r.status in ('approved', 'rejected')]
     
-    # Get ALL attendance records for ALL active employees (all departments)
-    # REQUIREMENT 3: Removed the 7-day limit - now shows ALL attendance records
-    today = date.today()
+    # Get attendance records for ALL active employees, restricted to the
+    # SELECTED date. This used to have no date restriction at all (see the
+    # old REQUIREMENT 3 note) and could return the entire attendance
+    # history in a single page load - now it defaults to just today.
     
     # Get all active employees (not just managers)
     all_active_employees = Employee.query.filter_by(status='active').all()
     all_employee_ids = [emp.id for emp in all_active_employees]
     
-    # Get ALL attendance records for all active employees (no date restriction)
+    # Get attendance records for all active employees on the selected date
     week_attendance = Attendance.query.filter(
-        Attendance.employee_id.in_(all_employee_ids)
-    ).order_by(Attendance.date.desc(), Attendance.employee_id).all()
+        Attendance.employee_id.in_(all_employee_ids),
+        Attendance.date == selected_date
+    ).order_by(Attendance.employee_id).all()
     
     # Add display_out_time for UI
     am, _, _, _ = get_services()
@@ -3932,12 +4000,24 @@ def admin_approvals():
     
     # Get pending manual attendance requests for admin view (all departments)
     pending_manual_attendance = approval_service.get_pending_manual_attendance_requests(admin_view=True)
+    pending_manual_attendance = [
+        r for r in pending_manual_attendance
+        if matches_ist_date(r.submission_timestamp, selected_date)
+    ]
 
     # Get already-approved/rejected manual attendance requests (all departments)
     # so rejection remarks are visible in a history table on this dashboard.
     approved_manual_attendance, rejected_manual_attendance = approval_service.get_processed_manual_attendance_requests(
         admin_view=True
     )
+    approved_manual_attendance = [
+        r for r in approved_manual_attendance
+        if matches_ist_date(r.submission_timestamp, selected_date)
+    ]
+    rejected_manual_attendance = [
+        r for r in rejected_manual_attendance
+        if matches_ist_date(r.submission_timestamp, selected_date)
+    ]
     
     return render_template('admin_approvals.html',
                          pending_requests=pending_requests,
@@ -3948,7 +4028,9 @@ def admin_approvals():
                          week_attendance=week_attendance,
                          pending_manual_attendance=pending_manual_attendance,
                          approved_manual_attendance=approved_manual_attendance,
-                         rejected_manual_attendance=rejected_manual_attendance)
+                         rejected_manual_attendance=rejected_manual_attendance,
+                         selected_date=selected_date,
+                         today=date.today())
 
 @app.route('/admin/approve-logout/<int:request_id>', methods=['POST'])
 @login_required
