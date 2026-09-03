@@ -634,54 +634,57 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="alert alert-info">
-                        <i class="bi bi-info-circle"></i> 
-                        Current face images: <strong>{{ current_face_images if current_face_images is defined else 0 }}</strong>
-                        Required: <strong>{{ min_face_images if min_face_images is defined else 20 }}</strong>
-                        {% if remaining_images is defined and remaining_images > 0 %}
-                        <br>Capturing <strong>{{ remaining_images }}</strong> additional images.
-                        {% elif remaining_images is defined and remaining_images == 0 %}
-                        <br>Employee already has sufficient face images.
-                        {% endif %}
+                    <!-- This banner is refreshed dynamically from /api/face-dataset-status,
+                         it is never left as a static server-rendered value. -->
+                    <div class="alert alert-info" id="faceStatusAlert">
+                        <i class="bi bi-info-circle"></i>
+                        Current face images: <strong id="faceStatusCount">{{ current_face_images if current_face_images is defined else 0 }}</strong>
+                        Required: <strong id="faceStatusRequired">{{ min_face_images if min_face_images is defined else 20 }}</strong>
+                        <br id="faceStatusRemainingBr">
+                        <span id="faceStatusRemainingText"></span>
                     </div>
-                    
-                    {% if remaining_images is defined and remaining_images > 0 %}
-                    <div class="mb-3">
+
+                    <div class="mb-3" id="captureSection">
                         <label class="form-label">Number of Images to Capture</label>
-                        <input type="number" class="form-control" id="numImages" value="{{ remaining_images }}" min="1" max="{{ remaining_images }}" readonly data-remaining="{{ remaining_images }}">
-                        <small class="text-muted">System will capture {{ remaining_images }} remaining images to reach {{ min_face_images if min_face_images is defined else 20 }} total</small>
+                        <input type="number" class="form-control" id="numImages" value="{{ remaining_images if remaining_images is defined else 20 }}" min="1" readonly data-remaining="{{ remaining_images if remaining_images is defined else 20 }}">
+                        <small class="text-muted" id="captureHelpText">System will capture the remaining images needed to reach the required total</small>
                     </div>
-                    
+
                     <div class="video-container mb-3" id="videoContainer" style="display: none;">
                         <video id="webcam" autoplay playsinline style="width: 100%; border-radius: 10px;"></video>
                     </div>
-                    
+
                     <div class="text-center mb-3">
                         <button type="button" class="btn btn-primary" id="startCameraBtn">
                             <i class="bi bi-camera-video"></i> Start Camera
                         </button>
-                        <button type="button" class="btn btn-success" id="captureBtn" style="display: none;">
+                        <button type="button" class="btn btn-success" id="captureBtn" style="display: none;" disabled>
                             <i class="bi bi-camera"></i> Capture Images
                         </button>
                         <button type="button" class="btn btn-danger" id="stopCameraBtn" style="display: none;">
                             <i class="bi bi-stop-circle"></i> Stop
                         </button>
                     </div>
-                    
+
                     <div class="progress mb-3" style="display: none;" id="progressContainer">
                         <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%">0 / 0</div>
                     </div>
-                    
-                    <div class="alert alert-info">
+
+                    <div class="alert alert-info" id="captureInstructions">
                         <i class="bi bi-info-circle"></i> Click "Start Camera" to open webcam. Ensure good lighting and face is clearly visible. The system will automatically capture images.
                     </div>
-                    {% else %}
-                    <div class="alert alert-success">
-                        <i class="bi bi-check-circle"></i> Employee already has {{ current_face_images if current_face_images is defined else 0 }} face images. No additional capture needed.
+
+                    <!-- Shown instead of the capture controls once the dataset is
+                         complete/trained. Hidden again automatically if the dataset
+                         folder is emptied/deleted and re-checked. -->
+                    <div class="alert alert-success" id="sufficientAlert" style="display: none;">
+                        <i class="bi bi-check-circle"></i> <span id="sufficientAlertText"></span>
                     </div>
-                    {% endif %}
                 </div>
                 <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" id="refreshStatusBtn">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh Status
+                    </button>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
@@ -693,64 +696,195 @@
             if (faceModalElement) {
                 var faceModal = new bootstrap.Modal(faceModalElement);
                 faceModal.show();
-                
+
                 // Only initialize webcam logic if modal exists
+                const employeeId = {{ employee.id | tojson }};
+                const STATUS_URL = '/api/face-dataset-status/' + employeeId;
+                const POLL_INTERVAL_MS = 5000; // periodically re-check in case the
+                                                // dataset folder is deleted on the
+                                                // server while this page is open
+
                 let video = document.getElementById('webcam');
                 let stream = null;
                 let capturing = false;
                 let capturedCount = 0;
-                let numImages = parseInt(document.getElementById('numImages').value) || 20;
-                const employeeId = {{ employee.id | tojson }};
-                
-                document.getElementById('startCameraBtn').addEventListener('click', async function() {
+                let numImages = 0;
+                let pollTimer = null;
+
+                const startCameraBtn = document.getElementById('startCameraBtn');
+                const captureBtn = document.getElementById('captureBtn');
+                const stopCameraBtn = document.getElementById('stopCameraBtn');
+                const captureSection = document.getElementById('captureSection');
+                const captureInstructions = document.getElementById('captureInstructions');
+                const sufficientAlert = document.getElementById('sufficientAlert');
+                const sufficientAlertText = document.getElementById('sufficientAlertText');
+                const faceStatusCount = document.getElementById('faceStatusCount');
+                const faceStatusRequired = document.getElementById('faceStatusRequired');
+                const faceStatusRemainingText = document.getElementById('faceStatusRemainingText');
+                const numImagesInput = document.getElementById('numImages');
+                const captureHelpText = document.getElementById('captureHelpText');
+
+                // Applies a freshly-fetched status object to the UI: enables or
+                // disables capture, and switches between the "capture" view and
+                // the "dataset complete" view. This is the single source of truth -
+                // it is called on init, after every capture/training action, and
+                // on a timer, so a manually cleared dataset folder is detected
+                // and the Capture button re-enabled without requiring a page reload.
+                function applyStatus(status) {
+                    faceStatusCount.textContent = status.count;
+                    faceStatusRequired.textContent = status.required;
+
+                    if (status.can_capture) {
+                        const remaining = Math.max(0, status.required - status.count);
+                        faceStatusRemainingText.textContent = 'Capturing ' + remaining + ' additional image(s).';
+                        numImagesInput.value = remaining;
+                        numImagesInput.max = remaining;
+                        numImagesInput.setAttribute('data-remaining', remaining);
+                        captureHelpText.textContent = 'System will capture ' + remaining + ' remaining image(s) to reach ' + status.required + ' total';
+
+                        captureSection.style.display = 'block';
+                        captureInstructions.style.display = 'block';
+                        sufficientAlert.style.display = 'none';
+
+                        // Only re-enable "Start Camera"/"Capture" if we are not
+                        // already mid-capture and the camera isn't already running.
+                        if (!capturing) {
+                            if (stream) {
+                                captureBtn.style.display = 'inline-block';
+                                captureBtn.disabled = false;
+                            } else {
+                                startCameraBtn.style.display = 'inline-block';
+                                startCameraBtn.disabled = false;
+                                captureBtn.style.display = 'none';
+                            }
+                        }
+                    } else {
+                        faceStatusRemainingText.textContent = status.is_trained
+                            ? 'Employee already has sufficient face images and the model is trained.'
+                            : 'Employee already has sufficient face images.';
+
+                        sufficientAlertText.textContent = 'Employee already has ' + status.count + ' face images' +
+                            (status.is_trained ? ' and the recognition model is trained.' : '.') +
+                            ' No additional capture needed.';
+
+                        // Fully lock out capture: hide the controls and disable the
+                        // buttons so a stray click (or an in-flight request) can't
+                        // sneak past the 20-image / already-trained limit.
+                        captureSection.style.display = 'none';
+                        captureInstructions.style.display = 'none';
+                        sufficientAlert.style.display = 'block';
+
+                        startCameraBtn.disabled = true;
+                        captureBtn.disabled = true;
+
+                        // If the camera happens to be running, stop it - there is
+                        // nothing left to capture.
+                        if (stream && !capturing) {
+                            stream.getTracks().forEach(track => track.stop());
+                            stream = null;
+                            video.srcObject = null;
+                            document.getElementById('videoContainer').style.display = 'none';
+                            startCameraBtn.style.display = 'inline-block';
+                            captureBtn.style.display = 'none';
+                            stopCameraBtn.style.display = 'none';
+                        }
+                    }
+                }
+
+                function refreshStatus() {
+                    return fetch(STATUS_URL)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                applyStatus(data);
+                            }
+                            return data;
+                        })
+                        .catch(err => {
+                            console.error('Could not refresh face dataset status:', err);
+                        });
+                }
+
+                // Check dataset state as soon as the modal initializes, instead of
+                // trusting only the values rendered when the page was generated.
+                refreshStatus();
+
+                // Keep polling while the modal is open so an admin deleting the
+                // dataset folder on the server is picked up dynamically, and the
+                // Capture Image button is re-enabled automatically.
+                pollTimer = setInterval(refreshStatus, POLL_INTERVAL_MS);
+                faceModalElement.addEventListener('hidden.bs.modal', function() {
+                    if (pollTimer) {
+                        clearInterval(pollTimer);
+                        pollTimer = null;
+                    }
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                        stream = null;
+                    }
+                });
+
+                document.getElementById('refreshStatusBtn').addEventListener('click', function() {
+                    refreshStatus();
+                });
+
+                startCameraBtn.addEventListener('click', async function() {
+                    if (startCameraBtn.disabled) return;
                     try {
                         stream = await navigator.mediaDevices.getUserMedia({ video: true });
                         video.srcObject = stream;
                         document.getElementById('videoContainer').style.display = 'block';
-                        document.getElementById('startCameraBtn').style.display = 'none';
-                        document.getElementById('captureBtn').style.display = 'inline-block';
-                        document.getElementById('stopCameraBtn').style.display = 'inline-block';
+                        startCameraBtn.style.display = 'none';
+                        captureBtn.style.display = 'inline-block';
+                        captureBtn.disabled = false;
+                        stopCameraBtn.style.display = 'inline-block';
                     } catch (err) {
                         alert('Could not access webcam: ' + err.message);
                     }
                 });
-                
-                document.getElementById('captureBtn').addEventListener('click', function() {
-                    if (capturing) return;
-                    
-                    numImages = parseInt(document.getElementById('numImages').value);
+
+                captureBtn.addEventListener('click', function() {
+                    if (capturing || captureBtn.disabled) return;
+
+                    numImages = parseInt(numImagesInput.value);
+                    if (!numImages || numImages <= 0) {
+                        // Re-check with the server before assuming there's nothing
+                        // to do - the folder may have just been reset.
+                        refreshStatus();
+                        return;
+                    }
+
                     capturedCount = 0;
                     capturing = true;
-                    
+
                     document.getElementById('progressContainer').style.display = 'block';
-                    document.getElementById('captureBtn').disabled = true;
-                    
+                    captureBtn.disabled = true;
+
                     captureImages();
                 });
-                
-                document.getElementById('stopCameraBtn').addEventListener('click', function() {
+
+                stopCameraBtn.addEventListener('click', function() {
                     if (stream) {
                         stream.getTracks().forEach(track => track.stop());
                         stream = null;
                     }
                     document.getElementById('videoContainer').style.display = 'none';
-                    document.getElementById('startCameraBtn').style.display = 'inline-block';
-                    document.getElementById('captureBtn').style.display = 'none';
-                    document.getElementById('stopCameraBtn').style.display = 'none';
+                    startCameraBtn.style.display = 'inline-block';
+                    captureBtn.style.display = 'none';
+                    stopCameraBtn.style.display = 'none';
                     capturing = false;
                 });
-                
+
                 function captureImages() {
                     if (capturedCount >= numImages) {
                         capturing = false;
-                        document.getElementById('captureBtn').disabled = false;
-                        
+
                         // Train the face recognition model after capturing all images
                         document.getElementById('progressBar').textContent = 'Training model...';
-                        
+
                         const trainFormData = new FormData();
                         trainFormData.append('employee_id', employeeId);
-                        
+
                         fetch('/api/train-face-model', {
                             method: 'POST',
                             body: trainFormData
@@ -766,22 +900,28 @@
                         })
                         .catch(err => {
                             alert('Images captured but training error: ' + err.message);
+                        })
+                        .finally(function() {
+                            // Re-check dataset/training status so the button state
+                            // reflects the server's real record of it (limit
+                            // reached / trained -> capture stays disabled).
+                            refreshStatus();
                         });
-                        
+
                         return;
                     }
-                    
+
                     const canvas = document.createElement('canvas');
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(video, 0, 0);
-                    
+
                     canvas.toBlob(function(blob) {
                         const formData = new FormData();
                         formData.append('image', blob);
                         formData.append('employee_id', employeeId);
-                        
+
                         fetch('/api/upload-face-image', {
                             method: 'POST',
                             body: formData
@@ -792,19 +932,23 @@
                                 capturedCount++;
                                 document.getElementById('progressBar').style.width = (capturedCount / numImages * 100) + '%';
                                 document.getElementById('progressBar').textContent = capturedCount + ' / ' + numImages;
-                                
+
                                 // Capture next image after a short delay
                                 setTimeout(captureImages, 500);
                             } else {
+                                // Server refused (limit already reached, employee
+                                // not found, etc.) - stop and resync the UI with
+                                // the server's live status.
                                 alert('Error capturing image: ' + data.message);
                                 capturing = false;
-                                document.getElementById('captureBtn').disabled = false;
+                                captureBtn.disabled = false;
+                                refreshStatus();
                             }
                         })
                         .catch(err => {
                             console.error('Error:', err);
                             capturing = false;
-                            document.getElementById('captureBtn').disabled = false;
+                            captureBtn.disabled = false;
                         });
                     }, 'image/jpeg', 0.8);
                 }

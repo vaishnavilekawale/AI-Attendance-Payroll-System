@@ -36,8 +36,9 @@ class AttendanceCalculator:
         After manager approval, the OUT activity (23:59) is created, so this
         correctly calculates hours without double-counting attendance.out_time.
         
-        IMPORTANT: attendance.out_time is NOT used for calculation when OUT
-        activities exist. This prevents double-counting after approval.
+        IMPORTANT: When attendance.in_time and attendance.out_time are both set
+        (e.g., after admin edit), use them directly to preserve cross-day datetime
+        information that AttendanceActivity cannot store (it only stores time + date).
         
         Args:
             attendance: Attendance object with in_time and date
@@ -48,6 +49,13 @@ class AttendanceCalculator:
         if not attendance.in_time:
             return 0.0
         
+        # If both in_time and out_time are set, use them directly
+        # This handles admin edits with cross-day shifts correctly
+        if attendance.in_time and attendance.out_time:
+            total_seconds = (attendance.out_time - attendance.in_time).total_seconds()
+            result = round(total_seconds / 3600, 2)
+            return result
+        
         # Get all activities for this employee on this date
         activities = AttendanceActivity.query.filter_by(
             employee_id=attendance.employee_id,
@@ -55,11 +63,7 @@ class AttendanceCalculator:
         ).order_by(AttendanceActivity.activity_time).all()
         
         if not activities:
-            # No activities recorded, use simple calculation from in_time to out_time
-            if attendance.out_time:
-                total_seconds = (attendance.out_time - attendance.in_time).total_seconds()
-                result = round(total_seconds / 3600, 2)
-                return result
+            # No activities recorded and no out_time, return 0
             return 0.0
         
         # Calculate working hours from IN-OUT pairs
@@ -75,40 +79,13 @@ class AttendanceCalculator:
             elif activity.action == 'OUT' and in_time:
                 # Calculate duration for this IN-OUT pair
                 out_datetime = datetime.combine(attendance.date, activity.activity_time)
-                # Handle case where OUT is next day (shouldn't happen but defensive)
-                if out_datetime < in_datetime:
+                # Handle case where OUT is next day (cross-day shift)
+                if out_datetime < in_time:
                     out_datetime = out_datetime + timedelta(days=1)
                 duration = (out_datetime - in_time).total_seconds() / 3600
                 pair_count += 1
                 total_hours += duration
                 in_time = None
-        
-        # Fallback: If no valid IN→OUT pairs were found from activities, but attendance.in_time and
-        # attendance.out_time both exist, use them for calculation. This handles cases where activities
-        # are incomplete (e.g., only IN activity recorded but OUT is missing from AttendanceActivity).
-        # IMPORTANT: This is the ONLY source of truth when fallback is used. Do not add this duration again.
-        fallback_used = False
-        if total_hours == 0.0 and attendance.in_time and attendance.out_time:
-            logger.warning(
-                f"Activities found but no valid IN→OUT pair; falling back to Attendance.in_time → Attendance.out_time"
-            )
-            total_seconds = (attendance.out_time - attendance.in_time).total_seconds()
-            fallback_hours = total_seconds / 3600
-            logger.info(
-                f"Fallback calculation: {attendance.in_time} → {attendance.out_time} = {fallback_hours:.2f} hours"
-            )
-            total_hours = fallback_hours
-            fallback_used = True
-        
-        # If last activity was IN and no OUT activity exists, use attendance.out_time if available
-        # This handles the case where employee is currently checked IN (no OUT activity yet)
-        # After manager approval, OUT activity exists, so this won't run (prevents double-counting)
-        # IMPORTANT: Do NOT run this if fallback was already used to avoid double-counting
-        if not fallback_used and in_time and attendance.out_time:
-            out_datetime = attendance.out_time
-            duration = (out_datetime - in_time).total_seconds() / 3600
-            pair_count += 1
-            total_hours += duration
         
         result = round(total_hours, 2)
         return result

@@ -3382,41 +3382,140 @@ def mark_manual_attendance():
 
     return jsonify(result)
 
+def _count_dataset_images(folder):
+    """Recount images straight from disk. Never trust a cached DB value -
+    this is what lets the system notice a dataset folder that an admin
+    emptied or deleted by hand, without any special "reset" flag."""
+    if not os.path.exists(folder):
+        return 0
+    return len([f for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+
+
+def _get_required_face_image_count():
+    """Admin-configurable capture/training target, falling back to the
+    Config default (20) if Settings hasn't been initialized yet."""
+    settings = Settings.get_settings()
+    if settings and settings.min_face_images_required:
+        return settings.min_face_images_required
+    return Config.MIN_FACE_IMAGES_REQUIRED
+
+
+@app.route('/api/face-dataset-status/<int:employee_id>', methods=['GET'])
+@login_required
+def face_dataset_status(employee_id):
+    """Live status of an employee's face dataset, read fresh from disk on
+    every call. The frontend polls/calls this on page load and before each
+    capture attempt so it can dynamically enable/disable the Capture button -
+    including automatically re-enabling it if an admin manually deleted the
+    dataset folder on the server."""
+    employee = Employee.query.filter_by(id=employee_id).first()
+    if not employee:
+        return jsonify({'success': False, 'message': 'Employee not found'}), 404
+
+    required_count = _get_required_face_image_count()
+    dataset_folder = os.path.join(Config.DATASET_FOLDER, str(employee.id))
+    current_count = _count_dataset_images(dataset_folder)
+
+    # Keep the cached DB counter in sync with reality.
+    if employee.face_images_count != current_count:
+        employee.face_images_count = current_count
+        db.session.commit()
+
+    recognizer = get_face_recognizer()
+    is_trained = str(employee.id) in recognizer.known_face_ids
+
+    return jsonify({
+        'success': True,
+        'employee_id': employee.id,
+        'count': current_count,
+        'required': required_count,
+        'remaining': max(0, required_count - current_count),
+        'is_trained': is_trained,
+        # Capture is only allowed while the live on-disk count is below the
+        # required target. If the folder is emptied/deleted, count drops to
+        # 0 and this flips back to True automatically.
+        'can_capture': current_count < required_count
+    })
+
+
 @app.route('/api/upload-face-image', methods=['POST'])
 @login_required
 def upload_face_image():
-    """API endpoint to upload face image for training"""
+    """API endpoint to upload a single face image into an employee's
+    training dataset. Re-checks the live image count on disk on every
+    request (rather than trusting a cached DB value or the frontend), so a
+    manually cleared dataset folder is picked up immediately and a full
+    dataset can't be exceeded by a stray/duplicate request."""
     if 'image' not in request.files:
-        return jsonify({'success': False, 'message': 'No image file provided'})
-    
+        return jsonify({'success': False, 'message': 'No image file provided'}), 400
+
     file = request.files['image']
     employee_id = request.form.get('employee_id')
-    
+
+    if not employee_id:
+        return jsonify({'success': False, 'message': 'Employee ID required'}), 400
+
     if file.filename == '':
-        return jsonify({'success': False, 'message': 'No file selected'})
-    
+        return jsonify({'success': False, 'message': 'No file selected'}), 400
+
     try:
-        # Create dataset folder for employee if it doesn't exist
-        dataset_folder = os.path.join(Config.DATASET_FOLDER, employee_id)
-        os.makedirs(dataset_folder, exist_ok=True)
-        
+        employee = Employee.query.filter_by(id=int(employee_id)).first()
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': 'Invalid employee ID'}), 400
+
+    if not employee:
+        return jsonify({'success': False, 'message': 'Employee not found'}), 404
+
+    required_count = _get_required_face_image_count()
+
+    # Create dataset folder for employee if it doesn't exist (also handles
+    # the case where it was deleted entirely - it's simply recreated).
+    dataset_folder = os.path.join(Config.DATASET_FOLDER, str(employee.id))
+    os.makedirs(dataset_folder, exist_ok=True)
+
+    current_count = _count_dataset_images(dataset_folder)
+    recognizer = get_face_recognizer()
+    is_trained = str(employee.id) in recognizer.known_face_ids
+
+    # Hard stop once the required count is already on disk. This also
+    # blocks re-capturing on top of an already-trained, still-intact
+    # dataset. If the folder was reset by an admin, current_count will be
+    # below required_count and this check simply won't trigger.
+    if current_count >= required_count:
+        employee.face_images_count = current_count
+        db.session.commit()
+        return jsonify({
+            'success': False,
+            'message': f'Capture limit reached ({current_count}/{required_count} images already saved).',
+            'limit_reached': True,
+            'count': current_count,
+            'required': required_count,
+            'is_trained': is_trained
+        }), 409
+
+    try:
         # Save image with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{timestamp}.jpg"
         file_path = os.path.join(dataset_folder, filename)
         file.save(file_path)
-        
-        # Update employee face_images_count
-        employee = Employee.query.filter_by(id=int(employee_id)).first()
-        if employee:
-            # Count actual images in the folder
-            image_count = len([f for f in os.listdir(dataset_folder) if f.endswith(('.jpg', '.jpeg', '.png'))])
-            employee.face_images_count = image_count
-            db.session.commit()
-        
-        return jsonify({'success': True, 'message': 'Image saved successfully', 'count': employee.face_images_count if employee else 0})
+
+        # Recount from disk (not count + 1) to stay correct even under
+        # concurrent uploads.
+        new_count = _count_dataset_images(dataset_folder)
+        employee.face_images_count = new_count
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': 'Image saved successfully',
+            'count': new_count,
+            'required': required_count,
+            'limit_reached': new_count >= required_count,
+            'is_trained': is_trained
+        })
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        return jsonify({'success': False, 'message': str(e)}), 500
     
 @app.route("/test")
 def test():
@@ -3456,34 +3555,21 @@ def manager_approvals():
                 approval_request.created_at + timedelta(hours=5, minutes=30)
             )
 
-    # Only keep requests CREATED on the selected date
-    all_requests = [r for r in all_requests if matches_ist_date(r.created_at, selected_date)]
-
-    # Separate by status
+    # Separate by status (no date filter - show all requests)
     pending_requests = [r for r in all_requests if r.status == 'pending']
     approved_requests = [r for r in all_requests if r.status == 'approved']
     rejected_requests = [r for r in all_requests if r.status == 'rejected']
     
     # Get pending manual attendance requests for this manager's department
+    # No date filter: pending requests should be visible regardless of submission date
     pending_manual_attendance = approval_service.get_pending_manual_attendance_requests(manager_id=employee_id, admin_view=False)
-    pending_manual_attendance = [
-        r for r in pending_manual_attendance
-        if matches_ist_date(r.submission_timestamp, selected_date)
-    ]
 
     # Get already-approved/rejected manual attendance requests so rejection
     # remarks are visible in a history table on this dashboard.
+    # No date filter: show all processed requests
     approved_manual_attendance, rejected_manual_attendance = approval_service.get_processed_manual_attendance_requests(
         manager_id=employee_id, admin_view=False
     )
-    approved_manual_attendance = [
-        r for r in approved_manual_attendance
-        if matches_ist_date(r.submission_timestamp, selected_date)
-    ]
-    rejected_manual_attendance = [
-        r for r in rejected_manual_attendance
-        if matches_ist_date(r.submission_timestamp, selected_date)
-    ]
     
     return render_template('manager_approvals.html',
                          pending_requests=pending_requests,
@@ -3860,38 +3946,10 @@ def admin_edit_attendance(attendance_id):
             logger.info(f"NEW IN (parsed): {attendance.in_time}")
             logger.info(f"NEW OUT (parsed): {attendance.out_time}")
             
-            # Sync AttendanceActivity records with Attendance IN/OUT changes
-            from models import AttendanceActivity
-            activities = AttendanceActivity.query.filter_by(
-                employee_id=attendance.employee_id,
-                attendance_date=attendance.date
-            ).order_by(AttendanceActivity.activity_time).all()
-            
-            logger.info(f"Found {len(activities)} activities for sync")
-            
-            # Update first IN activity if IN time was edited
-            if in_time_str and activities:
-                first_in_activity = None
-                for act in activities:
-                    if act.action == 'IN':
-                        first_in_activity = act
-                        break
-                if first_in_activity:
-                    old_activity_time = first_in_activity.activity_time
-                    first_in_activity.activity_time = attendance.in_time.time()
-                    logger.info(f"Updated first IN activity: {old_activity_time} -> {first_in_activity.activity_time}")
-            
-            # Update last OUT activity if OUT time was edited
-            if out_time_str and activities:
-                last_out_activity = None
-                for act in reversed(activities):
-                    if act.action == 'OUT':
-                        last_out_activity = act
-                        break
-                if last_out_activity:
-                    old_activity_time = last_out_activity.activity_time
-                    last_out_activity.activity_time = attendance.out_time.time()
-                    logger.info(f"Updated last OUT activity: {old_activity_time} -> {last_out_activity.activity_time}")
+            # Skip AttendanceActivity sync when admin edits attendance
+            # The calculation will use attendance.in_time and attendance.out_time directly
+            # This preserves cross-day datetime information that AttendanceActivity cannot store
+            # (AttendanceActivity only stores time + attendance_date, not full datetime)
             
             # Clear any rejected logout approval request when admin manually edits attendance
             # Admin's manual edit overrides the automatic rejection
@@ -3903,6 +3961,8 @@ def admin_edit_attendance(attendance_id):
             if rejected_request:
                 logger.info(f"Clearing rejected logout approval request ID: {rejected_request.id} for Attendance ID: {attendance.id}")
                 db.session.delete(rejected_request)
+                # Flush the deletion so has_rejected_approval doesn't find it during recalculation
+                db.session.flush()
             
             # Recalculate attendance fields
             from attendance import AttendanceManager
@@ -3955,10 +4015,8 @@ def admin_approvals():
                 approval_request.created_at + timedelta(hours=5, minutes=30)
             )
 
-    # Only keep requests CREATED on the selected date
-    all_requests = [r for r in all_requests if matches_ist_date(r.created_at, selected_date)]
-    
     # Filter to show ONLY Manager requests in top sections (employee.designation == 'Manager')
+    # No date filter: show all manager requests
     manager_requests = [r for r in all_requests if r.employee.designation == 'Manager']
     
     # Separate by status (only Manager requests)
@@ -3968,6 +4026,7 @@ def admin_approvals():
     
     # Get employee approval history (all approval requests for normal employees)
     # This shows which manager handled which employee's approval
+    # No date filter: show all employee approval history
     employee_approval_history = [r for r in all_requests if r.employee.designation != 'Manager']
     
     # ============================================================
@@ -3975,23 +4034,21 @@ def admin_approvals():
     # Combined approval history showing ALL completed actions
     # (approved/rejected) across both managers and employees.
     # This is displayed in the 'Approval History' section below.
+    # No date filter: show all approval history
     # ============================================================
     approval_history = [r for r in all_requests if r.status in ('approved', 'rejected')]
     
-    # Get attendance records for ALL active employees, restricted to the
-    # SELECTED date. This used to have no date restriction at all (see the
-    # old REQUIREMENT 3 note) and could return the entire attendance
-    # history in a single page load - now it defaults to just today.
+    # Get attendance records for ALL active employees, across ALL dates
+    # This is for the "Attendance Records (All Employees)" section
     
     # Get all active employees (not just managers)
     all_active_employees = Employee.query.filter_by(status='active').all()
     all_employee_ids = [emp.id for emp in all_active_employees]
     
-    # Get attendance records for all active employees on the selected date
+    # Get attendance records for all active employees across all dates (no date filter)
     week_attendance = Attendance.query.filter(
-        Attendance.employee_id.in_(all_employee_ids),
-        Attendance.date == selected_date
-    ).order_by(Attendance.employee_id).all()
+        Attendance.employee_id.in_(all_employee_ids)
+    ).order_by(Attendance.date.desc(), Attendance.employee_id).all()
     
     # Add display_out_time for UI
     am, _, _, _ = get_services()
@@ -3999,25 +4056,15 @@ def admin_approvals():
         am._add_display_out_time(att, att.date)
     
     # Get pending manual attendance requests for admin view (all departments)
+    # No date filter: pending requests should be visible regardless of submission date
     pending_manual_attendance = approval_service.get_pending_manual_attendance_requests(admin_view=True)
-    pending_manual_attendance = [
-        r for r in pending_manual_attendance
-        if matches_ist_date(r.submission_timestamp, selected_date)
-    ]
 
     # Get already-approved/rejected manual attendance requests (all departments)
     # so rejection remarks are visible in a history table on this dashboard.
+    # No date filter: show all processed requests
     approved_manual_attendance, rejected_manual_attendance = approval_service.get_processed_manual_attendance_requests(
         admin_view=True
     )
-    approved_manual_attendance = [
-        r for r in approved_manual_attendance
-        if matches_ist_date(r.submission_timestamp, selected_date)
-    ]
-    rejected_manual_attendance = [
-        r for r in rejected_manual_attendance
-        if matches_ist_date(r.submission_timestamp, selected_date)
-    ]
     
     return render_template('admin_approvals.html',
                          pending_requests=pending_requests,
@@ -4125,39 +4172,75 @@ def admin_reject_logout_request(request_id):
 @app.route('/api/train-face-model', methods=['POST'])
 @login_required
 def train_face_model():
-    """API endpoint to train face recognition model for an employee"""
+    """API endpoint to train the face recognition model for an employee.
+    Re-validates the live image count on disk before training so this can
+    never be triggered against a dataset that was emptied/deleted after the
+    capture loop finished."""
     employee_id = request.form.get('employee_id')
-    
+
     if not employee_id:
-        return jsonify({'success': False, 'message': 'Employee ID required'})
-    
+        return jsonify({'success': False, 'message': 'Employee ID required'}), 400
+
     try:
         employee = Employee.query.filter_by(id=int(employee_id)).first()
-        if not employee:
-            return jsonify({'success': False, 'message': 'Employee not found'})
-        
-        # Get image paths
-        dataset_folder = os.path.join(Config.DATASET_FOLDER, employee_id)
-        if not os.path.exists(dataset_folder):
-            return jsonify({'success': False, 'message': 'No face images found for this employee'})
-        
-        image_paths = [os.path.join(dataset_folder, f) for f in os.listdir(dataset_folder) 
-                      if f.endswith(('.jpg', '.jpeg', '.png'))]
-        
-        if len(image_paths) < Config.MIN_FACE_IMAGES_REQUIRED:
-            return jsonify({'success': False, 'message': f'Need at least {Config.MIN_FACE_IMAGES_REQUIRED} images, found {len(image_paths)}'})
-        
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'message': 'Invalid employee ID'}), 400
+
+    if not employee:
+        return jsonify({'success': False, 'message': 'Employee not found'}), 404
+
+    required_count = _get_required_face_image_count()
+
+    try:
+        # Get image paths - always read fresh from disk.
+        dataset_folder = os.path.join(Config.DATASET_FOLDER, str(employee.id))
+        image_paths = [os.path.join(dataset_folder, f) for f in os.listdir(dataset_folder)
+                      if f.lower().endswith(('.jpg', '.jpeg', '.png'))] if os.path.exists(dataset_folder) else []
+
+        # Keep the cached DB counter honest too.
+        employee.face_images_count = len(image_paths)
+        db.session.commit()
+
+        if not image_paths:
+            return jsonify({
+                'success': False,
+                'message': 'No face images found for this employee',
+                'count': 0,
+                'required': required_count
+            }), 400
+
+        if len(image_paths) < required_count:
+            return jsonify({
+                'success': False,
+                'message': f'Need at least {required_count} images, found {len(image_paths)}',
+                'count': len(image_paths),
+                'required': required_count
+            }), 400
+
         # Train the model using DeepFace with global instance
         recognizer = get_face_recognizer()
         trained_count = recognizer.train_employee(str(employee.id), employee.name, image_paths)
-        
+
         if trained_count > 0:
-            return jsonify({'success': True, 'message': f'Successfully trained with {trained_count} face encodings', 'count': trained_count})
+            return jsonify({
+                'success': True,
+                'message': f'Successfully trained with {trained_count} face encodings',
+                'count': trained_count,
+                'image_count': len(image_paths),
+                'required': required_count,
+                'is_trained': True
+            })
         else:
-            return jsonify({'success': False, 'message': 'Training failed - no faces detected in images. Please ensure: 1) Face is clearly visible, 2) Good lighting, 3) Images are not blurry, 4) Try capturing new images with better conditions'})
-            
+            return jsonify({
+                'success': False,
+                'message': 'Training failed - no faces detected in images. Please ensure: 1) Face is clearly visible, 2) Good lighting, 3) Images are not blurry, 4) Try capturing new images with better conditions',
+                'count': len(image_paths),
+                'required': required_count,
+                'is_trained': False
+            }), 422
+
     except Exception as e:
-        return jsonify({'success': False, 'message': f'Training error: {str(e)}'})
+        return jsonify({'success': False, 'message': f'Training error: {str(e)}'}), 500
 
 # ==================== ERROR HANDLERS ====================
 
