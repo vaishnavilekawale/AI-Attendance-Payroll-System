@@ -140,10 +140,10 @@ def build_payslip_earnings_rows(payroll):
     Build earnings rows from saved Payroll values.
 
     Each row is a (label, earned_amount, full_amount) tuple. `earned_amount`
-    is what was actually paid for this period (already pro-rated, if the
-    period covered fewer working days than a full month). `full_amount` is
-    the employee's original/full monthly figure for that field, so a
-    prorated payslip can display both side by side - e.g.
+    is what was actually paid for this period (already pro-rated against
+    actual attendance - see compute_payroll_amounts). `full_amount` is the
+    employee's original/full monthly figure for that field, so a prorated
+    payslip can display both side by side - e.g.
     "Basic Pay: Rs. 3,846.15 (Full: Rs. 50,000.00)".
 
     `full_amount` is `None` for rows that are never prorated (Overtime
@@ -192,9 +192,11 @@ def get_month_working_days(year, month):
     Get the total number of working days in a full calendar month, using the
     same weekly-off rule as PayrollCalculator._get_working_days (Sundays are
     excluded). This represents a "full" pay period and is the denominator
-    used to pro-rate earnings when an employee's evaluation period covers
-    fewer working days than the whole month (e.g. mid-month joining, or an
-    evaluation window restricted to a handful of days).
+    used to pro-rate earnings against actual attendance (paid_days) whenever
+    an employee didn't earn a full month's worth of pay - whether because
+    the evaluation period itself was short (mid-month joining, evaluation
+    window restricted to a handful of days) or because of absences within
+    the period.
     """
     total_days = get_month_total_days(year, month)
     working_days = 0
@@ -204,23 +206,23 @@ def get_month_working_days(year, month):
     return working_days
 
 
-def get_proration_factor(working_days, full_month_working_days):
+def get_proration_factor(paid_days, full_month_working_days):
     """
-    Fraction of a full month's earnings that should be paid, based on how
-    many working days the evaluation period actually covers out of the
-    full month's working days.
+    Fraction of a full month's earnings that should actually be paid out,
+    based on how many days were actually paid for (paid_days = present days
+    + half of half-days) out of the full month's working days.
 
-    - Returns 0.0 if there are no working days to pay for.
+    - Returns 0.0 if there are no paid days (e.g. fully absent period).
     - Returns 1.0 (no proration) if the month has no working days on record
       (defensive fallback - should not normally happen).
-    - Otherwise returns working_days / full_month_working_days, capped at
-      1.0 so a period can never be paid MORE than a full month.
+    - Otherwise returns paid_days / full_month_working_days, capped at 1.0
+      so a period can never be paid MORE than a full month.
     """
-    if working_days <= 0:
+    if paid_days <= 0:
         return 0.0
     if full_month_working_days <= 0:
         return 1.0
-    return min(1.0, working_days / full_month_working_days)
+    return min(1.0, paid_days / full_month_working_days)
 
 
 def compute_payroll_amounts(
@@ -263,61 +265,62 @@ def compute_payroll_amounts(
     # ------------------------------------------------------------------
     # PRO-RATA EARNINGS SCALING
     # ------------------------------------------------------------------
-    # `working_days` is the number of working days in THIS payroll
-    # evaluation period (which may be a full month, or shorter - e.g. the
-    # employee joined mid-month, left mid-month, or the evaluation window
-    # was otherwise restricted to only a few days, such as 2).
+    # BUGFIX: earnings must be prorated against PAID_DAYS (actual
+    # attendance: present days + half of half-days), NOT against
+    # `working_days` (the length of the evaluation period). The previous
+    # implementation scaled Basic Pay/allowances by
+    # working_days / full_month_working_days, which only accounts for a
+    # short EVALUATION PERIOD (e.g. mid-month joining, or payroll run
+    # part-way through the month) - it does NOT account for the employee
+    # being absent during that period. That meant an employee who was
+    # absent for the entire evaluation window still received a
+    # proportional share of Basic Pay, which was then only partially
+    # clawed back by a flat, unrelated "Absent Deduction" setting -
+    # producing a non-zero net salary for zero attendance.
     #
-    # `full_month_working_days` is the working-day count for the ENTIRE
-    # calendar month, using the same Sunday-off rule.
-    #
-    # basic_salary and every allowance configured on the employee record
-    # are monthly figures. When the evaluation period covers fewer working
-    # days than the full month, those monthly figures must be scaled down
-    # by (working_days / full_month_working_days) so the payslip reflects
-    # only the days actually being paid for, instead of a full month's pay.
-    #
-    # This proration is entirely separate from attendance-based LOP
-    # deductions (absent/half-day deductions below) - those still deduct
-    # for absences that occur WITHIN the (possibly already shorter)
-    # evaluation period, on top of this scaling.
+    # By prorating against paid_days / full_month_working_days instead,
+    # Basic Pay and every allowance scale directly and correctly with
+    # actual attendance: 0 paid days -> 0 earnings, full attendance for
+    # the period -> full proportional earnings, partial attendance ->
+    # proportional earnings. This also correctly folds in short
+    # evaluation periods, since paid_days can never exceed working_days.
     # ------------------------------------------------------------------
     full_month_working_days = get_month_working_days(year, month)
-    proration_factor = get_proration_factor(working_days, full_month_working_days)
+    proration_factor = get_proration_factor(paid_days, full_month_working_days)
 
     raw_basic_salary = round_money(employee.basic_salary)
     basic_salary = round_money(raw_basic_salary * proration_factor)
 
     # Per Day Salary is always derived from the FULL month's basic pay and
     # the FULL month's working-day count - NOT from the (possibly much
-    # shorter) evaluation period. This keeps the daily rate used for LOP /
-    # half-day deductions and the overtime bonus stable and correct
-    # regardless of how many working days actually fall inside the
-    # evaluation window (e.g. a 2-working-day period must still use the
-    # normal monthly per-day rate, not basic_salary / 2).
+    # shorter) evaluation period. This keeps the daily rate used for the
+    # overtime bonus (and any explicit flat per-occurrence deductions
+    # below) stable and correct regardless of how many working days
+    # actually fall inside the evaluation window.
     per_day_salary = (
         round_money(raw_basic_salary / full_month_working_days)
         if full_month_working_days > 0
         else 0.0
     )
 
-    # LOP Deductions - only applied if enabled in settings
+    # LOP Deductions - only applied if enabled in settings.
+    # BUGFIX: since basic_salary/allowances are now prorated directly
+    # against paid_days, an absence is ALREADY unpaid within those
+    # figures. The old per_day_salary-based fallback here would double
+    # -charge the same absence (once via lost earnings, again via this
+    # deduction) - that fallback has been removed. An explicit flat
+    # per-occurrence penalty configured by the admin is a genuine
+    # ADDITIONAL penalty on top of lost pay, so that behavior is kept.
     absent_deduction = 0.0
-    if settings.absent_deduction_enabled:
-        if settings.absent_deduction_per_occurrence > 0:
-            absent_deduction = round_money(absent_days * settings.absent_deduction_per_occurrence)
-        else:
-            absent_deduction = round_money(absent_days * per_day_salary)
+    if settings.absent_deduction_enabled and settings.absent_deduction_per_occurrence > 0:
+        absent_deduction = round_money(absent_days * settings.absent_deduction_per_occurrence)
 
-    # Half Day Deduction is recalculated against payslip_half_days, which
-    # includes the late-mark-converted half-days on top of the actual
-    # half-day attendance count.
+    # Half Day Deduction: same reasoning - only an explicit flat
+    # per-occurrence penalty applies now, since half-days are already
+    # reflected in the paid_days-based proration above.
     half_day_deduction = 0.0
-    if settings.half_day_deduction_enabled:
-        if settings.half_day_deduction_per_occurrence > 0:
-            half_day_deduction = round_money(payslip_half_days * settings.half_day_deduction_per_occurrence)
-        else:
-            half_day_deduction = round_money(payslip_half_days * (per_day_salary / 2))
+    if settings.half_day_deduction_enabled and settings.half_day_deduction_per_occurrence > 0:
+        half_day_deduction = round_money(payslip_half_days * settings.half_day_deduction_per_occurrence)
 
     lop_deduction = round_money(absent_deduction + half_day_deduction)
 
@@ -334,10 +337,10 @@ def compute_payroll_amounts(
             overtime_hours * hourly_rate * settings.overtime_rate
         )
 
-    # Allowances - scaled by the same pro-rata factor as basic_salary above,
-    # so a restricted/short evaluation period (e.g. 2 working days out of a
-    # full month) pays a proportional slice of HRA/DA/etc. rather than the
-    # full monthly amount.
+    # Allowances - scaled by the same paid_days-based pro-rata factor as
+    # basic_salary above, so absence (or a restricted evaluation period)
+    # reduces HRA/DA/etc. proportionally rather than paying the full
+    # monthly amount regardless of attendance.
     raw_hra = round_money(getattr(employee, 'hra', 0.0))
     raw_da = round_money(getattr(employee, 'da', 0.0))
     raw_medical_allowance = round_money(getattr(employee, 'medical_allowance', 0.0))
@@ -596,7 +599,7 @@ class PayrollCalculator:
 
     def _get_working_days(self, start_date, end_date):
         """Count working days from start_date through end_date (inclusive).
-        
+
         Sundays are weekly holidays/off days and are EXCLUDED from working days.
         """
         if end_date < start_date:
@@ -632,6 +635,7 @@ class PayrollCalculator:
             'total_overtime_bonus': round_money(sum(p.overtime_bonus for p in payrolls)),
             'total_deductions': round_money(sum(p.total_deductions for p in payrolls)),
         }
+
 
 
 # from datetime import date, timedelta
