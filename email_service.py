@@ -176,10 +176,15 @@ class EmailService:
         `pdf_password` is only used as a boolean flag (has the PDF been
         protected at all?) to decide whether to show the "how to unlock
         this PDF" instructions. The instructions explain the *rule* used
-        to build the password (name + DOB), with a fixed, generic
-        worked example - never the recipient's own real password - so an
-        intercepted email can never be used on its own to open the
-        attachment; the recipient still needs to know their own DOB.
+        to build the default password (name + phone + DOB + employee ID),
+        with a fixed, generic worked example - never the recipient's own
+        real password - so an intercepted email can never be used on its
+        own to open the attachment; the recipient still needs to know
+        their own phone number and DOB. If the employee has set a custom
+        payslip password via their profile, that password is used instead
+        and this generic hint no longer applies to them - encourage
+        employees who want a memorable password of their own choosing to
+        set one there.
         """
         subject = f"Payslip for {month} {year} - {self.company_name}"
 
@@ -190,21 +195,26 @@ class EmailService:
             <div style="margin: 16px 0; padding: 12px 16px; background-color: #F5F7FA; border-left: 4px solid #0B3D91; border-radius: 4px;">
                 <p style="margin: 0 0 8px 0;"><strong>This payslip PDF is password protected for your privacy.</strong></p>
                 <p style="margin: 0 0 8px 0;">
-                    To open it, use the password format:
-                    <strong>first 4 letters of your name in CAPITALS + your date of birth (DDMM)</strong>.
+                    If you haven't set a custom password in your profile, use the
+                    default format:
+                    <strong>first 2 letters of your name + last 4 digits of your
+                    phone number + your date of birth (DDMM) + last 2 characters
+                    of your employee ID</strong>.
                 </p>
                 <p style="margin: 0; font-size: 13px; color: #555;">
-                    Example: if your name is <strong>RAMESH</strong> and your date of birth is
-                    <strong>15th August</strong>, your password would be <strong>RAME1508</strong>.
+                    Example: RAMESH, phone ending 3210, born 15th August, ID EMP0001
+                    -&gt; password <strong>RA3210150801</strong>.
                 </p>
             </div>
             """
             password_notice_text = (
                 "\nThis payslip PDF is password protected for your privacy.\n"
-                "To open it, use the password format: first 4 letters of your name in "
-                "CAPITALS + your date of birth (DDMM).\n"
-                "Example: if your name is RAMESH and your date of birth is 15th August, "
-                "your password would be RAME1508.\n"
+                "If you haven't set a custom password in your profile, use the "
+                "default format: first 2 letters of your name + last 4 digits of "
+                "your phone number + your date of birth (DDMM) + last 2 characters "
+                "of your employee ID.\n"
+                "Example: RAMESH, phone ending 3210, born 15th August, ID EMP0001 "
+                "-> password RA3210150801.\n"
             )
 
         html_body = f"""

@@ -1,0 +1,10 @@
+# Build-time only - install these on your BUILD machine to package the
+# app, but do NOT add them to the main requirements.txt (customers never
+# need these; they're for producing the .exe, not running it).
+
+pyinstaller==6.11.1
+pyinstaller-hooks-contrib==2024.10
+
+# Only needed if you enable the optional online license check-in
+# (LICENSE_CHECK_IN_URL) - see licensing/license_manager.py. Leave this
+# uninstalled/unused if running fully offline license verification.

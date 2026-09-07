@@ -27,6 +27,7 @@ except ImportError:
     DeepFace = None
 
 from config import Config
+import crypto_utils
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,31 @@ def _save_persistent_embeddings_cache():
 
 #     return employee_images
 
+def load_face_image_array(img_path):
+    """
+    Load a dataset face image from disk into a BGR numpy array (the format
+    cv2/DeepFace expect), transparently decrypting it if it was saved
+    encrypted by FaceCapture.capture_frame().
+
+    Backward compatible with datasets captured before encryption-at-rest
+    was added: if the file's bytes aren't a valid encrypted token, it is
+    read as a plain image instead of raising an error. This lets an
+    existing install keep working immediately after upgrading, with old
+    photos migrating to encrypted-on-disk the next time they're
+    re-captured/re-saved, rather than requiring a one-shot migration
+    script before the app can start.
+    """
+    with open(img_path, 'rb') as f:
+        raw = f.read()
+
+    if crypto_utils.is_encrypted(raw):
+        raw = crypto_utils.decrypt_bytes(raw)
+
+    file_bytes = np.frombuffer(raw, dtype=np.uint8)
+    image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    return image
+
+
 def get_employee_embedding_cached(employee_id, img_path):
     """
     Return the Facenet512 embedding for a single employee image.
@@ -177,8 +203,13 @@ def get_employee_embedding_cached(employee_id, img_path):
             return cached['embedding']
 
     try:
+        image_array = load_face_image_array(img_path)
+        if image_array is None:
+            logger.error(f"Could not decode image for embedding: {img_path}")
+            return None
+
         embedding_obj = DeepFace.represent(
-            img_path=img_path,
+            img_path=image_array,
             model_name=MODEL_NAME,
             detector_backend="opencv",
             enforce_detection=False
@@ -506,11 +537,186 @@ class FaceDetectionEngine:
 
 
 class FaceRecognitionEngine:
+    # How often (in seconds) the "No trained employees available" warning
+    # is allowed to be logged. Prevents the auto-scan poller (every ~2s)
+    # from flooding the console while waiting for employee registration.
+    NO_EMPLOYEES_WARNING_THROTTLE_SECONDS = 60
+
+    # Minimum time (in seconds) between automatic reload attempts. This is
+    # intentionally shorter than the warning throttle so the engine recovers
+    # reasonably quickly after employees are trained elsewhere, without
+    # hammering disk I/O / DB queries on every single 2-second poll.
+    AUTO_RELOAD_COOLDOWN_SECONDS = 20
+
     def __init__(self):
         self.known_face_ids = []
         self.known_face_names = []
         self.model_path = os.path.join(Config.TRAINED_MODEL_FOLDER, 'face_data.pkl')
+
+        # --- state for throttled "no employees" logging ---
+        self._warning_lock = threading.Lock()
+        self._last_no_employees_warning_time = 0.0
+
+        # --- state for background auto-reload of empty engine state ---
+        self._reload_lock = threading.Lock()
+        self._reload_in_progress = False
+        self._last_reload_attempt_time = 0.0
+
         self.load_model()
+
+    def _log_no_employees_warning_throttled(self):
+        """
+        Log "No trained employees available" at most once every
+        NO_EMPLOYEES_WARNING_THROTTLE_SECONDS, instead of on every call
+        (the auto-scan endpoint polls every ~2 seconds, which would
+        otherwise flood the console with the same warning every couple
+        of seconds).
+        """
+        now = time.time()
+        with self._warning_lock:
+            if (now - self._last_no_employees_warning_time) >= self.NO_EMPLOYEES_WARNING_THROTTLE_SECONDS:
+                self._last_no_employees_warning_time = now
+                should_log = True
+            else:
+                should_log = False
+        if should_log:
+            logger.warning("No trained employees available.")
+
+    def _attempt_auto_reload(self):
+        """
+        Lazy/auto-reload for when this engine instance has zero trained
+        employees loaded in memory.
+
+        This can legitimately happen when:
+          - The engine starts before any employee has ever been trained.
+          - Employees were trained/registered through a different
+            FaceRecognitionEngine instance (e.g. a bulk "train all"
+            operation) which wrote an updated model file to disk, but
+            this long-lived instance (used by the auto-scan endpoint)
+            never re-read it.
+
+        Rather than staying empty forever until a manual server restart,
+        we kick off a background attempt to (1) reload the persisted
+        model file from disk, and (2) if that still leaves us empty,
+        rescan the dataset directory for any employees that have enough
+        images on disk but were never registered. This is throttled and
+        guarded by a lock so at most one reload attempt runs at a time
+        and we don't re-attempt on every single 2-second poll.
+        """
+        now = time.time()
+        with self._reload_lock:
+            if self._reload_in_progress:
+                return
+            if (now - self._last_reload_attempt_time) < self.AUTO_RELOAD_COOLDOWN_SECONDS:
+                return
+            self._last_reload_attempt_time = now
+            self._reload_in_progress = True
+
+        def _do_reload():
+            try:
+                logger.info(
+                    "AI engine has 0 trained employees loaded - attempting "
+                    "automatic reload/rescan in the background..."
+                )
+                # 1) Cheap path: re-read the persisted model file, in case
+                #    another engine instance/process trained employees and
+                #    saved an updated face_data.pkl since we last loaded.
+                self.load_model()
+
+                # 2) If still empty, fall back to rescanning the dataset
+                #    directory for employees with enough images on disk
+                #    that were never registered in this model file at all.
+                if len(self.known_face_ids) == 0:
+                    self.rescan_and_train_untrained_employees()
+
+                if len(self.known_face_ids) > 0:
+                    logger.info(
+                        f"Auto-reload succeeded: {len(self.known_face_ids)} "
+                        f"trained employee(s) now loaded."
+                    )
+                else:
+                    # Dataset is genuinely empty (or nothing usable yet) -
+                    # handle this gracefully, no exception, just try again
+                    # after the next cooldown window.
+                    logger.info(
+                        "Auto-reload found no trained employees. Dataset "
+                        "appears empty; will retry automatically later."
+                    )
+            except Exception as e:
+                logger.error(f"Auto-reload attempt failed: {e}")
+            finally:
+                with self._reload_lock:
+                    self._reload_in_progress = False
+
+        threading.Thread(target=_do_reload, daemon=True, name="ai-engine-auto-reload").start()
+
+    def rescan_and_train_untrained_employees(self):
+        """
+        Scan Config.DATASET_FOLDER for employee photo folders and train any
+        employee who has enough images on disk but is not yet present in
+        this engine instance's known_face_ids.
+
+        This is the "rescan the dataset directory" half of the auto-reload
+        flow: it lets a long-lived engine instance recover on its own after
+        new employees are added/trained, without needing a manual restart.
+        Safe to call with an empty/missing dataset folder (no-op, no crash).
+        """
+        trained_count = 0
+
+        if DeepFace is None or cv2 is None:
+            return trained_count
+
+        if not os.path.exists(Config.DATASET_FOLDER):
+            return trained_count
+
+        min_images = getattr(Config, 'MIN_FACE_IMAGES_REQUIRED', 1)
+
+        try:
+            employee_folders = sorted(os.listdir(Config.DATASET_FOLDER))
+        except OSError as e:
+            logger.warning(f"Could not list dataset folder during rescan: {e}")
+            return trained_count
+
+        for employee_folder in employee_folders:
+            employee_path = os.path.join(Config.DATASET_FOLDER, employee_folder)
+            if not os.path.isdir(employee_path):
+                continue
+
+            employee_id = employee_folder
+            if employee_id in self.known_face_ids:
+                continue  # already trained/known - nothing to do
+
+            try:
+                image_paths = [
+                    os.path.join(employee_path, f) for f in os.listdir(employee_path)
+                    if f.lower().endswith(('.jpg', '.jpeg', '.png'))
+                ]
+            except OSError:
+                continue
+
+            if len(image_paths) < min_images:
+                continue
+
+            employee_name = employee_id
+            try:
+                from models import Employee
+                employee = Employee.query.filter_by(id=int(employee_id)).first()
+                if employee:
+                    employee_name = employee.name
+            except Exception:
+                # No app/DB context available from this background thread,
+                # or employee record not found - fall back to using the
+                # folder name as the display name rather than failing.
+                pass
+
+            try:
+                valid = self.train_employee(employee_id, employee_name, image_paths)
+                if valid > 0:
+                    trained_count += 1
+            except Exception as e:
+                logger.error(f"Auto-reload: failed to train employee {employee_id}: {e}")
+
+        return trained_count
 
     def load_model(self):
         """Load trained face recognition data"""
@@ -558,16 +764,19 @@ class FaceRecognitionEngine:
                     logger.warning(f"Image not found: {img_path}")
                     continue
 
-                # Read image with OpenCV
-                image = cv2.imread(img_path)
+                # Read image (transparently decrypting if it was saved
+                # encrypted by FaceCapture.capture_frame())
+                image = load_face_image_array(img_path)
 
                 if image is None:
                     logger.warning(f"Could not read image: {img_path}")
                     continue
 
-                # Detect face
+                # Detect face - pass the decoded array rather than img_path
+                # so DeepFace never reads the (possibly encrypted) file
+                # directly off disk itself.
                 faces = DeepFace.extract_faces(
-                    img_path=img_path,
+                    img_path=image,
                     detector_backend="opencv",
                     enforce_detection=False
                 )
@@ -579,7 +788,15 @@ class FaceRecognitionEngine:
                     logger.warning(f"No face detected in {img_path}")
 
             except Exception as e:
-                logger.debug(f"Error processing {img_path}: {e}")
+                # WARNING, not DEBUG: a decrypt/decode failure here (most
+                # commonly crypto_utils.decrypt_bytes raising InvalidToken
+                # because FACE_DATA_ENCRYPTION_KEY in .env doesn't match
+                # the key this specific photo was encrypted with) used to
+                # be swallowed at DEBUG level - invisible at the app's
+                # normal INFO log level. That made "employee registered
+                # with 0 valid images, recognition always says Unknown"
+                # silently unexplainable. Log it loudly instead.
+                logger.warning(f"Error processing {img_path}: {e}")
 
         if valid_images > 0:
             if employee_id not in self.known_face_ids:
@@ -643,7 +860,12 @@ class FaceRecognitionEngine:
             return []
 
         if len(self.known_face_ids) == 0:
-            logger.warning("No trained employees available.")
+            # Throttled warning instead of logging on every ~2s poll, plus
+            # a background attempt to auto-reload/rescan so the engine can
+            # recover on its own once employees are trained, instead of
+            # staying empty until a manual server restart.
+            self._log_no_employees_warning_throttled()
+            self._attempt_auto_reload()
             return []
 
         try:
@@ -856,7 +1078,23 @@ class FaceCapture:
                 face_crop = frame[y:y+h, x:x+w]
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                 img_path = os.path.join(self.save_dir, f"{timestamp}.jpg")
-                cv2.imwrite(img_path, face_crop)
+
+                # Encrypt at rest: encode to JPEG in memory, encrypt the
+                # bytes, then write the ciphertext under the same .jpg
+                # filename/extension (so every other part of the app that
+                # discovers dataset images by extension - the admin
+                # thumbnail grid, rescan_and_train_untrained_employees(),
+                # etc. - keeps working unchanged; only the byte-level
+                # read/write path is aware of encryption).
+                success, encoded = cv2.imencode('.jpg', face_crop)
+                if not success:
+                    logger.warning(f"Could not encode captured face image for {img_path}")
+                    return drawn_frame, False
+
+                encrypted_bytes = crypto_utils.encrypt_bytes(encoded.tobytes())
+                with open(img_path, 'wb') as f:
+                    f.write(encrypted_bytes)
+
                 self.captured_count += 1
                 return drawn_frame, True
 
@@ -901,4 +1139,3 @@ def train_all_employees():
                 if employee:
                     recognizer.train_employee(employee_id, employee.name, image_paths)
                     logger.info(f"Trained employee {employee.name} with {len(image_paths)} images")
-  

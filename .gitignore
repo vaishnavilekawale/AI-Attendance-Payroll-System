@@ -1,19 +1,29 @@
 # Python Environment & Cache
 venv/
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Environment Variables & Security
 .env
+.env.*
+!.env.example
+
 
 # Database Files
 *.db
-instance/*.db
+*.db-journal
+*.db-wal
+*.db-shm
+instance/
 
 # Log Files
 *.log
 
-# Sensitive/User Generated Data (Folders match exact code paths)
+# Sensitive/User Generated Data (folders match exact code paths)
 dataset/*
 !dataset/.gitkeep
 
@@ -26,4 +36,30 @@ payrolls/*
 trained_model/*
 !trained_model/.gitkeep
 
+# PyInstaller build output (keep attendance_app.spec itself tracked —
+# only its generated output goes here)
+build/
+dist/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# OS junk files
+.DS_Store
+Thumbs.db
+
+# Confirm intent before keeping this — see note above about whether
+# this should exclude static/images/ entirely or just an uploads
+# subfolder within it.
 /static/images/
+
+
+
+
+
+
+
+
+
+

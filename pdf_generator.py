@@ -35,29 +35,56 @@ logger = logging.getLogger(__name__)
 
 def generate_payslip_password(employee):
     """
-    Build the deterministic payslip PDF open-password for `employee`.
+    Return the payslip PDF open-password for `employee`.
 
-    Rule (primary):
-        First 4 UPPERCASE letters of the employee's name + DOB in DDMM format
-        e.g. name="Vaishnavi Lekawale", dob=1998-03-15  ->  "VAIS1503"
+    1) Custom override (recommended): if the admin (or the employee, via
+       their portal) has set a custom payslip password, it is stored
+       encrypted-at-rest on Employee.payslip_password_override
+       (see crypto_utils.py / models.py) and returned as-is, decrypted.
 
-    Fallback (used only if the name doesn't yield 4 alphabetic characters,
-    e.g. a very short or non-alphabetic name):
-        Employee ID + DOB in DDMM format
-        e.g. employee_id="EMP0001", dob=1998-03-15  ->  "EMP00011503"
+    2) Default, strengthened deterministic formula (used when no override
+       is set): first 2 UPPERCASE letters of the employee's name + last 4
+       digits of their phone number + DOB in DDMM format + last 2
+       characters of their employee ID.
+       e.g. name="Vaishnavi Lekawale", phone="9876543210",
+            dob=1998-03-15, employee_id="EMP0001"  ->  "VA3210150301"
+
+       This deliberately replaces the old "first 4 letters of name + DOB"
+       rule: that scheme's only two inputs (name, birthdate) are commonly
+       public information (social media, HR directories), making the
+       8-character password guessable by someone who isn't the employee.
+       Mixing in the phone number (not usually public) and part of the
+       employee ID meaningfully raises the bar while keeping the password
+       self-derivable by the employee - nothing has to be emailed or
+       otherwise transmitted in-band (see email_service.send_payslip()).
 
     If the employee has no date of birth on file, falls back to their
     joining_date (always present, NOT NULL) so a password can still
-    always be produced deterministically - a warning is logged so admins
-    know to add a proper DOB for that employee.
+    always be produced - a warning is logged so admins know to add a
+    proper DOB for that employee.
 
-    This function is pure (no DB writes) and deterministic: calling it
-    again for the same employee always yields the same password, so the
-    password never needs to be persisted anywhere.
+    This function is pure from the caller's perspective (no DB writes)
+    and deterministic given the employee's current data: calling it again
+    for the same employee (with the same override / phone / DOB / name /
+    ID) always yields the same password.
     """
     employee_label = getattr(employee, 'employee_id', None) or getattr(employee, 'id', '?')
 
-    # --- date-of-birth component (DDMM) ---
+    # --- 1) custom override takes priority ---
+    encrypted_override = getattr(employee, 'payslip_password_override', None)
+    if encrypted_override:
+        try:
+            import crypto_utils
+            return crypto_utils.decrypt_str(encrypted_override)
+        except Exception as e:
+            logger.error(
+                f"Could not decrypt custom payslip password override for "
+                f"employee {employee_label} ({e}); falling back to the "
+                f"default generated password."
+            )
+
+    # --- 2) default strengthened formula ---
+    # date-of-birth component (DDMM)
     dob = getattr(employee, 'dob', None)
     if dob:
         ddmm = dob.strftime('%d%m')
@@ -78,18 +105,22 @@ def generate_payslip_password(employee):
                 f"on file; using a placeholder date for the payslip PDF password."
             )
 
-    # --- name component: first 4 uppercase letters ---
+    # name component: first 2 uppercase letters (falls back to 'XX' if the
+    # name has fewer than 2 alphabetic characters)
     raw_name = getattr(employee, 'name', '') or ''
     letters_only = re.sub(r'[^A-Za-z]', '', raw_name).upper()
-    name_part = letters_only[:4]
+    name_part = (letters_only[:2] or 'XX').ljust(2, 'X')
 
-    if len(name_part) == 4:
-        return f"{name_part}{ddmm}"
+    # phone component: last 4 digits (falls back to '0000' if missing/short
+    # - phone is NOT NULL in the schema, but never let this crash generation)
+    raw_phone = re.sub(r'\D', '', getattr(employee, 'phone', '') or '')
+    phone_part = raw_phone[-4:].rjust(4, '0') if raw_phone else '0000'
 
-    # Fallback: name too short / non-alphabetic -> Employee ID + DOB(DDMM)
-    employee_id = (getattr(employee, 'employee_id', '') or '').upper()
-    employee_id = re.sub(r'[^A-Z0-9]', '', employee_id)
-    return f"{employee_id}{ddmm}"
+    # employee ID component: last 2 characters
+    employee_id = re.sub(r'[^A-Z0-9]', '', (getattr(employee, 'employee_id', '') or '').upper())
+    id_part = employee_id[-2:] if employee_id else 'XX'
+
+    return f"{name_part}{phone_part}{ddmm}{id_part}"
 
 
 def encrypt_pdf(input_path, output_path, user_password, owner_password=None):

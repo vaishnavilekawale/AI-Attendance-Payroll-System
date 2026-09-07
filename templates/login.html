@@ -308,6 +308,7 @@
             {% endwith %}
             
             <form method="POST" action="{{ url_for('login') }}" id="loginForm" novalidate>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="role" id="roleInput" value="admin">
                 
                 <div class="mb-3">

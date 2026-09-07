@@ -192,6 +192,41 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="card shadow mt-3">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Payslip PDF Password</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">
+                            {% if employee.payslip_password_override %}
+                                You're using a custom password to open your payslip PDFs.
+                            {% else %}
+                                Your payslip PDFs currently use the default auto-generated password
+                                (first 2 letters of your name + last 4 digits of your phone + your
+                                date of birth DDMM + last 2 characters of your employee ID). Set a
+                                custom password below if you'd rather use one of your own choosing.
+                            {% endif %}
+                        </p>
+                        <form method="POST" action="{{ url_for('set_payslip_password') }}" class="row g-2 align-items-end">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="col-md-8">
+                                <label for="payslip_password" class="form-label">New payslip password</label>
+                                <input type="password" class="form-control" id="payslip_password"
+                                       name="payslip_password" minlength="8"
+                                       placeholder="At least 8 characters">
+                            </div>
+                            <div class="col-md-4 d-flex gap-2">
+                                <button type="submit" class="btn btn-primary">Save</button>
+                                {% if employee.payslip_password_override %}
+                                <button type="submit" class="btn btn-outline-secondary" name="clear_override" value="1">
+                                    Use default instead
+                                </button>
+                                {% endif %}
+                            </div>
+                        </form>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -217,6 +252,7 @@
                     {% endwith %}
                     
                     <form method="POST" action="{{ url_for('employee_profile') }}" id="editProfileForm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="mb-3">
                             <label for="phone" class="form-label">Phone Number</label>
                             <input type="text" class="form-control" id="phone" name="phone" 

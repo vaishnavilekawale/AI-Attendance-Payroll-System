@@ -25,7 +25,7 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" href="{{ url_for('employees') }}">
+                        <a class="nav-link active" href="{{ url_for('employees.employees') }}">
                             <i class="bi bi-people"></i> Employees
                         </a>
                     </li>
@@ -96,7 +96,7 @@
                 {% if search is defined %}
                 <div class="row mb-3">
                     <div class="col-md-4">
-                        <form method="GET" action="{{ url_for('employees') }}">
+                        <form method="GET" action="{{ url_for('employees.employees') }}">
                             <div class="input-group">
                                 <input type="text" class="form-control" name="search" placeholder="Search employees..." value="{{ search }}">
                                 <button class="btn btn-outline-primary" type="submit">Search</button>
@@ -148,16 +148,16 @@
                                         </td>
                                         <td>
                                             <div class="btn-group">
-                                                <a href="{{ url_for('view_employee', id=emp.id) }}" class="btn btn-sm btn-info">
+                                                <a href="{{ url_for('employees.view_employee', id=emp.id) }}" class="btn btn-sm btn-info">
                                                     <i class="bi bi-eye"></i>
                                                 </a>
                                                 <a href="{{ url_for('face_registration', id=emp.id) }}" class="btn btn-sm btn-warning">
                                                     <i class="bi bi-camera"></i>
                                                 </a>
-                                                <a href="{{ url_for('edit_employee', id=emp.id) }}" class="btn btn-sm btn-primary">
+                                                <a href="{{ url_for('employees.edit_employee', id=emp.id) }}" class="btn btn-sm btn-primary">
                                                     <i class="bi bi-pencil"></i>
                                                 </a>
-                                                <a href="{{ url_for('delete_employee', id=emp.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure?')">
+                                                <a href="{{ url_for('employees.delete_employee', id=emp.id) }}" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure?')">
                                                     <i class="bi bi-trash"></i>
                                                 </a>
                                             </div>
@@ -174,13 +174,13 @@
                             <ul class="pagination justify-content-center">
                                 {% if employees.has_prev %}
                                     <li class="page-item">
-                                        <a class="page-link" href="{{ url_for('employees', page=employees.prev_num, search=search) }}">Previous</a>
+                                        <a class="page-link" href="{{ url_for('employees.employees', page=employees.prev_num, search=search) }}">Previous</a>
                                     </li>
                                 {% endif %}
                                 {% for page in employees.iter_pages() %}
                                     {% if page %}
                                         <li class="page-item {{ 'active' if page == employees.page else '' }}">
-                                            <a class="page-link" href="{{ url_for('employees', page=page, search=search) }}">{{ page }}</a>
+                                            <a class="page-link" href="{{ url_for('employees.employees', page=page, search=search) }}">{{ page }}</a>
                                         </li>
                                     {% else %}
                                         <li class="page-item disabled"><span class="page-link">...</span></li>
@@ -188,7 +188,7 @@
                                 {% endfor %}
                                 {% if employees.has_next %}
                                     <li class="page-item">
-                                        <a class="page-link" href="{{ url_for('employees', page=employees.next_num, search=search) }}">Next</a>
+                                        <a class="page-link" href="{{ url_for('employees.employees', page=employees.next_num, search=search) }}">Next</a>
                                     </li>
                                 {% endif %}
                             </ul>
@@ -208,7 +208,8 @@
                     <h5 class="modal-title">Add New Employee</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form method="POST" action="{{ url_for('add_employee') }}" enctype="multipart/form-data">
+                <form method="POST" action="{{ url_for('employees.add_employee') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="modal-body">
                         <div class="row">
                             <div class="col-md-6">
@@ -417,7 +418,8 @@
                     <h5 class="modal-title">Edit Employee</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form method="POST" action="{{ url_for('edit_employee', id=employee.id) }}" enctype="multipart/form-data">
+                <form method="POST" action="{{ url_for('employees.edit_employee', id=employee.id) }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="modal-body">
                         <div class="row">
                             <div class="col-md-6">
@@ -884,6 +886,7 @@
 
                         const trainFormData = new FormData();
                         trainFormData.append('employee_id', employeeId);
+                        trainFormData.append('csrf_token', '{{ csrf_token() }}');
 
                         fetch('/api/train-face-model', {
                             method: 'POST',
@@ -921,6 +924,7 @@
                         const formData = new FormData();
                         formData.append('image', blob);
                         formData.append('employee_id', employeeId);
+                        formData.append('csrf_token', '{{ csrf_token() }}');
 
                         fetch('/api/upload-face-image', {
                             method: 'POST',
@@ -1115,6 +1119,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token() }}',
                 }
             })
             .then(response => response.json())

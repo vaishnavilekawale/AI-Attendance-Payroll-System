@@ -25,7 +25,7 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employees') }}">
+                        <a class="nav-link" href="{{ url_for('employees.employees') }}">
                             <i class="bi bi-people"></i> Employees
                         </a>
                     </li>
@@ -99,6 +99,7 @@
         <div class="row">
             <div class="col-lg-8">
                 <form method="POST" action="{{ url_for('settings') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <!-- Company Settings -->
                     <div class="card mb-4">
                         <div class="card-header">
@@ -280,6 +281,26 @@
                         <p class="small text-muted">Current database: SQLite</p>
                         <p class="small text-muted">To use MySQL, set <code>DATABASE_URL</code> in .env file:</p>
                         <code class="d-block small">mysql+pymysql://user:pass@localhost/dbname</code>
+                    </div>
+                </div>
+
+                <!-- Admin Management -->
+                <!-- /register locks itself once the first Admin account exists (see
+                     app.py) - /admin/create-admin is the intended, admin_required
+                     replacement for adding further admins afterward, but had no
+                     link anywhere in the UI. This card is that link. -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Admin Management</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted">
+                            Add another administrator account. Existing admins are
+                            unaffected — this only creates a new one.
+                        </p>
+                        <a href="{{ url_for('create_admin') }}" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-person-plus"></i> Manage Admins
+                        </a>
                     </div>
                 </div>
 

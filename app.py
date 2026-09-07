@@ -3,14 +3,31 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, send_from_directory, flash, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
-from functools import wraps
-import cv2
+from werkzeug.utils import secure_filename, safe_join
+import io
+import crypto_utils
+from auth_decorators import login_required, admin_required, employee_required
+from auth_helpers import create_admin_from_request_form
+from face_recognition_singleton import get_face_recognizer
+from file_helpers import allowed_file
+try:
+    import cv2
+except ImportError:
+    # Matches the same graceful-degradation pattern already used in
+    # ai_engine.py. cv2 is only ever touched inside specific route bodies
+    # here (webcam frame capture/decoding), never at module level, so a
+    # missing OpenCV install no longer prevents the whole app - including
+    # unrelated routes like payroll/reports - from being imported at all.
+    # This also means app.py can be imported by a test suite without
+    # requiring the real (large) OpenCV/ML dependency stack to be
+    # installed first.
+    cv2 = None
 import numpy as np
 from datetime import datetime, date, timedelta, time
+from setup_wizard import setup_bp
 import json
 
-from config import config, Config
+from config import config, Config, BASE_DIR
 from database import db, init_db
 from models import Admin, Employee, Attendance, Payroll, Settings, EmployeeLogin, AttendanceActivity, PayrollSettings, CompanySettings, LogoutApprovalRequest
 from ai_engine import FaceRecognitionEngine, FaceDetectionEngine, FaceCapture, train_all_employees, get_recognition_tolerance, presence_tracker, preload_employee_embeddings
@@ -27,13 +44,27 @@ import time as time_module
 
 # ============================================================
 # LOGGING CONFIGURATION
+#
+# Real logging setup (RotatingFileHandler at BASE_DIR/logs/app.log, plus
+# a console handler only when a console actually exists) now happens in
+# config.py, as early as possible in the import chain - see the comments
+# there for why it has to be there and not here: config.py is imported
+# well before this point (transitively, via crypto_utils and others),
+# and its own startup diagnostics (BASE_DIR, resolved database path)
+# need handlers attached before they run, not after.
+#
+# This call is deliberately WITHOUT force=True: basicConfig() is a no-op
+# if the root logger already has handlers attached, which is exactly the
+# case here (config.py already set them up by the time this module-level
+# code runs). Kept mainly so this file still behaves sanely if it's ever
+# imported in a context where config.py's setup didn't run first (e.g. a
+# future test harness that stubs config.py out).
 # ============================================================
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
-    force=True
 )
 
 logger = logging.getLogger(__name__)
@@ -208,19 +239,143 @@ def matches_ist_date(utc_dt, selected_date):
     return (utc_dt + IST_OFFSET).date() == selected_date
 
 
-app = Flask(__name__)
-app.config.from_object(config['default'])
+def matches_ist_date_range(utc_dt, date_from, date_to):
+    """
+    True if a naive-UTC datetime (e.g. LogoutApprovalRequest.created_at or
+    Attendance.submission_timestamp) falls within [date_from, date_to]
+    (inclusive on both ends) once shifted to IST.
+    """
+    if not utc_dt:
+        return False
+    ist_date = (utc_dt + IST_OFFSET).date()
+    return date_from <= ist_date <= date_to
 
-dataset_folder = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    'dataset'
-)
+
+def parse_approvals_date_range():
+    """
+    Read the `date_from` / `date_to` query params (format 'YYYY-MM-DD')
+    used by the Manager/Admin Approvals pages' history date-range filter.
+
+    - No params at all -> defaults to TODAY only (both ends), so the page
+      always loads with the clean "today's records" default view.
+    - The legacy single `date` param is still honoured for backward
+      compatibility with any previously bookmarked/shared links.
+    - Invalid/partial values fall back to today; a reversed range is
+      swapped so `date_from` is never after `date_to`.
+    """
+    def _parse(raw):
+        raw = (raw or '').strip()
+        if not raw:
+            return None
+        try:
+            return datetime.strptime(raw, '%Y-%m-%d').date()
+        except ValueError:
+            return None
+
+    today = date.today()
+    raw_from = request.args.get('date_from', '')
+    raw_to = request.args.get('date_to', '')
+
+    if not raw_from.strip() and not raw_to.strip():
+        legacy = _parse(request.args.get('date', ''))
+        if legacy:
+            return legacy, legacy
+        return today, today
+
+    date_from = _parse(raw_from) or today
+    date_to = _parse(raw_to) or today
+
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
+
+    return date_from, date_to
+
+
+# Explicit, BASE_DIR-anchored instance_path - do not rely on Flask's own
+# default instance_path detection here. Flask computes a default
+# instance_path from the app's import machinery, and has special-case
+# logic for frozen/zipped apps that can resolve it against sys.prefix -
+# which under PyInstaller points inside the EPHEMERAL `_MEI...`
+# extraction folder, not next to the .exe. This bit a real deployment:
+# a relative `DATABASE_URL=sqlite:///attendance.db` in .env (see
+# config.py's _resolve_database_uri() for the primary fix) got resolved
+# against that temp instance_path, so the database silently reset on
+# every restart even though BASE_DIR itself was correct everywhere else.
+# Pinning instance_path here explicitly means ANY code path that ever
+# resolves a relative path against it - Flask's own, Flask-SQLAlchemy's,
+# a future extension's - lands next to the .exe instead of in a temp
+# folder, regardless of how that code path computes its default.
+_instance_dir = os.path.join(BASE_DIR, 'instance')
+os.makedirs(_instance_dir, exist_ok=True)
+
+app = Flask(__name__, instance_path=_instance_dir)
+
+# ------------------------------------------------------------------
+# Environment-driven configuration.
+#
+# Previously this always loaded `config['default']` (DevelopmentConfig,
+# DEBUG=True) regardless of how the app was actually deployed, which
+# meant ProductionConfig was dead code and the app always ran with the
+# Werkzeug debugger enabled. FLASK_ENV now controls which config class
+# is loaded, and defaults to 'production' - a deployment has to opt IN
+# to debug mode explicitly, rather than opt out of it.
+# ------------------------------------------------------------------
+env_name = os.environ.get('FLASK_ENV', 'production').lower()
+app.config.from_object(config.get(env_name, config['production']))
+
+if app.config['DEBUG']:
+    logger.warning(
+        "Starting with FLASK_ENV=%s (DEBUG=True). Never run with debug mode "
+        "enabled on a deployment reachable by anyone other than the "
+        "developer - the interactive debugger allows remote code execution.",
+        env_name,
+    )
+
+# CSRF protection for every state-changing (POST/PUT/PATCH/DELETE) request.
+# WTF_CSRF_ENABLED was already set in Config, but no CSRFProtect instance
+# was ever created, so it had no effect. This also exposes `csrf_token()`
+# as a Jinja global automatically, for use in templates.
+#
+# csrf/limiter are shared, uninitialized instances from extensions.py
+# (rather than being constructed here directly) specifically so that
+# blueprints - like blueprints/setup_wizard.py - can import the exact same
+# instances without causing a circular import with app.py.
+from extensions import csrf, limiter
+csrf.init_app(app)
+
+# Rate limiting - primarily to slow down credential-stuffing / brute-force
+# attempts against /login. Uses in-memory storage by default, which is
+# fine for a single-process desktop/local deployment; point
+# RATELIMIT_STORAGE_URI at Redis for a multi-worker/production deployment.
+# Rate limiting - primarily to slow down credential-stuffing / brute-force
+# attempts against /login. Uses in-memory storage by default, which is
+# fine for a single-process desktop/local deployment; point
+# RATELIMIT_STORAGE_URI at Redis for a multi-worker/production deployment.
+app.config.setdefault('RATELIMIT_STORAGE_URI', os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'))
+limiter.init_app(app)
+
+dataset_folder = Config.DATASET_FOLDER
 
 if not os.path.exists(dataset_folder):
     os.makedirs(dataset_folder)
 
 
 init_db(app)
+
+# Blueprints. setup_wizard is the first route group fully migrated out of
+# this file - see blueprints/setup_wizard.py for the pattern (shared
+# extensions/decorators/helpers imported from neutral modules rather than
+# from app.py, to avoid circular imports) that the rest of app.py's route
+# groups can be migrated into over time.
+# from blueprints.setup_wizard import setup_bp
+from setup_wizard import setup_bp
+app.register_blueprint(setup_bp)
+
+# Second migrated blueprint - employee CRUD (list/add/edit/delete/view).
+# See blueprints/employees.py for what's included and what deliberately
+# isn't (camera/cv2-dependent routes stay in app.py for now).
+from employees import employees_bp
+app.register_blueprint(employees_bp)
 
 with app.app_context():
     logger.info(
@@ -271,9 +426,9 @@ payroll_calculator = None
 email_service = None
 pdf_generator = None
 
-# Global face recognition engine - created once at startup to avoid repeated model loading
-# This prevents "Loaded face recognition data with X employees" log appearing multiple times
-face_recognizer = None
+# Global face recognition engine singleton now lives in
+# face_recognition_singleton.py (get_face_recognizer()), for the same
+# circular-import reasons as the other extractions above.
 
 # ============================================================
 # EMPLOYEE LOGIN ATTENDANCE - FRAME-PRESENCE LOCK
@@ -367,88 +522,108 @@ def get_services():
         pdf_generator = PDFGenerator()
     return attendance_manager, payroll_calculator, email_service, pdf_generator
 
-def get_face_recognizer():
-    """Get or create the global face recognition engine instance"""
-    global face_recognizer
-    if face_recognizer is None:
-        face_recognizer = FaceRecognitionEngine()
-    return face_recognizer
-
-# Allowed file extensions
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+# get_face_recognizer() and allowed_file() are now imported from
+# face_recognition_singleton.py / file_helpers.py (see imports at top of
+# file) so that blueprints (e.g. blueprints/employees.py) can use them
+# without a circular import.
 
 # ==================== AUTH DECORATORS ====================
-
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'admin_id' not in session and 'employee_id' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def admin_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'admin_id' not in session:
-            flash('Access Denied. Admin access required.', 'danger')
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-def employee_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'employee_id' not in session:
-            flash('Access Denied. Employee access required.', 'danger')
-            return redirect(url_for('employee_login'))
-        # Ensure employee can only access their own data
-        # Check if any kwargs contain employee_id that doesn't match session
-        if 'employee_id' in kwargs and kwargs['employee_id'] != session['employee_id']:
-            flash('Access Denied. You can only view your own information.', 'danger')
-            return redirect(url_for('employee_dashboard'))
-        return f(*args, **kwargs)
-    return decorated_function
+# login_required / admin_required / employee_required are now imported
+# from auth_decorators.py (see imports at top of file), so that blueprints
+# (e.g. blueprints/setup_wizard.py) can use the exact same decorators
+# without a circular import with this file.
 
 # ==================== AUTH ROUTES ====================
 
 @app.route('/uploads/<path:filename>')
+@login_required
 def serve_upload(filename):
-    """Serve files from uploads folder for profile photos and payslips"""
-    uploads_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-    file_path = os.path.join(uploads_folder, filename)
-    
-    # If file doesn't exist at the expected path, try to find it in the uploads root
-    # This handles the case where payslips are stored directly in uploads/ instead of payrolls/ subdirectory
-    if not os.path.exists(file_path):
-        # Extract just the filename from the path
-        filename_only = os.path.basename(filename)
-        alternative_path = os.path.join(uploads_folder, filename_only)
-        
-        if os.path.exists(alternative_path):
-            file_path = alternative_path
-        else:
-            # Try alternative naming convention for payslips (e.g., payslip_EMP0001_8_2026.pdf vs payslip_EMP0001_2026_8.pdf)
-            if 'payslip' in filename_only:
-                # Extract employee_id, month, year from filename
-                parts = filename_only.replace('payslip_', '').replace('.pdf', '').split('_')
-                if len(parts) == 3:
-                    employee_id, month, year = parts
-                    # Try swapping month and year
-                    alt_filename = f"payslip_{employee_id}_{year}_{month}.pdf"
-                    alt_path = os.path.join(uploads_folder, alt_filename)
-                    if os.path.exists(alt_path):
-                        file_path = alt_path
-    
-    return send_file(file_path)
+    """
+    Serve files from the uploads folder (profile photos and payslips).
+
+    Security:
+      - login_required: no anonymous access at all (previously this route
+        had NO auth check, so payslips - which contain salary data - and
+        profile photos were downloadable by anyone who could guess/enumerate
+        a filename).
+      - Employees may only fetch files that are theirs (filename contains
+        their own employee_id, matching how payslip_<employee_id>_...pdf and
+        <employee_id>_<photo> filenames are generated elsewhere in this
+        file). Admins may access any file in uploads/.
+      - Only the basename is ever passed to the filesystem, and it is
+        resolved via send_from_directory() (Werkzeug's safe_join), so a
+        filename containing '..' or an absolute path cannot escape the
+        uploads directory - the previous os.path.join()+send_file()
+        combination had no such protection.
+    """
+    uploads_folder = Config.UPLOAD_FOLDER
+    filename_only = os.path.basename(filename)
+
+    if 'admin_id' not in session:
+        employee = Employee.query.get(session.get('employee_id'))
+        if not employee or employee.employee_id not in filename_only:
+            flash('Access Denied. You can only view your own files.', 'danger')
+            return redirect(url_for('employee_dashboard'))
+
+    def _exists(name):
+        return os.path.isfile(os.path.join(uploads_folder, name))
+
+    resolved_name = filename_only if _exists(filename_only) else None
+
+    # Fallback lookups preserved from the original implementation, e.g. for
+    # payslips saved with a swapped month/year naming convention
+    # (payslip_EMP0001_8_2026.pdf vs payslip_EMP0001_2026_8.pdf).
+    if resolved_name is None and 'payslip' in filename_only:
+        parts = filename_only.replace('payslip_', '').replace('.pdf', '').split('_')
+        if len(parts) == 3:
+            employee_id, month, year = parts
+            alt_filename = secure_filename(f"payslip_{employee_id}_{year}_{month}.pdf")
+            if _exists(alt_filename):
+                resolved_name = alt_filename
+
+    if resolved_name is None:
+        # Preserve original filename for the 404 Werkzeug will raise - it
+        # still resolves safely (no traversal) even though it won't exist.
+        resolved_name = filename_only
+
+    return send_from_directory(uploads_folder, resolved_name)
 
 
 @app.route('/dataset/<path:filename>')
+@admin_required
 def serve_dataset(filename):
-    """Serve files from dataset folder for face image thumbnails"""
-    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
-    return send_file(os.path.join(dataset_folder, filename))
+    """
+    Serve face-image thumbnails from the dataset folder.
+
+    Only used by the admin "manage employee" screen (add_employee.html),
+    so this is admin-only rather than login_required - there's no reason
+    for an ordinary employee login to browse other employees' biometric
+    photos.
+
+    Dataset images are encrypted at rest (see FaceCapture.capture_frame in
+    ai_engine.py / crypto_utils.py), so this can no longer stream the file
+    straight off disk with send_from_directory() - it has to decrypt into
+    memory first. safe_join() is still used to resolve the (possibly
+    nested, e.g. '<employee_id>/<image>.jpg') path against dataset_folder
+    and reject any attempt to traverse outside of it, preserving the same
+    traversal protection send_from_directory() provided.
+    """
+    dataset_folder = Config.DATASET_FOLDER
+    safe_path = safe_join(dataset_folder, filename)
+    if safe_path is None or not os.path.isfile(safe_path):
+        return jsonify({'error': 'Not found'}), 404
+
+    with open(safe_path, 'rb') as f:
+        raw = f.read()
+
+    if crypto_utils.is_encrypted(raw):
+        try:
+            raw = crypto_utils.decrypt_bytes(raw)
+        except Exception:
+            logger.error(f"Failed to decrypt dataset image: {safe_path}")
+            return jsonify({'error': 'Could not decrypt image'}), 500
+
+    return send_file(io.BytesIO(raw), mimetype='image/jpeg')
 
 @app.route('/')
 def index():
@@ -470,6 +645,7 @@ def test_log():
     return "OK"
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("10 per minute, 50 per hour")
 def login():
     """Unified login for both Admin and Employee"""
     if request.method == 'POST':
@@ -495,7 +671,11 @@ def login():
                 session['user_role'] = 'admin'
                 admin.last_login = datetime.utcnow()
                 db.session.commit()
-                
+
+                if admin.force_password_change:
+                    flash('For security, you must change your password before continuing.', 'info')
+                    return redirect(url_for('change_password'))
+
                 return redirect(url_for('dashboard'))
             elif admin.check_temporary_password(password):
                 # Check if temporary password is still valid (not expired)
@@ -597,6 +777,7 @@ def logout():
     return redirect(url_for('index'))
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
+@limiter.limit("5 per minute, 20 per hour")
 def forgot_password():
     """Handle forgot password - send temporary password via email for Admin"""
     if request.method == 'POST':
@@ -716,6 +897,7 @@ def change_password():
 # ==================== EMPLOYEE AUTHENTICATION ROUTES ====================
 
 @app.route('/employee-forgot-password', methods=['GET', 'POST'])
+@limiter.limit("5 per minute, 20 per hour")
 def employee_forgot_password():
     """Employee forgot password - send temporary password via email"""
     if request.method == 'POST':
@@ -828,44 +1010,52 @@ def employee_change_password():
     
     return render_template('change_password.html', first_login=login_creds.first_login)
 
+# create_admin_from_request_form() is now imported from auth_helpers.py
+# (see imports at top of file) so the setup wizard blueprint can reuse the
+# exact same validation/creation logic without a circular import.
+
+
 @app.route('/register', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
 def register():
-    """Register a new admin user"""
+    """
+    Legacy first-run admin setup URL.
+
+    This route USED to be a permanently public, unauthenticated endpoint
+    that let anyone create a new Admin account with full access to
+    attendance, payroll, and employee data - a critical vulnerability.
+
+    It now simply forwards to the guided setup wizard (blueprints/setup_wizard.py)
+    while no Admin exists yet, so any old bookmarks/links to /register still
+    work. Once an Admin exists, it refuses to create another one via a
+    public form; further admins must be created by an already-authenticated
+    admin (see /admin/create-admin below).
+    """
+    if Admin.query.count() > 0:
+        flash('Setup has already been completed. Please contact an existing administrator for access.', 'info')
+        return redirect(url_for('login'))
+
+    return redirect(url_for('setup.step1_admin'))
+
+
+@app.route('/admin/create-admin', methods=['GET', 'POST'])
+@admin_required
+@limiter.limit("5 per minute")
+def create_admin():
+    """
+    Create an additional admin account.
+
+    Once initial setup is complete, /register locks itself (see above),
+    so this authenticated, admin-only route is the only way to add further
+    admin accounts - it reuses the exact same validation/creation logic.
+    """
     if request.method == 'POST':
-        username = request.form.get('username')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        confirm_password = request.form.get('confirm_password')
-        
-        # Validation
-        if not username or not email or not password:
-            flash('All fields are required', 'danger')
-        elif len(username) < 3:
-            flash('Username must be at least 3 characters', 'danger')
-        elif len(password) < 6:
-            flash('Password must be at least 6 characters', 'danger')
-        elif password != confirm_password:
-            flash('Passwords do not match', 'danger')
-        else:
-            # Check for duplicate username or email
-            if Admin.query.filter_by(username=username).first():
-                flash('Username already exists', 'danger')
-            elif Admin.query.filter_by(email=email).first():
-                flash('Email already registered', 'danger')
-            else:
-                # Create new admin
-                admin = Admin(
-                    username=username,
-                    email=email
-                )
-                admin.set_password(password)
-                db.session.add(admin)
-                db.session.commit()
-                
-                flash('Registration successful! Please login.', 'success')
-                return redirect(url_for('login'))
-    
-    return render_template('register.html')
+        admin = create_admin_from_request_form()
+        if admin:
+            flash(f'Admin account "{admin.username}" created successfully.', 'success')
+            return redirect(url_for('settings'))
+
+    return render_template('register.html', creating_additional_admin=True)
 
 # ==================== DASHBOARD ROUTES ====================
 
@@ -1044,503 +1234,12 @@ def employee_dashboard():
                          today_activities=today_activities)
 
 # ==================== EMPLOYEE ROUTES ====================
+# Migrated to blueprints/employees.py (registered below via
+# app.register_blueprint(employees_bp)) - list/add/edit/delete/view.
+# Endpoint names are now 'employees.<function_name>'; every url_for()
+# call site referencing them (in this file and in templates) has been
+# updated to match.
 
-@app.route('/employees')
-@login_required
-@admin_required
-def employees():
-    search = request.args.get('search', '')
-    page = request.args.get('page', 1, type=int)
-    per_page = 10
-    
-    query = Employee.query.filter_by(status='active')
-    
-    if search:
-        query = query.filter(
-            (Employee.name.contains(search)) |
-            (Employee.employee_id.contains(search)) |
-            (Employee.department.contains(search))
-        )
-    
-    employees = query.order_by(Employee.created_at.desc()).paginate(
-        page=page, per_page=per_page, error_out=False
-    )
-    
-    # Get minimum face images required from Settings
-    settings = Settings.get_settings()
-    min_face_images = settings.min_face_images_required if settings else 20
-    
-    # Calculate actual face image count for each employee from dataset folder
-    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
-    
-    employee_image_counts = {}
-    
-    for emp in employees.items:
-        emp_folder = os.path.join(dataset_folder, str(emp.id))
-        if os.path.exists(emp_folder):
-            # Count actual images in folder
-            image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-            employee_image_counts[emp.id] = len(image_files)
-        else:
-            employee_image_counts[emp.id] = 0
-    
-    return render_template('add_employee.html', 
-                         employees=employees, 
-                         search=search,
-                         min_face_images=min_face_images,
-                         employee_image_counts=employee_image_counts)
-
-@app.route('/employees/add', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def add_employee():
-    if request.method == 'POST':
-        # Generate employee ID
-        last_employee = Employee.query.order_by(Employee.id.desc()).first()
-        if last_employee:
-            new_id = f"EMP{last_employee.id + 1:04d}"
-        else:
-            new_id = "EMP0001"
-        
-        # Get form data
-        name = request.form.get('name')
-        department = request.form.get('department')
-        designation = request.form.get('designation')
-        basic_salary = float(request.form.get('basic_salary'))
-        joining_date = datetime.strptime(request.form.get('joining_date'), '%Y-%m-%d').date()
-        email = request.form.get('email')
-        phone = request.form.get('phone')
-        address = request.form.get('address')
-        office_location = request.form.get('office_location')
-        bank_name = request.form.get('bank_name')
-        bank_account_number = request.form.get('bank_account_number')
-
-        # Statutory details - all optional plain-text identifiers, no
-        # numeric parsing needed. Stored as-is (stripped), None if blank
-        # so templates/PDF can cleanly fall back to "N/A".
-        pan_number = request.form.get('pan_number', '').strip() or None
-        uan_number = request.form.get('uan_number', '').strip() or None
-        pf_number = request.form.get('pf_number', '').strip() or None
-
-        # Date of birth - optional, but used to build the payslip PDF
-        # password (First 4 letters of name + DOB DDMM). If left blank,
-        # PDFGenerator.generate_payslip_password() falls back to the
-        # employee's joining_date automatically, so this is never
-        # required for the system to keep working.
-        dob_raw = request.form.get('dob')
-        dob = datetime.strptime(dob_raw, '%Y-%m-%d').date() if dob_raw else None
-
-        # Allowances - all optional in the form, always stored as floats
-        # defaulting to 0.0 so downstream payroll math never sees a None.
-        def _parse_allowance(field_name):
-            raw_value = request.form.get(field_name, '').strip()
-            if not raw_value:
-                return 0.0
-            try:
-                return float(raw_value)
-            except ValueError:
-                return 0.0
-
-        hra = _parse_allowance('hra')
-        da = _parse_allowance('da')
-        medical_allowance = _parse_allowance('medical_allowance')
-        travel_allowance = _parse_allowance('travel_allowance')
-        special_allowance = _parse_allowance('special_allowance')
-        other_allowances = _parse_allowance('other_allowances')
-
-        # Salary Deductions - same safe-parsing pattern as allowances.
-        # employee_pf_percentage and esic_percentage are PERCENTAGES (applied to
-        # earned gross salary inside payroll.compute_payroll_amounts); tds_percentage
-        # is also a PERCENTAGE; bus_charges and other_deduction are flat monthly amounts.
-        employee_pf_percentage = _parse_allowance('employee_pf_percentage')
-        esic_percentage = _parse_allowance('esic_percentage')
-        tds_percentage = _parse_allowance('tds_percentage')
-        bus_charges = _parse_allowance('bus_charges')
-        other_deduction = _parse_allowance('other_deduction')
-        
-        # Unique validation
-        if Employee.query.filter_by(name=name).first():
-            flash('This Employee Name already exists.', 'danger')
-            return redirect(url_for('employees'))
-        
-        if Employee.query.filter_by(phone=phone).first():
-            flash('This Mobile Number already exists.', 'danger')
-            return redirect(url_for('employees'))
-        
-        if Employee.query.filter_by(email=email).first():
-            flash('This Email ID already exists.', 'danger')
-            return redirect(url_for('employees'))
-        
-        # Handle profile photo
-        profile_photo = None
-        if 'profile_photo' in request.files:
-            file = request.files['profile_photo']
-            if file and allowed_file(file.filename):
-                filename = secure_filename(f"{new_id}_{file.filename}")
-                profile_photo_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(profile_photo_path)
-                profile_photo = filename
-            else:
-                pass
-        else:
-            pass
-        
-        employee = Employee(
-            employee_id=new_id,
-            username=new_id,
-            password_hash=generate_password_hash(phone),
-            name=name,
-            department=department,
-            designation=designation,
-            basic_salary=basic_salary,
-            joining_date=joining_date,
-            dob=dob,
-            email=email,
-            phone=phone,
-            address=address,
-            profile_photo=profile_photo,
-            office_location=office_location,
-            bank_name=bank_name,
-            bank_account_number=bank_account_number,
-            pan_number=pan_number,
-            uan_number=uan_number,
-            pf_number=pf_number,
-            hra=hra,
-            da=da,
-            medical_allowance=medical_allowance,
-            travel_allowance=travel_allowance,
-            special_allowance=special_allowance,
-            other_allowances=other_allowances,
-            employee_pf_percentage=employee_pf_percentage,
-            esic_percentage=esic_percentage,
-            tds_percentage=tds_percentage,
-            bus_charges=bus_charges,
-            other_deduction=other_deduction,
-            status='active',
-            role='employee',
-            must_change_password=True
-        )
-        
-        db.session.add(employee)
-        db.session.flush()  # Flush to get the employee ID
-        
-        # Create EmployeeLogin record with mobile number as default password
-        existing_login = EmployeeLogin.query.filter_by(employee_id=employee.id).first()
-        if not existing_login:
-            login_creds = EmployeeLogin(
-                employee_id=employee.id,
-                username=new_id,
-                first_login=True,
-                force_password_change=True,
-                is_active=True
-            )
-            login_creds.set_password(phone)  # Default password is mobile number
-            employee.password_hash = generate_password_hash(phone)  # Default password mobile number set kela
-            employee.username = new_id
-            employee.role = 'employee'
-            db.session.add(login_creds)
-        else:
-            pass
-        
-        db.session.commit()
-        
-        # Send welcome email with credentials
-        try:
-            email_service = EmailService()
-            result = email_service.send_welcome_email(email, name, new_id, phone)
-        except Exception as e:
-            pass
-        
-        flash(f'Employee {new_id} added successfully', 'success')
-        return redirect(url_for('employees'))
-    
-    return render_template('add_employee.html')
-
-@app.route('/employees/edit/<int:id>', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def edit_employee(id):
-    employee = Employee.query.get_or_404(id)
-    employees = Employee.query.filter_by(status='active').order_by(Employee.created_at.desc()).all()
-    
-    # Get minimum face images required from Settings
-    settings = Settings.get_settings()
-    min_face_images = settings.min_face_images_required if settings else 20
-    
-    # Calculate face image counts for all employees
-    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
-    employee_image_counts = {}
-    
-    for emp in employees:
-        emp_folder = os.path.join(dataset_folder, str(emp.id))
-        if os.path.exists(emp_folder):
-            image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-            employee_image_counts[emp.id] = len(image_files)
-        else:
-            employee_image_counts[emp.id] = 0
-    
-    if request.method == 'POST':
-        name = request.form.get('name')
-        department = request.form.get('department')
-        designation = request.form.get('designation')
-        basic_salary = float(request.form.get('basic_salary'))
-        email = request.form.get('email')
-        phone = request.form.get('phone')
-        address = request.form.get('address')
-        office_location = request.form.get('office_location')
-        bank_name = request.form.get('bank_name')
-        bank_account_number = request.form.get('bank_account_number')
-
-        # Date of birth - same optional field used by add_employee. Only
-        # overwrite employee.dob if the form actually sent a value, so a
-        # blank field on an edit form never accidentally wipes out a DOB
-        # that was already saved.
-        dob_raw = request.form.get('dob', '').strip()
-        dob = datetime.strptime(dob_raw, '%Y-%m-%d').date() if dob_raw else None
-
-        # Statutory details - same pattern as add_employee: optional,
-        # stored as-is, None if blank so the PDF cleanly falls back to N/A.
-        pan_number = request.form.get('pan_number', '').strip() or None
-        uan_number = request.form.get('uan_number', '').strip() or None
-        pf_number = request.form.get('pf_number', '').strip() or None
-
-        # Allowances - same safe-parsing helper used by add_employee: any
-        # blank/invalid value defaults to 0.0 rather than raising or
-        # silently keeping a stale value.
-        def _parse_allowance(field_name):
-            raw_value = request.form.get(field_name, '').strip()
-            if not raw_value:
-                return 0.0
-            try:
-                return float(raw_value)
-            except ValueError:
-                return 0.0
-
-        hra = _parse_allowance('hra')
-        da = _parse_allowance('da')
-        medical_allowance = _parse_allowance('medical_allowance')
-        travel_allowance = _parse_allowance('travel_allowance')
-        special_allowance = _parse_allowance('special_allowance')
-        other_allowances = _parse_allowance('other_allowances')
-
-        # Salary Deductions - same safe-parsing pattern as allowances.
-        # employee_pf_percentage and esic_percentage are PERCENTAGES (applied to
-        # earned gross salary inside payroll.compute_payroll_amounts); tds_percentage
-        # is also a PERCENTAGE; bus_charges and other_deduction are flat monthly amounts.
-        employee_pf_percentage = _parse_allowance('employee_pf_percentage')
-        esic_percentage = _parse_allowance('esic_percentage')
-        tds_percentage = _parse_allowance('tds_percentage')
-        bus_charges = _parse_allowance('bus_charges')
-        other_deduction = _parse_allowance('other_deduction')
-        
-        # Unique validation (exclude current employee)
-        if Employee.query.filter(Employee.name == name, Employee.id != id).first():
-            flash('This Employee Name already exists.', 'danger')
-            return redirect(url_for('edit_employee', id=id))
-        
-        if Employee.query.filter(Employee.phone == phone, Employee.id != id).first():
-            flash('This Mobile Number already exists.', 'danger')
-            return redirect(url_for('edit_employee', id=id))
-        
-        if Employee.query.filter(Employee.email == email, Employee.id != id).first():
-            flash('This Email ID already exists.', 'danger')
-            return redirect(url_for('edit_employee', id=id))
-        
-        employee.name = name
-        employee.department = department
-        employee.designation = designation
-        employee.basic_salary = basic_salary
-        employee.email = email
-        employee.phone = phone
-        employee.address = address
-        employee.office_location = office_location
-        employee.bank_name = bank_name
-        employee.bank_account_number = bank_account_number
-        employee.pan_number = pan_number
-        employee.uan_number = uan_number
-        employee.pf_number = pf_number
-
-        # Only overwrite dob if a value was actually submitted - keeps a
-        # previously-saved DOB intact if the edit form is ever submitted
-        # without that field populated.
-        if dob is not None:
-            employee.dob = dob
-
-        employee.hra = hra
-        employee.da = da
-        employee.medical_allowance = medical_allowance
-        employee.travel_allowance = travel_allowance
-        employee.special_allowance = special_allowance
-        employee.other_allowances = other_allowances
-        employee.employee_pf_percentage = employee_pf_percentage
-        employee.esic_percentage = esic_percentage
-        employee.tds_percentage = tds_percentage
-        employee.bus_charges = bus_charges
-        employee.other_deduction = other_deduction
-        
-        # Handle profile photo
-        if 'profile_photo' in request.files:
-            file = request.files['profile_photo']
-            if file and allowed_file(file.filename):
-                filename = secure_filename(f"{employee.employee_id}_{file.filename}")
-                profile_photo = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(profile_photo)
-                employee.profile_photo = filename
-        
-        db.session.commit()
-        flash('Employee updated successfully', 'success')
-        return redirect(url_for('employees'))
-    
-    return render_template('add_employee.html', employee=employee, employees=employees, edit_mode=True, min_face_images=min_face_images, employee_image_counts=employee_image_counts)
-
-@app.route('/employees/delete/<int:id>')
-@login_required
-@admin_required
-def delete_employee(id):
-    employee = Employee.query.get_or_404(id)
-    
-    # Remove from face recognition using global instance
-    recognizer = get_face_recognizer()
-    recognizer.remove_employee(str(employee.id))
-
-    # ------------------------------------------------------------------
-    # Ordered, safe cleanup of every table with a foreign key back to this
-    # employee (or to that employee's attendance rows), BEFORE the
-    # Employee row itself is deleted. This fixes the SQLite NOT NULL /
-    # FK IntegrityError that previously occurred because
-    # LogoutApprovalRequest and AttendanceActivity records were never
-    # cleaned up:
-    #   - LogoutApprovalRequest.attendance_id  -> attendance.id   (NOT NULL)
-    #   - LogoutApprovalRequest.employee_id    -> employees.id   (NOT NULL)
-    #   - LogoutApprovalRequest.manager_id     -> employees.id   (NOT NULL)
-    #   - LogoutApprovalRequest.approved_by    -> employees.id   (nullable)
-    #   - AttendanceActivity.employee_id       -> employees.id   (NOT NULL)
-    # Order matters: LogoutApprovalRequest references Attendance, so it
-    # must be deleted before Attendance rows are deleted.
-    # ------------------------------------------------------------------
-
-    # 1. Collect this employee's attendance record IDs up front - needed
-    #    to also catch any LogoutApprovalRequest rows that reference this
-    #    employee's attendance via attendance_id even in edge cases.
-    attendance_ids = [
-        att_id for (att_id,) in
-        db.session.query(Attendance.id).filter_by(employee_id=id).all()
-    ]
-
-    # 2. Delete LogoutApprovalRequest rows referencing this employee in
-    #    ANY foreign key column, or referencing one of their attendance
-    #    rows. Using a single OR'd query avoids missing edge cases (e.g.
-    #    this employee being the manager/approver on someone else's
-    #    request would otherwise be missed).
-    logout_approval_filters = [
-        LogoutApprovalRequest.employee_id == id,
-        LogoutApprovalRequest.manager_id == id,
-        LogoutApprovalRequest.approved_by == id,
-    ]
-    if attendance_ids:
-        logout_approval_filters.append(LogoutApprovalRequest.attendance_id.in_(attendance_ids))
-
-    logout_approval_requests = LogoutApprovalRequest.query.filter(
-        db.or_(*logout_approval_filters)
-    ).all()
-    for request_row in logout_approval_requests:
-        db.session.delete(request_row)
-
-    # 3. Delete AttendanceActivity rows (IN/OUT punch log) for this employee.
-    attendance_activities = AttendanceActivity.query.filter_by(employee_id=id).all()
-    for activity in attendance_activities:
-        db.session.delete(activity)
-
-    # 4. Delete EmployeeLogin record.
-    login_creds = EmployeeLogin.query.filter_by(employee_id=id).first()
-    if login_creds:
-        db.session.delete(login_creds)
-    
-    # 5. Delete attendance records (safe now that step 2 removed anything
-    #    referencing them).
-    attendance_records = Attendance.query.filter_by(employee_id=id).all()
-    for record in attendance_records:
-        db.session.delete(record)
-    
-    # 6. Delete payroll records
-    payroll_records = Payroll.query.filter_by(employee_id=id).all()
-    for record in payroll_records:
-        db.session.delete(record)
-
-    # Flush the deletions so the DB session is consistent before we
-    # delete the Employee row itself, and so any error surfaces here
-    # (before file cleanup) rather than after files are already removed.
-    db.session.flush()
-    
-    # Delete profile photo file
-    if employee.profile_photo:
-        try:
-            profile_photo_path = os.path.join(app.config['UPLOAD_FOLDER'], employee.profile_photo.split('/')[-1])
-            if os.path.exists(profile_photo_path):
-                os.remove(profile_photo_path)
-        except Exception as e:
-            pass
-    
-    # Delete dataset images
-    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset', str(id))
-    if os.path.exists(dataset_folder):
-        try:
-            import shutil
-            shutil.rmtree(dataset_folder)
-        except Exception as e:
-            pass
-    
-    # Delete employee
-    db.session.delete(employee)
-    db.session.commit()
-    
-    flash('Employee deleted successfully', 'success')
-    return redirect(url_for('employees'))
-
-@app.route('/employees/<int:id>')
-@login_required
-@admin_required
-def view_employee(id):
-    employee = Employee.query.get_or_404(id)
-    attendance = Attendance.query.filter_by(employee_id=id).order_by(Attendance.date.desc()).limit(30).all()
-    employees = Employee.query.filter_by(status='active').order_by(Employee.created_at.desc()).all()
-    
-    # Get minimum face images required from Settings
-    settings = Settings.get_settings()
-    min_face_images = settings.min_face_images_required if settings else 20
-    
-    # Calculate face image counts for all employees
-    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
-    employee_image_counts = {}
-    
-    for emp in employees:
-        emp_folder = os.path.join(dataset_folder, str(emp.id))
-        if os.path.exists(emp_folder):
-            image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-            employee_image_counts[emp.id] = len(image_files)
-        else:
-            employee_image_counts[emp.id] = 0
-    
-    # Get face images from dataset folder for the specific employee
-    emp_folder = os.path.join(dataset_folder, str(employee.id))
-    
-    face_images = []
-    current_count = 0
-    if os.path.exists(emp_folder):
-        image_files = [f for f in os.listdir(emp_folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-        image_files.sort()  # Sort to ensure consistent ordering
-        current_count = len(image_files)
-        face_images = image_files
-    
-    return render_template('add_employee.html', 
-                         employee=employee, 
-                         attendance=attendance, 
-                         employees=employees,
-                         view_mode=True,
-                         face_images=face_images,
-                         current_face_images=current_count,
-                         min_face_images=min_face_images,
-                         employee_image_counts=employee_image_counts)
 
 # ==================== FACE REGISTRATION ROUTES ====================
 
@@ -1556,7 +1255,7 @@ def face_registration(id):
     min_face_images = settings.min_face_images_required if settings else 20
     
     # Calculate face image counts for all employees
-    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+    dataset_folder = Config.DATASET_FOLDER
     employee_image_counts = {}
     
     for emp in employees:
@@ -1597,7 +1296,7 @@ def capture_face(id):
     min_face_images = settings.min_face_images_required if settings else 20
     
     # Calculate current face image count from dataset folder
-    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+    dataset_folder = Config.DATASET_FOLDER
     emp_folder = os.path.join(dataset_folder, str(employee.id))
     
     current_count = 0
@@ -1611,7 +1310,7 @@ def capture_face(id):
     # If already have enough images, don't capture more
     if remaining_images == 0:
         flash(f'Employee already has {current_count} face images. No additional capture needed.', 'info')
-        return redirect(url_for('view_employee', id=id))
+        return redirect(url_for('employees.view_employee', id=id))
     
     capture = FaceCapture(str(employee.id), remaining_images)
     
@@ -1640,7 +1339,7 @@ def capture_face(id):
         trained_count = recognizer.train_employee(str(employee.id), employee.name, image_paths)
         
         flash(f'Captured {captured} additional images. Total: {total_count}/{min_face_images}. Trained {trained_count} encodings', 'success')
-        return redirect(url_for('view_employee', id=id))
+        return redirect(url_for('employees.view_employee', id=id))
     
     except Exception as e:
         capture.stop_capture()
@@ -1670,7 +1369,7 @@ def delete_face_image(employee_id, image_name):
     image_name = secure_filename(image_name)
     
     # Construct the full path to the image
-    dataset_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'dataset')
+    dataset_folder = Config.DATASET_FOLDER
     emp_folder = os.path.join(dataset_folder, str(employee_id))
     image_path = os.path.join(emp_folder, image_name)
     
@@ -2477,6 +2176,41 @@ def employee_profile():
             return redirect(url_for('employee_profile'))
     
     return render_template('employee_profile.html', employee=employee, current_user=current_user, login_creds=login_creds)
+
+
+@app.route('/employee/set-payslip-password', methods=['POST'])
+@login_required
+@employee_required
+@limiter.limit("5 per minute")
+def set_payslip_password():
+    """
+    Let an employee set (or clear) a custom payslip PDF-open password,
+    overriding the default auto-generated one. Stored encrypted at rest
+    (see crypto_utils.py / Employee.payslip_password_override) since the
+    PDF-open password must remain recoverable in plaintext.
+    """
+    employee_id = session['employee_id']
+    employee = Employee.query.get(employee_id)
+    if not employee:
+        flash('Employee not found', 'danger')
+        return redirect(url_for('employee_login'))
+
+    if request.form.get('clear_override') == '1':
+        employee.payslip_password_override = None
+        db.session.commit()
+        flash('Custom payslip password removed - the default auto-generated password will be used again.', 'success')
+        return redirect(url_for('employee_profile'))
+
+    new_password = (request.form.get('payslip_password') or '').strip()
+    if len(new_password) < 8:
+        flash('Payslip password must be at least 8 characters.', 'danger')
+        return redirect(url_for('employee_profile'))
+
+    employee.payslip_password_override = crypto_utils.encrypt_str(new_password)
+    db.session.commit()
+    flash('Custom payslip password saved. Use it to open your future payslip PDFs.', 'success')
+    return redirect(url_for('employee_profile'))
+
 
 @app.route('/employee-payroll')
 @login_required
@@ -3541,8 +3275,12 @@ def manager_approvals():
     
     from services.approval_service import approval_service
 
-    # Date filter: defaults to today, or the ?date=YYYY-MM-DD query param.
-    selected_date = parse_approvals_filter_date()
+    # Date-range filter: defaults to TODAY only, or the ?date_from=&date_to=
+    # query params (legacy ?date= is also honoured). This applies ONLY to
+    # the completed Approved/Rejected history sections below - Pending
+    # requests are always shown regardless of date so nothing awaiting
+    # action ever silently disappears from view.
+    date_from, date_to = parse_approvals_date_range()
 
     # Get all logout requests for this manager
     all_requests = approval_service.get_all_requests_for_manager(employee_id)
@@ -3555,21 +3293,36 @@ def manager_approvals():
                 approval_request.created_at + timedelta(hours=5, minutes=30)
             )
 
-    # Separate by status (no date filter - show all requests)
+    # Pending: no date filter - always show every outstanding request.
     pending_requests = [r for r in all_requests if r.status == 'pending']
-    approved_requests = [r for r in all_requests if r.status == 'approved']
-    rejected_requests = [r for r in all_requests if r.status == 'rejected']
+    # Approved/Rejected history: scoped to the selected date range.
+    approved_requests = [
+        r for r in all_requests
+        if r.status == 'approved' and matches_ist_date_range(r.created_at, date_from, date_to)
+    ]
+    rejected_requests = [
+        r for r in all_requests
+        if r.status == 'rejected' and matches_ist_date_range(r.created_at, date_from, date_to)
+    ]
     
     # Get pending manual attendance requests for this manager's department
     # No date filter: pending requests should be visible regardless of submission date
     pending_manual_attendance = approval_service.get_pending_manual_attendance_requests(manager_id=employee_id, admin_view=False)
 
     # Get already-approved/rejected manual attendance requests so rejection
-    # remarks are visible in a history table on this dashboard.
-    # No date filter: show all processed requests
+    # remarks are visible in a history table on this dashboard, scoped to
+    # the selected date range (by submission timestamp, in IST).
     approved_manual_attendance, rejected_manual_attendance = approval_service.get_processed_manual_attendance_requests(
         manager_id=employee_id, admin_view=False
     )
+    approved_manual_attendance = [
+        a for a in approved_manual_attendance
+        if matches_ist_date_range(a.submission_timestamp, date_from, date_to)
+    ]
+    rejected_manual_attendance = [
+        a for a in rejected_manual_attendance
+        if matches_ist_date_range(a.submission_timestamp, date_from, date_to)
+    ]
     
     return render_template('manager_approvals.html',
                          pending_requests=pending_requests,
@@ -3579,7 +3332,8 @@ def manager_approvals():
                          approved_manual_attendance=approved_manual_attendance,
                          rejected_manual_attendance=rejected_manual_attendance,
                          manager=employee,
-                         selected_date=selected_date,
+                         date_from=date_from,
+                         date_to=date_to,
                          today=date.today())
 
 @app.route('/manager/approve-logout/<int:request_id>', methods=['POST'])
@@ -4001,8 +3755,12 @@ def admin_approvals():
     
     from services.approval_service import approval_service
     
-    # Date filter: defaults to today, or the ?date=YYYY-MM-DD query param.
-    selected_date = parse_approvals_filter_date()
+    # Date-range filter: defaults to TODAY only, or the ?date_from=&date_to=
+    # query params (legacy ?date= is also honoured). This applies to the
+    # completed Approved/Rejected/History sections and the all-employees
+    # attendance table below - Pending requests are always shown regardless
+    # of date so nothing awaiting action ever silently disappears from view.
+    date_from, date_to = parse_approvals_date_range()
 
     # Get all requests across all managers/departments
     all_requests = approval_service.get_all_requests_for_admin()
@@ -4016,38 +3774,56 @@ def admin_approvals():
             )
 
     # Filter to show ONLY Manager requests in top sections (employee.designation == 'Manager')
-    # No date filter: show all manager requests
+    # Employee (non-manager) requests must never reach the Admin queue at
+    # the initial/pending stage - they are handled exclusively by the
+    # employee's department manager.
     manager_requests = [r for r in all_requests if r.employee.designation == 'Manager']
     
-    # Separate by status (only Manager requests)
+    # Pending: no date filter - always show every outstanding Manager request.
     pending_requests = [r for r in manager_requests if r.status == 'pending']
-    approved_requests = [r for r in manager_requests if r.status == 'approved']
-    rejected_requests = [r for r in manager_requests if r.status == 'rejected']
+    # Approved/Rejected history (Manager requests only): scoped to the
+    # selected date range.
+    approved_requests = [
+        r for r in manager_requests
+        if r.status == 'approved' and matches_ist_date_range(r.created_at, date_from, date_to)
+    ]
+    rejected_requests = [
+        r for r in manager_requests
+        if r.status == 'rejected' and matches_ist_date_range(r.created_at, date_from, date_to)
+    ]
     
     # Get employee approval history (all approval requests for normal employees)
     # This shows which manager handled which employee's approval
-    # No date filter: show all employee approval history
-    employee_approval_history = [r for r in all_requests if r.employee.designation != 'Manager']
+    employee_approval_history = [
+        r for r in all_requests
+        if r.employee.designation != 'Manager' and matches_ist_date_range(r.created_at, date_from, date_to)
+    ]
     
     # ============================================================
     # REQUIREMENT 2: ADMIN APPROVAL HISTORY
     # Combined approval history showing ALL completed actions
     # (approved/rejected) across both managers and employees.
     # This is displayed in the 'Approval History' section below.
-    # No date filter: show all approval history
+    # Scoped to the selected date range.
     # ============================================================
-    approval_history = [r for r in all_requests if r.status in ('approved', 'rejected')]
+    approval_history = [
+        r for r in all_requests
+        if r.status in ('approved', 'rejected') and matches_ist_date_range(r.created_at, date_from, date_to)
+    ]
     
-    # Get attendance records for ALL active employees, across ALL dates
+    # Get attendance records for ALL active employees, scoped to the
+    # selected date range (defaults to today only)
     # This is for the "Attendance Records (All Employees)" section
     
     # Get all active employees (not just managers)
     all_active_employees = Employee.query.filter_by(status='active').all()
     all_employee_ids = [emp.id for emp in all_active_employees]
     
-    # Get attendance records for all active employees across all dates (no date filter)
+    # Get attendance records for all active employees within the selected date range
     week_attendance = Attendance.query.filter(
-        Attendance.employee_id.in_(all_employee_ids)
+        Attendance.employee_id.in_(all_employee_ids),
+        Attendance.date >= date_from,
+        Attendance.date <= date_to
     ).order_by(Attendance.date.desc(), Attendance.employee_id).all()
     
     # Add display_out_time for UI
@@ -4055,16 +3831,25 @@ def admin_approvals():
     for att in week_attendance:
         am._add_display_out_time(att, att.date)
     
-    # Get pending manual attendance requests for admin view (all departments)
+    # Get pending manual attendance requests for admin view (Managers' own
+    # requests only - see get_pending_manual_attendance_requests).
     # No date filter: pending requests should be visible regardless of submission date
     pending_manual_attendance = approval_service.get_pending_manual_attendance_requests(admin_view=True)
 
     # Get already-approved/rejected manual attendance requests (all departments)
-    # so rejection remarks are visible in a history table on this dashboard.
-    # No date filter: show all processed requests
+    # so rejection remarks are visible in a history table on this dashboard,
+    # scoped to the selected date range (by submission timestamp, in IST).
     approved_manual_attendance, rejected_manual_attendance = approval_service.get_processed_manual_attendance_requests(
         admin_view=True
     )
+    approved_manual_attendance = [
+        a for a in approved_manual_attendance
+        if matches_ist_date_range(a.submission_timestamp, date_from, date_to)
+    ]
+    rejected_manual_attendance = [
+        a for a in rejected_manual_attendance
+        if matches_ist_date_range(a.submission_timestamp, date_from, date_to)
+    ]
     
     return render_template('admin_approvals.html',
                          pending_requests=pending_requests,
@@ -4076,7 +3861,8 @@ def admin_approvals():
                          pending_manual_attendance=pending_manual_attendance,
                          approved_manual_attendance=approved_manual_attendance,
                          rejected_manual_attendance=rejected_manual_attendance,
-                         selected_date=selected_date,
+                         date_from=date_from,
+                         date_to=date_to,
                          today=date.today())
 
 @app.route('/admin/approve-logout/<int:request_id>', methods=['POST'])
@@ -4286,11 +4072,33 @@ if __name__ == '__main__':
     SERVER_PORT = 5000
     SERVER_URL = f'http://{SERVER_HOST}:{SERVER_PORT}/'
 
+    # Never hardcode debug=True here - it must follow the environment-driven
+    # config (see FLASK_ENV / app.config.from_object above). The interactive
+    # Werkzeug debugger allows arbitrary remote code execution if reachable,
+    # so it should only ever be on when a developer explicitly opts in via
+    # FLASK_ENV=development.
+    debug_mode = app.config.get('DEBUG', False)
+
     print("\n" + "=" * 50)
     print(f"🚀 Attendance & Payroll System")
     print(f"   Running at: {SERVER_URL}")
     print(f"   Host: {SERVER_HOST}  |  Port: {SERVER_PORT}")
+    print(f"   Mode: {'DEVELOPMENT (debug=True)' if debug_mode else 'PRODUCTION (debug=False)'}")
     print("=" * 50 + "\n")
 
-    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=True, use_reloader=False)
+    # Auto-open the default browser once the server is actually listening -
+    # a packaged desktop .exe has no terminal for the customer to read a
+    # URL from, so this is what makes "double-click the exe" behave like a
+    # normal desktop app rather than requiring them to know to open a
+    # browser and type in an address manually. Skipped when Werkzeug's
+    # reloader would otherwise cause this to run twice (not relevant here
+    # since use_reloader=False, but guarded defensively) and can be
+    # disabled entirely via SKIP_BROWSER_AUTOLAUNCH=true (e.g. for
+    # automated/CI runs of the packaged build).
+    if os.environ.get('SKIP_BROWSER_AUTOLAUNCH', '').lower() != 'true':
+        import threading
+        import webbrowser
+        threading.Timer(1.5, lambda: webbrowser.open(SERVER_URL)).start()
+
+    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=debug_mode, use_reloader=False)
 

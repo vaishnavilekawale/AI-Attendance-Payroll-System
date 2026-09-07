@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>First-Run Setup - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            background: #f5f7fa;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+        }
+        .wizard-card { max-width: 560px; margin: 0 auto; }
+        .step-indicator { display: flex; justify-content: center; gap: 8px; margin-bottom: 1.5rem; }
+        .step-dot {
+            width: 32px; height: 32px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 600; font-size: 14px;
+            background: #e5e7eb; color: #6b7280;
+        }
+        .step-dot.active { background: #4f46e5; color: #fff; }
+        .step-dot.done { background: #16a34a; color: #fff; }
+        .step-line { flex: 0 0 32px; border-top: 2px solid #e5e7eb; align-self: center; }
+    </style>
+</head>
+<body>
+<div class="container py-5">
+    <div class="wizard-card">
+        <div class="text-center mb-4">
+            <h2 class="text-primary">Welcome</h2>
+            <p class="text-muted">Let's get your Attendance &amp; Payroll System set up.</p>
+        </div>
+
+        <div class="step-indicator">
+            <div class="step-dot {{ 'done' if step > 1 else 'active' }}">
+                {% if step > 1 %}<i class="bi bi-check-lg"></i>{% else %}1{% endif %}
+            </div>
+            <div class="step-line"></div>
+            <div class="step-dot {{ 'active' if step == 2 else ('done' if step > 2 else '') }}">
+                {% if step > 2 %}<i class="bi bi-check-lg"></i>{% else %}2{% endif %}
+            </div>
+            <div class="step-line"></div>
+            <div class="step-dot {{ 'active' if step == 3 else '' }}">3</div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                {% if step == 1 %}
+                    <h5 class="mb-3">Step 1 of 3 &middot; Create your admin account</h5>
+                    <form method="POST" action="{{ url_for('setup.step1_admin') }}" novalidate>
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" name="username" required minlength="3">
+                        </div>
+                        <div class="mb-3">
+                            <label for="email" class="form-label">Email</label>
+                            <input type="email" class="form-control" id="email" name="email" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" name="password" required minlength="6">
+                        </div>
+                        <div class="mb-3">
+                            <label for="confirm_password" class="form-label">Confirm Password</label>
+                            <input type="password" class="form-control" id="confirm_password" name="confirm_password" required minlength="6">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Create admin account &amp; continue</button>
+                    </form>
+
+                {% elif step == 2 %}
+                    <h5 class="mb-3">Step 2 of 3 &middot; Company settings</h5>
+                    <p class="text-muted small">You can change any of these later from Settings.</p>
+                    <form method="POST" action="{{ url_for('setup.step2_company') }}" novalidate>
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="mb-3">
+                            <label for="company_name" class="form-label">Company name</label>
+                            <input type="text" class="form-control" id="company_name" name="company_name"
+                                   value="{{ settings.company_name }}" required>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="office_start_time" class="form-label">Office start time</label>
+                                <input type="time" class="form-control" id="office_start_time" name="office_start_time"
+                                       value="{{ settings.office_start_time }}">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="office_end_time" class="form-label">Office end time</label>
+                                <input type="time" class="form-control" id="office_end_time" name="office_end_time"
+                                       value="{{ settings.office_end_time }}">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="grace_period_minutes" class="form-label">Late-arrival grace period (minutes)</label>
+                                <input type="number" min="0" class="form-control" id="grace_period_minutes"
+                                       name="grace_period_minutes" value="{{ settings.grace_period_minutes }}">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="working_hours_per_day" class="form-label">Working hours per day</label>
+                                <input type="number" step="0.5" min="1" class="form-control" id="working_hours_per_day"
+                                       name="working_hours_per_day" value="{{ settings.working_hours_per_day }}">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Save &amp; continue</button>
+                    </form>
+
+                {% elif step == 3 %}
+                    <div class="text-center py-3">
+                        <i class="bi bi-check-circle-fill text-success" style="font-size: 3rem;"></i>
+                        <h5 class="mt-3 mb-2">You're all set!</h5>
+                        <p class="text-muted">
+                            Your admin account and company settings are ready. Next, add your
+                            employees and start capturing attendance.
+                        </p>
+                        <a href="{{ url_for('dashboard') }}" class="btn btn-primary mt-2">Go to Dashboard</a>
+                        <a href="{{ url_for('employees.add_employee') }}" class="btn btn-outline-secondary mt-2">Add your first employee</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

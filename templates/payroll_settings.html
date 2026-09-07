@@ -25,7 +25,7 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employees') }}">
+                        <a class="nav-link" href="{{ url_for('employees.employees') }}">
                             <i class="bi bi-people"></i> Employees
                         </a>
                     </li>
@@ -94,6 +94,7 @@
         <div class="row">
             <div class="col-lg-8">
                 <form method="POST" action="{{ url_for('payroll_settings') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <!-- Payroll Automation Settings -->
                     <div class="card mb-4">
                         <div class="card-header bg-primary text-white">

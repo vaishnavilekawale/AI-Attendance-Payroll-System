@@ -15,8 +15,8 @@
                 <div class="card shadow-lg">
                     <div class="card-body p-5">
                         <div class="text-center mb-4">
-                            <h2 class="text-primary">Create Account</h2>
-                            <p class="text-muted">Register as an admin user</p>
+                            <h2 class="text-primary">{{ 'Add Admin User' if creating_additional_admin else 'Create Account' }}</h2>
+                            <p class="text-muted">{{ 'Create another administrator account' if creating_additional_admin else 'First-run setup: create the initial admin account' }}</p>
                         </div>
                         
                         {% with messages = get_flashed_messages(with_categories=true) %}
@@ -30,7 +30,8 @@
                             {% endif %}
                         {% endwith %}
                         
-                        <form method="POST" action="{{ url_for('register') }}" id="registerForm" novalidate>
+                        <form method="POST" action="{{ url_for(request.endpoint) }}" id="registerForm" novalidate>
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="mb-3">
                                 <label for="username" class="form-label">Username</label>
                                 <div class="input-group">

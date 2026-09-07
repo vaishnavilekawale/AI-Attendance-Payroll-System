@@ -1,637 +1,633 @@
-# 🤖 AI Employee Attendance Monitoring and Payroll Management System
+# AI Attendance & Payroll System
 
-A complete AI-powered Employee Attendance Monitoring and Payroll Management System built with Python, Flask, DeepFace (FaceNet512), OpenCV/MediaPipe, and SQLite. The system runs as a walk-up kiosk that recognizes employees by face, falls back to a password-verified manual entry with a full manager/admin approval workflow when a face can't be confidently matched, computes attendance status from one shared rule engine, and drives an end-to-end payroll pipeline — from configurable allowances/deductions through AES-256-encrypted PDF payslips to deliverability-conscious email delivery.
+A Flask-based AI Attendance & Payroll System that recognizes employees by face
+(DeepFace + FaceNet512, with a password-verified manual fallback), runs a
+single shared rule engine for attendance status, and drives an end-to-end
+payroll pipeline — configurable allowances/deductions, AES-256-encrypted PDF
+payslips, and automated email delivery. It is designed to be packaged as a
+**standalone Windows `.exe`** (via PyInstaller) and handed to a non-technical
+client who double-clicks one file and gets a working local application —
+no Python install, no `pip install`, no manual server setup.
 
-## Project Overview
+This README is the single source of truth for taking the project from a
+development checkout to a signed-off, shippable `.exe` on a client's machine.
 
-The AI Employee Attendance Monitoring and Payroll Management System is a three-role platform (**Admin**, **Manager**, **Employee**) for modern HR management. It leverages AI face recognition to automate attendance tracking at a public kiosk, enforces strict anti-proxy safeguards — including a hidden-until-approved review cycle — when face recognition can't be used, and ties every attendance record into a single, consistent rule engine that drives dashboards, reports, and payroll alike. The system features a responsive admin dashboard, a manager approval console, a full employee self-service portal, versioned/auditable settings, detailed reports, and automated payroll with encrypted payslip delivery.
+---
 
-## Features
+## Table of Contents
 
-### Attendance & Recognition
-- **Public Kiosk Landing Page**: The root URL (`/`) is a public, no-login kiosk screen (`home_attendance.html`) with continuous, real-time camera scanning — anyone can walk up and mark attendance immediately. Admin and Employee login remain one click away via an unobtrusive link, rather than gating the home screen behind a session check.
-- **AI Face Recognition**: Continuous camera scanning using DeepFace with the FaceNet512 embedding model, with MediaPipe available as a secondary face-detection backend — no manual "capture" click required once the camera starts.
-- **Multi-Face, Strict-Match Detection**: Every face detected in a frame is analyzed independently, so multiple people can be recognized in a single scan. Matching uses a hard-capped cosine-distance tolerance plus a minimum confidence margin between the best and second-best candidate, so an ambiguous or borderline face is reported as "Unknown" rather than guessed.
-- **Frame-Presence Locking (No Duplicate Punches)**: A server-side presence tracker (`AttendancePresenceTracker`) ensures an employee is logged **exactly once** per continuous appearance in front of the camera — even if they stand there for hours — and only allows a new attendance attempt after they've genuinely left the frame (configurable absence timeout) and returned. The admin kiosk and the employee self-service stream each keep their own, independently isolated presence lock.
-- **Secure Manual Fallback (Proxy-Attendance Prevention)**: If face recognition can't confidently identify someone, `/mark_manual_attendance` requires **both** the employee's Employee ID **and** their account password, verified live against the `EmployeeLogin` table (`EmployeeLogin.check_password()`, with valid-temporary-password support). Employee-ID-only fallback does not exist, so no one can punch in on a colleague's behalf just by knowing their ID. Invalid ID, wrong password, and inactive account all return the exact same generic error, so the endpoint can't be used to enumerate valid Employee IDs.
-- **Hidden-Until-Approved Manual Attendance Workflow**: Every manual (password) punch starts life as `approval_status = 'pending'` and is invisible to normal reporting until a Manager or Admin approves or rejects it. While pending, the employee cannot mark OUT or submit another request for the day. A rejected request re-opens a same-day retry window (up to office end time) so the employee can correct and resubmit; once approved, later IN/OUT actions for that day proceed normally without resetting back to "pending."
-- **Full Attendance Audit Trail**: Every `Attendance` row carries `attendance_type` (`FACE_RECOGNITION` or `MANUAL_PASSWORD`) and, for manual entries, `approval_status` (`pending` / `approved` / `rejected`) plus a `submission_timestamp` recording the exact moment the employee clicked "Mark Attendance" — so HR can always audit exactly how and when a given day's attendance was captured.
-- **One Rule Engine, No Hardcoded Status**: Whether attendance is captured via camera or the manual fallback, both paths call the same core engine (`attendance.py`'s `AttendanceManager.mark_attendance()`), which evaluates real office shift timing to compute the correct status — Present, Late, or Half-Day — rather than ever hardcoding a result. A manual punch made after hours is correctly shown as "Late," never force-set to "Present."
-- **Automatic Working Hours Calculation**: Computed in the background from IN/OUT timestamps as soon as a punch is recorded.
-- **Automatic Late Entry Detection**: Configurable grace period after office start time; an employee can be "Present" and "Late" simultaneously.
-- **Automatic Absent Detection**: Employees with no attendance record are marked absent after office end time, with no manual intervention, consistently across dashboard, recent-attendance table, and reports.
-- **Overtime Calculation**: Configurable overtime rate applied to hours worked beyond the standard workday.
-- **Auto-Logout Regularization**: A daily job closes out anyone still clocked-in at day's end and raises a manager-review request rather than silently guessing an OUT time; a rejected regularization request blocks further attendance marking for that employee until resolved.
-- **Employee Self-Service Attendance**: A separate login-gated attendance stream (`employee_attendance.html`) for employees to mark their own IN/OUT via face recognition, with its own independent frame-presence lock.
+1. [System Architecture & Features Overview](#1-system-architecture--features-overview)
+2. [Prerequisites & Environment Setup](#2-prerequisites--environment-setup)
+3. [Local Development Execution](#3-local-development-execution)
+4. [Environment Variables (`.env`)](#4-environment-variables-env)
+5. [DeepFace Model Weights — Offline Client Machines](#5-deepface-model-weights--offline-client-machines)
+6. [Building the Windows `.exe` with PyInstaller](#6-building-the-windows-exe-with-pyinstaller)
+7. [Production Deployment & `dist/` Folder Structure](#7-production-deployment--dist-folder-structure)
+8. [First-Time Launch & Setup Wizard](#8-first-time-launch--setup-wizard)
+9. [Troubleshooting Guide](#9-troubleshooting-guide)
+10. [Appendix: File Map](#10-appendix-file-map)
 
-### Roles & Approval Workflows
-- **Three Roles, One App**: `Admin`, `Manager` (an `Employee` whose `designation` is "Manager"), and `Employee`, each with their own dashboard and permission scope.
-- **Manager Approval Console** (`manager_approvals.html`): Managers review and approve/reject two independent queues — auto-logout regularization requests and pending manual (password-fallback) attendance requests for their scope — with pending/approved/rejected tabs and IST-adjusted timestamps.
-- **Admin Approval Console** (`admin_approvals.html`): A parallel, org-wide view of the same logout-regularization and pending-manual-attendance queues for administrators.
-- **Editable Attendance with Trail**: Dedicated admin (`admin_edit_attendance.html`) and manager (`manager_edit_attendance.html`) screens for correcting an attendance record after the fact, alongside the approval flows.
-- **Email Notifications at Every Step**: Manual-attendance submission notifies the employee (and the Admin, if the submitter is a Manager); logout-regularization requests notify both the employee and their manager, with duplicate-send protection built into the data model.
+---
 
-### Employee & Payroll Management
-- **Complete Employee Lifecycle Management**: Add/edit employees with department, designation, joining date, date of birth, bank details, and profile photo. All numeric fields default safely to `0.0` if left blank, and the Edit form always pre-populates existing values so nothing is accidentally cleared on save.
-- **Statutory Details**: PAN Number, UAN Number, and PF Account Number captured per employee and displayed on the generated payslip, with a clean "N/A" fallback if any are missing.
-- **Configurable Salary Allowances**: HRA, DA, Medical Allowance, Travel Allowance, Special Allowance, and Other Allowances — each stored per-employee and dynamically summed into gross salary.
-- **Configurable Salary Deductions**: Employee/Employer PF %, ESIC %, TDS % (of earned gross), Bus/Transport Charges, Other Deductions, plus Professional Tax, LOP, and Late deductions — all dynamically summed into total deductions.
-- **Automated Payroll Engine**: `Gross Salary = Basic + HRA + DA + Medical + Travel + Special + Other Allowances`, `Net Salary = Gross Salary − Total Deductions`, recalculated from live employee and attendance data every time payroll runs — never cached or hand-adjusted.
-- **Safe Cascade Delete**: Deleting an employee cleanly removes every dependent record first — `LogoutApprovalRequest`, `AttendanceActivity`, `EmployeeLogin`, `Attendance`, and `Payroll` — in the correct order, preventing SQLite NOT NULL / foreign-key integrity errors.
-- **Employee Self-Service Portal**: Employees get their own login and dashboard (`employee_dashboard.html`), profile page (`employee_profile.html`), payroll/payslip view (`employee_payroll.html`), and personal attendance reports with export (`employee_reports.html`), plus a dedicated employee-side forgot/change-password flow.
+## 1. System Architecture & Features Overview
 
-### PDF Payslips & Email
-- **Password-Protected PDF Payslips**: Clean, corporate-styled payslips built with ReportLab, then encrypted with `pikepdf` (AES-256) so only the individual employee can open their own file.
-- **Deterministic Password Rule**: First 4 uppercase letters of the employee's name + date of birth (DDMM), with a safe fallback to Employee ID + DOB (or joining date, if DOB isn't on file) — computed on demand, never stored anywhere.
-- **Deliverability-Conscious Email Service**: Proper nested MIME structure (`multipart/mixed` → `multipart/alternative` with plain-text + HTML, attachments as siblings rather than mixed into the alternative part), spam-safe subject lines, and correctly content-typed PDF attachments.
-- **Password Never Sent By Email**: The payslip email explains the password *rule* with a fixed, generic worked example — the recipient's actual password is never included in the email body in any form.
-- **Full Notification Suite**: Payslip delivery, attendance report delivery, admin/employee password resets and welcome emails, manual-attendance submission notices, and logout-regularization notices to both employee and manager, all via one deliverability-conscious `EmailService`.
-
-### Reporting & Dashboard
-- **Consistent Reporting Engine**: Admin Reports' summary cards, department analytics, rankings, and the per-employee summary table all share the exact same validity filtering and status-classification logic (`services/admin_reports_service.py`), so the numbers always agree with each other — no more mismatched Absent counts between sections.
-- **Dashboard Analytics**: Real-time Present/Absent/Half-Day/Late cards and interactive charts, computed via the same shared aggregation logic used by Reports.
-- **Department-wise Statistics**: Attendance breakdown by department.
-- **PDF Export**: Both admin reports and individual employee attendance reports can be exported as branded PDFs (`generate_admin_reports_pdf`, `generate_attendance_report`).
-
-### Configurable, Versioned Settings
-- **Attendance Settings with History**: Office start/end time, grace period, working hours per day, and half-day threshold are editable from the admin **Settings** page and stored with an `effective_from` timestamp (`AttendanceSettingsHistory`) — past attendance is always evaluated against the rules that were actually in force on that date, not today's rules.
-- **Payroll Settings**: A dedicated **Payroll Settings** page (`payroll_settings.html`) controls the automatic monthly payroll generation day/time, whether payslip emails auto-send, and month-by-month Professional Tax slabs (`PayrollSettings`).
-- **Company Settings**: Company name, address, phone, email, website, and logo used across the UI and generated PDFs (`CompanySettings`), editable without touching code.
-
-### Automation
-- **Scheduled Auto-Logout Regularization**: A daily background job (APScheduler, 23:59) closes out anyone still clocked in and raises a regularization request for manager/admin review.
-- **Scheduled Monthly Payroll**: Runs automatically on the 1st of every month to calculate and process the previous full month's payroll, distributing encrypted payslips via email when auto-send is enabled.
-
-### Platform
-- **Login System**: Secure username/password authentication for admins, with a separate employee login backed by its own `EmployeeLogin` credentials table (including forced password change on first login and temporary-password support with expiry).
-- **Mobile Responsive UI**: Bootstrap 5 responsive design across desktop, tablet, and mobile.
-
-## Tech Stack
-
-### Backend
-- Python 3.10+
-- Flask (Web Framework)
-- SQLAlchemy (ORM)
-- Session-based authentication (Admin / Employee / Manager roles)
-
-### AI / Computer Vision
-- DeepFace (Face Recognition)
-- FaceNet512 (Embedding Model)
-- OpenCV + OpenCV-Contrib (Image Processing)
-- MediaPipe (secondary face-detection backend)
-- TensorFlow / tf-keras (DeepFace backend)
-- NumPy (Numerical Computing)
-
-### Frontend
-- HTML5, CSS3
-- Bootstrap 5 (UI Framework) + Bootstrap Icons
-- Vanilla JavaScript (`fetch()`-based AJAX, no page reloads for attendance actions)
-- Chart.js (Data Visualization)
-
-### Database
-- SQLite (Default)
-- MySQL (Optional, via PyMySQL)
-
-### Other Libraries
-- ReportLab (PDF layout/generation)
-- pikepdf (AES-256 PDF password protection)
-- qrcode (payslip/report QR support)
-- APScheduler (background job scheduling)
-- smtplib (SMTP email, standard library)
-- Werkzeug (password hashing/security)
-- Flask-WTF / WTForms (forms, CSRF)
-
-## Project Structure
+### 1.1 High-level architecture
 
 ```
-attendance_ai/
-│
-├── app.py                        # Main Flask application & routes (admin, manager, employee, APIs)
-├── config.py                     # Base configuration / environment defaults
-├── database.py                   # Database initialization
-├── models.py                     # DB models (Employee, Attendance, Payroll, Settings, PayrollSettings,
-│                                  #   AttendanceSettingsHistory, CompanySettings, LogoutApprovalRequest, ...)
-├── ai_engine.py                   # Face detection (DeepFace/MediaPipe), matching, frame-presence tracking
-├── attendance.py                   # Core attendance rule engine (status/late/half-day/auto-checkout logic)
-├── payroll.py                       # Payroll calculation engine (allowances + deductions)
-├── email_service.py                  # SMTP email service (MIME-correct, spam-conscious, full notification suite)
-├── pdf_generator.py                   # Payslip/report PDF layout + AES-256 password protection helper
-├── scheduler_service.py                 # APScheduler jobs: auto-logout, monthly payroll, reconciliation
-├── requirements.txt               # Python dependencies
-├── README.md                      # This file
-├── .env                          # Environment variables (SMTP, DB, office timing, etc.)
-├── instance/attendance.db          # SQLite database (auto-generated)
-│
-├── dataset/                      # Face images for training, organized by employee ID
-├── trained_model/                 # Cached face embeddings
-├── payrolls/<year>/<month>/         # Generated, password-encrypted PDF payslips
-├── uploads/                      # Uploaded files (photos, generated payslip/report copies)
-│
-├── services/
-│      approval_service.py          # Regularization / manual-attendance approval logic
-│      attendance_calculator.py      # Present / Late / Half-Day timing rules
-│      attendance_stats.py            # Aggregated attendance statistics helpers
-│      admin_reports_service.py        # Admin Reports single-source-of-truth aggregation
-│
-├── static/
-│      css/style.css              # Custom styles
-│      js/main.js                  # JavaScript functions
-│      images/company_logo_MD.jpg    # Company logo
-│
-└── templates/
-       home_attendance.html        # Public kiosk landing page (default entry point)
-       login.html                  # Admin/Employee login page
-       register.html               # Admin registration page
-       forgot_password.html        # Admin password reset
-       change_password.html        # Admin change password
-       employee_forgot_password.html  # Employee password reset
-       dashboard.html              # Admin dashboard
-       employee_dashboard.html     # Employee self-service dashboard
-       add_employee.html           # Add/Edit Employee modals (allowances, deductions, statutory details)
-       attendance.html             # Admin camera scan + secure manual fallback
-       employee_attendance.html    # Employee self-service attendance stream
-       employee_profile.html       # Employee self-service profile
-       employee_payroll.html       # Employee self-service payslips
-       employee_reports.html       # Employee self-service attendance reports
-       admin_approvals.html        # Admin regularization / manual-attendance review queue
-       manager_approvals.html      # Manager regularization / manual-attendance review queue
-       admin_edit_attendance.html  # Admin manual attendance correction
-       manager_edit_attendance.html  # Manager manual attendance correction
-       payroll.html                # Payroll management
-       payroll_settings.html       # Payroll automation & professional-tax settings
-       reports.html                # Admin reports
-       settings.html               # Attendance / company settings
+┌─────────────────────────────────────────────────────────────────┐
+│  Windows client machine                                         │
+│                                                                   │
+│   AttendancePayrollSystem.exe  (PyInstaller onefile/onedir)     │
+│        │                                                         │
+│        ├─ launcher.py  → runs app.py's __main__ block           │
+│        │                  (Flask app → browser)                 │
+│        │                                                         │
+│        ├─ Flask app (Werkzeug dev server, 127.0.0.1:5000)       │
+│        │     ├─ Admin / Manager / Employee routes & blueprints  │
+│        │     ├─ Face recognition engine (DeepFace/OpenCV)       │
+│        │     ├─ APScheduler background jobs (payroll, logout)   │
+│        │     └─ PDF generation (ReportLab + pikepdf AES-256)    │
+│        │                                                         │
+│        ├─ SQLite database  → instance/attendance.db             │
+│        ├─ Employee face photos (encrypted) → dataset/           │
+│        ├─ Payslips / uploads → uploads/                         │
+│        ├─ Face embeddings cache → trained_model/                │
+│        └─ .env (secrets, config)                                │
+│                                                                   │
+│   Default OS browser opens automatically to http://127.0.0.1:5000│
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Installation Guide
+The app is a normal Flask web app; PyInstaller just freezes the Python
+interpreter + all dependencies + your source into one executable, and
+`launcher.py` opens the user's default browser pointed at `localhost` so it
+*feels* like a native desktop app even though it's a local web server.
 
-### Prerequisites
+### 1.2 Roles
 
-- Python 3.10 or higher
-- pip (Python package manager)
-- Virtual environment (recommended)
+| Role | Access |
+|---|---|
+| **Admin** | Full system: employees, payroll, settings, reports, approvals |
+| **Manager** | An Employee flagged as a manager; approves manual-attendance/logout-regularization requests for their scope |
+| **Employee** | Self-service dashboard: own attendance, payslips, profile, password |
 
-### Step 1: Clone the Project
+### 1.3 Feature summary
+
+- **Attendance:** public kiosk face-recognition scanning, strict-match
+  cosine-distance matching with a confidence margin (no guessing on
+  look-alikes), frame-presence locking (one punch per continuous
+  appearance), password-verified manual fallback with mandatory
+  manager/admin approval, full audit trail (`attendance_type`,
+  `approval_status`, `submission_timestamp`).
+- **Rule engine:** one shared engine (`attendance.py::AttendanceManager`)
+  computes Present / Late / Half-Day / Absent for both face and manual
+  punches — status is never hardcoded per entry point.
+- **Payroll:** configurable allowances (HRA, DA, Medical, Travel, Special,
+  Other) and deductions (PF, ESIC, TDS, Professional Tax, LOP, Late,
+  Transport), automated monthly generation via APScheduler, AES-256
+  password-protected PDF payslips (deterministic password rule), and
+  deliverability-conscious email delivery.
+- **Reporting:** admin dashboard analytics, department-wise stats, PDF
+  export for both admin and employee reports, all backed by one shared
+  aggregation service so numbers never disagree between screens.
+- **Settings:** versioned attendance settings (past attendance is always
+  evaluated against the rules in force *on that date*), payroll settings,
+  company branding settings — all editable from the UI, no code changes.
+- **Security:** encrypted-at-rest biometric photos (Fernet/AES), CSRF
+  protection, rate-limited login, password hashing via Werkzeug.
+
+### 1.4 Tech stack
+
+| Layer | Choice |
+|---|---|
+| Backend | Python 3.10+, Flask 3.x, SQLAlchemy 2.x |
+| AI / CV | DeepFace (FaceNet512), OpenCV-Contrib, MediaPipe, TensorFlow 2.15 / tf-keras |
+| Frontend | Bootstrap 5, vanilla JS (`fetch`), Chart.js |
+| Database | SQLite (default) or MySQL (via PyMySQL) |
+| PDF | ReportLab (layout), pikepdf (AES-256 password protection) |
+| Scheduling | APScheduler (background jobs) |
+| Packaging | PyInstaller 6.x + pyinstaller-hooks-contrib |
+
+---
+
+## 2. Prerequisites & Environment Setup
+
+### 2.1 Required software
+
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | **3.10.x** (3.10.11 recommended) | TensorFlow 2.15 / mediapipe wheels on Windows are most reliable on 3.10. Do not use 3.12+. |
+| pip | Latest | `python -m pip install --upgrade pip` |
+| Git | Any recent | To clone/manage the repo |
+| Windows | 10/11, 64-bit | Build and ship for 64-bit only |
+| Webcam | Any USB/integrated | Required for face capture and recognition |
+| (Optional) MySQL Server | 8.x | Only if you choose MySQL instead of the default SQLite |
+
+> **Why 3.10, specifically?** DeepFace, TensorFlow 2.15, `tf-keras`, and
+> `mediapipe==0.10.21` all publish official Windows wheels for 3.9–3.11.
+> 3.10 is the safest intersection. If you must use a different version,
+> confirm every package in `requirements.txt` has a matching wheel
+> **before** you invest time in a PyInstaller build.
+
+### 2.2 Clone and create a virtual environment
 
 ```bash
-git clone https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System
-cd attendance_ai
-```
+git clone <your-repo-url> AI_APS
+cd AI_APS
 
-### Step 2: Create Virtual Environment
-
-```bash
 python -m venv venv
-```
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # macOS/Linux (dev only — ship for Windows)
 
-### Step 3: Activate Virtual Environment
-
-**Windows:**
-```bash
-venv\Scripts\activate
-```
-
-**Linux/Mac:**
-```bash
-source venv/bin/activate
-```
-
-### Step 4: Install Dependencies
-
-```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-**Note:** Installing DeepFace, TensorFlow, MediaPipe, and pikepdf may take some time as they pull in additional native dependencies.
+Installing `requirements.txt` pulls in TensorFlow, MediaPipe, and OpenCV —
+expect a multi-GB download and several minutes on first install.
 
-### Step 5: Configure Environment Variables
+### 2.3 Verify the install
 
-Create a `.env` file in the project root and configure:
+```bash
+python -c "import cv2, tensorflow, mediapipe, deepface; print('OK')"
+```
 
-```env
-SECRET_KEY=your-secret-key-change-in-production
-FLASK_ENV=development
+If this fails, resolve it here before touching PyInstaller — packaging
+problems are much harder to diagnose than a plain import error.
 
-# Database Configuration
-DATABASE_URL=sqlite:///attendance.db
+---
 
-# Email Configuration (SMTP)
+## 3. Local Development Execution
+
+```bash
+# From the project root, with venv activated
+set FLASK_ENV=development        # Windows (cmd)
+# $env:FLASK_ENV="development"   # Windows (PowerShell)
+# export FLASK_ENV=development   # macOS/Linux
+
+python app.py
+```
+
+You should see:
+
+```
+============================================================
+🚀 AI Attendance & Payroll System
+   Host: 127.0.0.1  |  Port: 5000
+   Mode: DEVELOPMENT (debug=True)
+============================================================
+```
+
+Open `http://127.0.0.1:5000/` — the public kiosk landing page. Admin/Employee
+login is one click away from there.
+
+**First run creates, next to `app.py`:**
+- `instance/attendance.db` (SQLite database)
+- `dataset/`, `uploads/`, `trained_model/` (created automatically if missing)
+
+If no admin account exists yet, you'll be routed into the **Setup Wizard**
+(see [Section 8](#8-first-time-launch--setup-wizard)).
+
+---
+
+## 4. Environment Variables (`.env`)
+
+Create a `.env` file **next to `app.py`** (dev) or **next to the `.exe`**
+(packaged build) — never commit this file, and never ship the developer's
+own `.env` to a customer. Each install should get its own.
+
+```ini
+# ── Flask Core ──────────────────────────────────────────────────────
+SECRET_KEY=<REQUIRED — see warning below>
+FLASK_ENV=production                       # production | development
+
+# ── Database ─────────────────────────────────────────────────────────
+# Leave unset to default to a local SQLite file at instance/attendance.db
+# DATABASE_URL=mysql+pymysql://user:password@localhost/attendance_db
+
+# ── Email (SMTP) — for payslip delivery, password resets, notifications ──
 MAIL_SERVER=smtp.gmail.com
 MAIL_PORT=587
 MAIL_USE_TLS=true
-MAIL_USERNAME=your-email@gmail.com
-MAIL_PASSWORD=your-app-password
-MAIL_DEFAULT_SENDER=your-email@gmail.com
+MAIL_USERNAME=your-company@gmail.com
+MAIL_PASSWORD=<app password, NOT your normal Gmail password>
+MAIL_DEFAULT_SENDER=your-company@gmail.com
 
-# Company Settings (also editable later from the Settings page)
-COMPANY_NAME=AI Attendance System
+# ── Company Branding ─────────────────────────────────────────────────
+COMPANY_NAME=Your Company Pvt Ltd
 COMPANY_LOGO=static/images/company_logo.png
 
-# Office Timing (also editable later from the Settings page, versioned per change)
+# ── Office Timing ────────────────────────────────────────────────────
 OFFICE_START_TIME=09:00
 OFFICE_END_TIME=18:00
 GRACE_PERIOD_MINUTES=15
 
-# Working Hours
+# ── Working Hours & Salary Rules ─────────────────────────────────────
 WORKING_HOURS_PER_DAY=9.0
-
-# Salary Calculation
 LATE_DEDUCTION_ENABLED=false
 LATE_DEDUCTION_PER_OCCURRENCE=0.0
-
-# Overtime Calculation
 OVERTIME_ENABLED=true
 OVERTIME_RATE=1.5
 
-# Face Recognition Settings
-FACE_RECOGNITION_TOLERANCE=0.6
+# ── Face Recognition ─────────────────────────────────────────────────
+FACE_RECOGNITION_TOLERANCE=0.6             # admin-configurable ceiling; see ai_engine.py STRICT_MAX_TOLERANCE
 MIN_FACE_IMAGES_REQUIRED=20
+
+# ── Rate Limiting ─────────────────────────────────────────────────────
+RATELIMIT_STORAGE_URI=memory://            # fine for single-process desktop use
+
+# ── Biometric Encryption Key ─────────────────────────────────────────
+# DO NOT SET THIS MANUALLY on a fresh install. crypto_utils.py generates
+# and appends it here automatically the first time it's needed, and logs
+# a warning telling you to back up this file. If it's already present
+# (e.g. you're restoring a previous install), leave it exactly as-is.
+# FACE_DATA_ENCRYPTION_KEY=<auto-generated — back this up>
 ```
 
-### Step 6: Database Setup
+### 4.1 Mandatory vs. optional keys
 
-The database is created automatically on first run:
-
-```bash
-python -c "from app import app, db; app.app_context().push(); db.create_all()"
-```
-
-Default admin credentials:
-- Username: `admin`
-- Password: `admin123`
-
-**Important:** Change the default password after first login!
-
-### Step 7: Run the Application
-
-```bash
-python app.py
-```
-
-The application will start on `http://localhost:5000`, opening directly on the **public kiosk landing page**. Admin and Employee login links are available from there.
-
-## AI Workflow
-
-### Face Registration
-
-1. Register the employee in the system with their basic details.
-2. Navigate to employee management and open face capture.
-3. Set the number of face images to capture (minimum 20 recommended).
-4. Start capture — ensure good lighting and a clearly visible face.
-5. Images are stored under `dataset/<employee_id>/`.
-
-### AI Training
-
-1. Navigate to Settings (or trigger `/train-ai` / `/api/train-face-model`).
-2. DeepFace processes all face images per employee and FaceNet512 generates 512-dimensional embeddings.
-3. Embeddings are cached under `trained_model/` for fast comparison at recognition time, with an in-memory cache layer for repeated lookups.
-
-### Face Recognition & Matching
-
-1. The kiosk landing page starts the camera automatically — no manual "Start Camera" step and no Employee ID prompt.
-2. Every ~1.5–2 seconds, a frame is sent to the recognition engine.
-3. **Every face detected in that frame** is embedded and compared independently against all trained employees (multi-person aware).
-4. A match is only accepted if the best candidate's distance is below a strict, hard-capped tolerance **and** clearly beats the second-best candidate by a minimum margin — otherwise the face is reported "Unknown" rather than guessed.
-5. A server-side presence tracker (`AttendancePresenceTracker`) records who is currently "in frame" so a matched employee is logged only once per continuous presence, regardless of how many frames they appear in.
-
-## Attendance Workflow
-
-### IN Punch
-
-1. Employee's face is recognized (or they authenticate via the secure manual fallback).
-2. Current time is recorded as IN Time; status is computed by the rule engine (Present or Late, based on office start time + grace period).
-3. Duplicate IN punches for the same continuous presence are blocked by the presence tracker.
-
-### OUT Punch
-
-1. Employee is recognized again (or re-authenticates manually) later in the day.
-2. Current time is recorded as OUT Time; working hours are calculated automatically (OUT − IN).
-3. OUT can only be marked after a matching IN for the same day, and is blocked entirely while a manual IN for that day is still pending approval.
-
-### Secure Manual Fallback (When Face Recognition Fails)
-
-1. The "Face Not Recognized" card asks for **both** Employee ID and account password.
-2. `/mark_manual_attendance` verifies the password live against `EmployeeLogin.check_password()` (the same mechanism used by the real employee login page, including temporary-password support) — never a hardcoded or cached comparison.
-3. On success, the record is created/updated through the same `AttendanceManager.mark_attendance()` engine the camera flow uses — status is computed honestly (Present/Late/Half-Day), never force-set to "Present."
-4. The resulting `Attendance` row is tagged `attendance_type = 'MANUAL_PASSWORD'` and starts as `approval_status = 'pending'` for audit and review purposes.
-5. The submission is **hidden from normal counts until a Manager or Admin approves it**. Until then, the employee cannot mark OUT or submit a second request that day.
-6. If rejected, the employee can correct and resubmit for the same day up until office end time; past that, the retry window closes and they must contact a manager or admin.
-7. Any authentication failure (wrong ID, wrong password, inactive account) returns the same generic message, so the endpoint can't be used to enumerate valid Employee IDs.
-
-### Manager / Admin Approval
-
-1. Pending manual-attendance punches and auto-logout regularization requests both surface in the Manager Approvals and Admin Approvals consoles.
-2. Approving a manual punch makes it count normally everywhere (dashboard, reports, payroll); rejecting it opens the same-day retry window described above.
-3. A rejected logout-regularization request marks that day Absent and blocks further attendance attempts for the employee that day.
-
-### Working Hours Calculation
-
-- Calculated automatically from IN/OUT timestamps, stored in decimal hours (e.g., 8.5).
-
-### Late Entry Detection
-
-- Configurable grace period (default 15 minutes) after office start time.
-- Late entry is tracked as its own flag alongside status — an employee can be "Present" and "Late" simultaneously.
-
-### Automatic Absent Detection
-
-- Before office end time: employees without attendance are not yet marked absent.
-- After office end time: any employee with no attendance record for the day is automatically marked absent — no manual step needed. Applies consistently across the dashboard, recent-attendance table, and reports.
-
-### Overtime Calculation
-
-- Applied when working hours exceed the configured working hours per day, at a configurable overtime rate (default 1.5×).
-
-## Payroll Workflow
-
-### Monthly Calculation
-
-1. Navigate to Payroll, select month and year, and trigger calculation.
-2. The system processes all active employees for the selected period, pulling live attendance and employee data — no cached figures.
-
-### Attendance Analysis
-
-- Present Days, Absent Days, Half Days, Late Days, Total Hours Worked, and Overtime Hours are all derived from the same attendance records used everywhere else in the system (dashboard, reports, payroll) — kept consistent by a shared aggregation approach.
-
-### Salary Calculation
-
-```
-Per-Day Salary        = Basic Salary / Working Days in Month
-Absent Deduction      = Absent Days × Per-Day Salary
-Half-Day Deduction    = Half Days × (Per-Day Salary / 2)
-Late Deduction        = Late Days × Late Deduction Amount (if enabled)
-Overtime Bonus        = Overtime Hours × Hourly Rate × Overtime Rate
-
-Base Gross Salary     = Basic + HRA + DA + Medical + Travel + Special + Other Allowances
-Total Gross Earnings  = Base Gross Salary + Overtime Bonus
-
-Employee PF           = Basic × Employee PF% (employee-configured)
-Employer PF           = Basic × Employer PF% (employee-configured, reported for CTC only)
-ESIC                  = Earned Gross × ESIC% (employee-configured)
-TDS                   = Earned Gross × TDS% (employee-configured)
-Professional Tax      = Month-wise slab from Payroll Settings
-
-Total Deductions      = Absent + Half-Day + Late Deduction
-                        + Employee PF + ESIC + Professional Tax
-                        + TDS + Bus/Transport Charges + Other Deductions
-
-Net Salary            = Total Gross Earnings − Total Deductions
-```
-
-### Payslip Generation
-
-1. Trigger PDF generation for an employee from the Payroll page.
-2. ReportLab builds a professional payslip with:
-   - Company header (name, address, phone, email, website — pulled from Company Settings)
-   - Employee details: Employee ID, Name, Department, Designation, Location, Pay Period, **PAN Number, UAN Number, PF Account Number** (each falling back to "N/A" if not on file)
-   - Attendance summary (working/present/absent/half-day/late/paid/LOP days)
-   - Full earnings and deductions breakdown, with Net Pay in words
-3. The finished PDF is immediately encrypted with `pikepdf` using a password derived from the employee's name + date of birth — no plain PDF is ever left on disk when protection is requested.
-4. The payslip path is stored against the Payroll record, under `payrolls/<year>/<month>/`.
-
-### Email Delivery
-
-1. Trigger email delivery for an employee from the Payroll page.
-2. The email is built with a proper `multipart/mixed` → `multipart/alternative` (plain-text + HTML) structure, with the PDF attached as a correctly content-typed sibling part — good practice for inbox placement.
-3. The subject line follows a clean, non-spammy format: `Payslip for {Month} {Year} - {Company Name}`.
-4. The email explains **how** to unlock the password-protected PDF (name + DOB rule, with a fixed generic example) — it never contains the recipient's actual password.
-5. Delivery status is recorded against the Payroll record.
-
-## Dashboard Module
-
-### Overview Cards
-
-- **Present Today**, **Half Day Today**, **Absent Today** (including automatic absences), **Late Today**, **Total Employees** — all computed via the same shared aggregation logic used by Reports, so these numbers never disagree with the detailed reports.
-
-### Charts
-
-- **Today's Attendance Overview**: Doughnut chart (Present / Half-Day / Absent / Late).
-- **Department-wise Attendance**: Bar chart by department.
-
-### Recent Attendance Table
-
-- Latest attendance records with employee name, department, IN/OUT time, working hours, status, and which channel captured it — face recognition or manual password fallback (with its approval state where applicable).
-
-## Reports Module
-
-### Report Generation
-
-1. Select a date range, and optionally filter by department, employee, designation, or status.
-2. Generate the report — available from both the Admin Reports page and each employee's own self-service Reports page.
-
-### Consistency Guarantee
-
-- Summary cards, Department Analytics, Rankings, and the per-Employee Summary table all use the **same** underlying validity filtering and status-classification logic (`services/admin_reports_service.py`). A known historical bug where malformed "no attendance record" placeholder objects were counted inconsistently between sections (causing Absent totals to disagree) has been fixed at the source — every section now reports identical numbers for the same filters.
-
-### PDF Export
-
-- Generates a matching PDF version of the on-screen report, with company branding, the selected filters, and full summary statistics.
-
-## Employee Management
-
-### Add / Edit Employee
-
-Captured fields include:
-- Employee ID, Name, Department, Designation, Basic Salary, Joining Date, **Date of Birth**
-- Email, Phone, Address, Office Location
-- Bank Name, Bank Account Number
-- **Statutory Details**: PAN Number, UAN Number, PF Account Number
-- **Salary Allowances**: HRA, DA, Medical Allowance, Travel Allowance, Special Allowance, Other Allowances
-- **Salary Deductions**: Employee/Employer PF %, ESIC %, TDS %, Bus/Transport Charges, Other Deductions
-- Profile photo
-
-All numeric fields default safely to `0.0` if left blank, and the Edit form always pre-populates existing values so nothing is accidentally cleared on save. Setting an employee's **Designation** to "Manager" grants them access to the Manager Approval console for their scope.
-
-### Face Registration
-
-Same workflow as described in AI Workflow above — captured images feed directly into the recognition engine after training.
-
-### Delete Employee (Safe Cascade)
-
-Deleting an employee cleanly removes, in order: `LogoutApprovalRequest` (referencing this employee as employee/manager/approver, or referencing their attendance rows), `AttendanceActivity`, `EmployeeLogin`, `Attendance`, and `Payroll` — before the `Employee` row itself is removed, preventing SQLite foreign-key integrity errors.
-
-## Login System
-
-### Admin Login
-
-- Username/password authentication with hashed credentials.
-- Invalid Username vs. Invalid Password are distinguished for the admin, without exposing that distinction on security-sensitive employee-facing endpoints.
-
-### Employee Login
-
-- Backed by a dedicated `EmployeeLogin` table (separate from the `Employee` HR record), with forced password change on first login and support for temporary/reset passwords with expiry.
-- Employees get their own self-service portal — dashboard, profile, payroll, and reports — independently frame-presence-locked from the admin camera flow.
-- An `Employee` whose designation is "Manager" additionally sees the Manager Approvals console.
-
-### Register / Forgot Password
-
-- New admin registration with duplicate-username/email validation.
-- Separate, email-based password reset flows for admins and for employees, each issuing a temporary password.
-
-## Security Features
-
-- **Password Hashing**: Werkzeug-based hashing everywhere credentials are stored (`Admin`, `Employee`, `EmployeeLogin`) — verification always reads the live hash, so a changed password takes effect immediately with no cached logic anywhere.
-- **Anti-Proxy Attendance**: The manual fallback requires both Employee ID and password, with generic error messages that don't reveal whether an ID exists, plus a hidden-until-approved review cycle for every manual punch.
-- **PDF Encryption**: Payslips are encrypted at rest with AES-256 (via `pikepdf`) using a deterministic, per-employee password never stored in the database or sent by email.
-- **Strict Face-Match Thresholds**: A hard-capped cosine-distance tolerance plus a minimum confidence margin between top candidates, to minimize false-positive face matches.
-- **Safe Cascade Deletes**: No orphaned foreign-key references left behind when an employee is removed.
-- **SQL Injection Protection**: SQLAlchemy ORM throughout.
-- **XSS Protection**: Jinja2 auto-escaping, plus explicit HTML-escaping in dynamic JavaScript-rendered attendance UI.
-- **CSRF Protection**: Flask-WTF / WTForms on form submissions.
-- **Session Management**: Server-side session-based authentication for admin, manager, and employee roles.
-
-## Automated Workflows
-
-| Job | Schedule | Behavior |
+| Key | Required? | Consequence if missing |
 |---|---|---|
-| Auto-logout regularization | Daily, 23:59 | Closes out anyone still clocked in, raises a regularization request for manager/admin review |
-| Payroll generation | 1st day of every month (for the previous month) | Calculates payroll and, if auto-send is enabled, distributes encrypted payslips via email; missed runs are reconciled on next startup |
-
-## Mobile Responsive Design
-
-Built with Bootstrap 5 across:
-- **Kiosk / Login Pages**: Centered, adaptive card layout.
-- **Dashboards**: Grid layout that stacks on mobile, for both admin and employee views.
-- **Tables**: Horizontal scroll on small screens.
-- **Forms**: Full-width inputs on mobile, including the Add/Edit Employee allowance/deduction sections.
-- **Navigation**: Collapsible sidebar.
-- **Charts**: Auto-resizing.
-
-Optimized for Desktop (1200px+), Tablet (768–1199px), and Mobile (< 768px).
-
-## Database Configuration
-
-### SQLite (Default)
-
-No additional configuration needed. Database file lives under `instance/attendance.db`.
-
-### MySQL
-
-1. Install MySQL server and create a database:
-```sql
-CREATE DATABASE attendance_db;
-```
-2. Update `.env`:
-```env
-DATABASE_URL=mysql+pymysql://username:password@localhost/attendance_db
-```
-3. PyMySQL is already included in `requirements.txt`.
-
-## Troubleshooting
-
-### Issue: DeepFace / TensorFlow / MediaPipe installation fails
-**Solution:** Ensure a compatible Python version, install build tools, and retry inside a clean virtual environment.
-
-### Issue: Webcam not accessible
-**Solution:** Check browser permissions, ensure no other app is using the webcam, try Chrome.
-
-### Issue: Face recognition not matching
-**Solution:** Ensure good lighting, capture at least 20 images per employee, retrain the model, and review the tolerance setting — remember it's hard-capped for safety and can only be tightened, not loosened, below the system floor.
-
-### Issue: Manual attendance fallback rejects a correct password
-**Solution:** Confirm the employee is using their **current** `EmployeeLogin` password (the one used to log into the Employee Dashboard), not a payslip PDF password — these are unrelated credentials.
-
-### Issue: Manual attendance was marked but isn't showing up in reports/payroll
-**Solution:** Manual (password-fallback) punches start as `pending` and stay hidden from normal counts until a Manager or Admin approves them from the Approvals console — check there first.
-
-### Issue: Can't mark OUT after a manual IN
-**Solution:** If the manual IN is still `pending` approval, OUT and any further punches are blocked by design until a manager/admin approves or rejects it.
-
-### Issue: Email not sending
-**Solution:** Verify SMTP credentials in `.env`, use an app-specific password for Gmail, and check logs for the specific SMTP error.
-
-### Issue: Payslip PDF won't open
-**Solution:** Confirm the recipient is using first-4-letters-of-name (capitals) + DOB in DDMM format; if DOB isn't on file for that employee, the system falls back to Employee ID + DOB, or to their joining date if DOB is missing entirely.
-
-### Issue: Database locked error
-**Solution:** Close all other connections to the `.db` file and ensure only one application instance is running.
-
-### Issue: Port 5000 already in use
-**Solution:**
-```python
-app.run(debug=True, host='0.0.0.0', port=5001)
-```
-
-## Deployment
-
-### Production Deployment
-
-1. **Environment Variables:**
-```env
-FLASK_ENV=production
-SECRET_KEY=your-secure-secret-key
-SESSION_COOKIE_SECURE=true
-```
-2. **Production WSGI Server:**
-```bash
-pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:5000 app:app
-```
-3. **Reverse Proxy:** Nginx/Apache with SSL/HTTPS, static file serving.
-4. **Database:** MySQL/PostgreSQL for production, with regular backups.
-5. **Monitoring:** Application monitoring, error logging, resource alerts.
-
-## Version History
-
-### v3.0.0 (Current Release)
-
-- Root URL is now a public, no-login **kiosk landing page** with continuous face-scan attendance; admin/employee login is one click away instead of gating the home screen.
-- Introduced a **Manager** role (an `Employee` with designation "Manager") with its own Approvals console, separate from Admin.
-- Manual (password-fallback) attendance now runs a **hidden-until-approved** review cycle: every manual punch starts `pending`, blocks further punches for the day until resolved, supports a same-day retry after rejection, and only counts in reports/payroll once approved.
-- Added dedicated **Admin** and **Manager** edit-attendance screens for after-the-fact corrections.
-- Added a full **Employee Self-Service Portal**: dashboard, profile, payslip viewing, and personal attendance reports with export, plus an employee-specific forgot/change-password flow.
-- Added **versioned attendance settings** (`AttendanceSettingsHistory`) so historical attendance is always evaluated against the rules in force on that date, not today's settings.
-- Added a dedicated **Payroll Settings** page for auto-generation schedule, auto-email toggle, and month-by-month Professional Tax slabs.
-- Added **Company Settings** (name, address, contact, logo) editable from the UI and used across generated PDFs.
-- Added MediaPipe as a secondary face-detection backend alongside DeepFace.
-- Reconciliation for missed scheduled payroll runs on application startup.
-
-### v2.0.0
-
-- Removed the insecure Employee-ID-only manual attendance fallback; added password-verified `/mark_manual_attendance`.
-- Added `attendance_type` audit column (`FACE_RECOGNITION` / `MANUAL_PASSWORD`).
-- Manual attendance now routes through the same rule engine as camera attendance — no hardcoded status.
-- Multi-face, margin-based strict matching with server-side frame-presence locking (admin and employee streams independently isolated).
-- Configurable salary allowances (HRA, DA, Medical, Travel, Special, Other) and deductions (TDS%, Bus Charges, Other Deduction) captured end-to-end from form → database → payroll → payslip.
-- PAN/UAN/PF statutory details captured and displayed on payslips with clean fallbacks.
-- Password-protected PDF payslips (pikepdf, AES-256) with a deterministic, never-stored password rule.
-- Deliverability-conscious email service (proper MIME nesting, spam-safe subjects, no plain-text passwords ever emailed).
-- Fixed Admin Reports inconsistency between summary cards and per-employee table (shared aggregation/validity logic).
-- Safe cascade delete covering `LogoutApprovalRequest` and `AttendanceActivity`, eliminating FK integrity errors on employee deletion.
-
-### v1.1.0
-
-- DeepFace (FaceNet512) integration.
-- Automatic absent logic after office end time.
-- Responsive dashboard with improved charts.
-- Register User / Forgot Password authentication flows.
-
-### v1.0.0
-
-- Initial release: AI face recognition, attendance tracking, payroll management, PDF payslips, email integration, reports and analytics.
-
-## Future Enhancements
-
-- Biometric authentication (fingerprint/iris) as an additional fallback layer
-- Native mobile app (iOS/Android)
-- Geo-fencing for location-based attendance verification
-- Integrated leave management
-- Multi-shift support with rotation
-- Predictive analytics for attendance patterns
-- REST APIs for third-party integrations
-- Multi-language support (i18n)
-- Custom, schedulable report builder
-- Comprehensive system-wide audit logs beyond attendance
-
-## License
-
-This project is proprietary software. All rights reserved.
-
-## Contact
-
-For support and inquiries:
-- Email: lekawalevaishnavi@gmail.com
+| `SECRET_KEY` | **Yes, effectively mandatory** | Falls back to a hardcoded default (`'your-secret-key-change-in-production'`) if unset. **Never ship a customer install without setting this explicitly** — an unset `SECRET_KEY` means every install shares the same, publicly-known key, which breaks session/CSRF-token integrity. Generate one per install: `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `MAIL_*` | Only if email features are used | Payslip email delivery, password-reset emails, and approval notifications silently fail/log errors without valid SMTP credentials. The app still runs fine without them. |
+| `DATABASE_URL` | No | Defaults to a local SQLite file — the right choice for a single-site desktop install. Only set this for a MySQL deployment. |
+| `FACE_DATA_ENCRYPTION_KEY` | No — auto-managed | Auto-generated and persisted on first use by `crypto_utils.py`. **Back up `.env` once this key exists** — losing it permanently locks you out of previously-captured face photos (this is inherent to encryption, not a bug). |
+| `COMPANY_*`, office timing, salary rule defaults | No | Sensible defaults exist in `config.py`; these are just convenient overrides. All are also editable later from the admin **Settings** UI. |
 
 ---
 
-**Built with ❤️ using Python, Flask, and AI**
+## 5. DeepFace Model Weights — Offline Client Machines
+
+DeepFace downloads its model weight files (e.g. `facenet512_weights.h5`,
+plus the RetinaFace detector weights) to `~/.deepface/weights` **the first
+time it actually runs a face operation** — not at import time. A customer's
+machine will very likely have no internet access at the moment they first
+launch the app, or may be permanently offline (many attendance-kiosk PCs
+are). **If you skip this step, the shipped `.exe` will fail (or hang trying
+to reach the internet) the very first time someone tries to register a
+face.**
+
+### 5.1 Pre-download the weights on your *build* machine
+
+```bash
+# With your venv activated, from the project root
+python app.py
+```
+
+Then, in the browser:
+1. Log in as Admin (complete the Setup Wizard first if this is a fresh dev DB).
+2. Add a test employee and go through **Face Registration** — capture at
+   least one photo. This forces DeepFace to download and cache every
+   weight file it needs (FaceNet512 + RetinaFace detector).
+3. Stop the app (`Ctrl+C`).
+4. Confirm the weights landed on disk:
+
+```bash
+dir %USERPROFILE%\.deepface\weights          # Windows
+# ls ~/.deepface/weights                     # macOS/Linux
+```
+
+You should see files like `facenet512_weights.h5` and RetinaFace-related
+weight files, typically totaling 100–300 MB.
+
+### 5.2 Point the build at those weights
+
+`attendance_app.spec` auto-detects `~/.deepface/weights` by default. If your
+weights live somewhere else (a shared build server, a different user
+profile), set an environment variable before building:
+
+```bash
+set DEEPFACE_WEIGHTS_DIR=C:\path\to\.deepface\weights
+pyinstaller attendance_app.spec --clean
+```
+
+The spec prints one of two messages during the build so you can confirm
+this worked *before* handing the exe to a customer:
+
+```
+[spec] Bundling DeepFace weights from: C:\Users\you\.deepface\weights
+```
+or, if not found:
+```
+[spec] WARNING: DeepFace weights folder not found or empty at '...'.
+Building WITHOUT bundled weights - the shipped exe will try to download
+them from the internet on the customer's machine...
+```
+
+**Do not ship a build that printed the WARNING** unless you've confirmed
+the client site has internet access on first use.
+
+---
+
+## 6. Building the Windows `.exe` with PyInstaller
+
+### 6.1 Install build-only tools
+
+These are intentionally kept out of `requirements.txt` (customers never
+need them):
+
+```bash
+pip install -r requirements-packaging.txt
+```
+
+### 6.2 Pre-build checklist
+
+Run through this **every time**, not just the first build:
+
+- [ ] `requirements.txt` installed cleanly in a venv that has never had
+      plain `opencv-python` installed alongside `opencv-contrib-python`
+      (they conflict — see `requirements.txt` comments). If in doubt,
+      rebuild the venv from scratch:
+      ```bash
+      deactivate
+      rmdir /s /q venv
+      python -m venv venv
+      venv\Scripts\activate
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      pip install -r requirements-packaging.txt
+      ```
+- [ ] DeepFace weights are populated (Section 5) and either auto-detected
+      or pointed to via `DEEPFACE_WEIGHTS_DIR`.
+- [ ] You have an `.ico` file ready if you want a custom exe icon (point
+      `icon=` in `attendance_app.spec` at it — optional).
+
+### 6.3 Build
+
+```bash
+pyinstaller attendance_app.spec --clean
+```
+
+`--clean` removes PyInstaller's cache before building — always use it after
+changing `requirements.txt`, the spec file, or Python version, to avoid
+stale-cache packaging bugs.
+
+The build produces:
+```
+dist/
+└── AttendancePayrollSystem/          # onedir build — folder, not a single file
+    ├── AttendancePayrollSystem.exe
+    ├── templates/
+    ├── static/
+    ├── dataset/                      # empty scaffold — see Section 7
+    ├── uploads/
+    ├── trained_model/
+    └── ... (bundled Python runtime, DLLs, deepface_weights/ if bundled)
+```
+
+> The current spec builds a **onedir** app (a folder containing the exe and
+> its dependencies), not a single-file `--onefile` exe. Onedir starts
+> noticeably faster (no self-extraction step on every launch) and is the
+> recommended mode for a TensorFlow/DeepFace-heavy app like this one. Ship
+> the whole `AttendancePayrollSystem` folder, not just the `.exe` file.
+
+### 6.4 Verify the build — do this away from your dev machine
+
+Copy the entire `dist/AttendancePayrollSystem/` folder to:
+- a **different folder** outside your project (e.g. `C:\Temp\test-install`), or
+- ideally, a **clean VM or a second physical machine** with no Python installed.
+
+Many "works on my machine" packaging bugs (missing DLL, missing data file,
+stale `sys.path` entry) only surface once you're away from your own dev
+environment's installed Python.
+
+Then work through the checklist at the bottom of `attendance_app.spec`
+before shipping — it covers first-run DB creation, the setup wizard, the
+scheduler, face capture, PDF/email, and AV false-positive checks, in the
+order you should test them.
+
+---
+
+## 7. Production Deployment & `dist/` Folder Structure
+
+### 7.1 Where to install on the client machine
+
+Install to a location the exe can **write to without admin elevation**:
+
+```
+✅  C:\Users\<user>\AppData\Local\AttendancePayrollSystem\
+✅  C:\AttendancePayrollSystem\                (if the account has write access)
+❌  C:\Program Files\AttendancePayrollSystem\  (write-protected by default —
+                                                  SQLite/photo/log writes will
+                                                  fail with permission errors)
+```
+
+### 7.2 Folder layout after first launch
+
+```
+AttendancePayrollSystem/
+├── AttendancePayrollSystem.exe      # entry point — customer double-clicks this
+├── .env                              # created by you before first launch (Section 4)
+├── instance/
+│   └── attendance.db                 # created automatically on first launch
+├── dataset/
+│   └── <employee_id>/                # encrypted face photos, created per employee
+├── uploads/
+│   └── payrolls/<year>/<month>/      # generated payslip PDFs
+├── trained_model/
+│   └── embeddings_cache.pkl          # face embedding cache, rebuilt as needed
+├── templates/, static/               # bundled UI assets — do not edit on client machines
+└── (bundled runtime: python3xx.dll, _internal/, deepface_weights/, etc.)
+```
+
+`instance/`, `dataset/`, `uploads/`, and `trained_model/` are all created
+automatically the first time they're needed — you do not need to
+pre-create them, but you **do** need write permission in the install
+folder for this to succeed (see 7.1).
+
+### 7.3 Backups
+
+Back up these four things together, as a set, on whatever schedule you back
+up the database:
+
+```
+instance/attendance.db      ← all records
+.env                        ← SECRET_KEY, FACE_DATA_ENCRYPTION_KEY, SMTP creds
+dataset/                    ← encrypted face photos (undecryptable without .env's key)
+uploads/                    ← generated payslips
+```
+
+Losing `.env` without a backup makes every previously-encrypted face photo
+and any custom payslip password **permanently unrecoverable** — this is
+inherent to encryption, not a bug to report.
+
+---
+
+## 8. First-Time Launch & Setup Wizard
+
+### 8.1 What the customer sees
+
+1. Double-click `AttendancePayrollSystem.exe`.
+2. No console window appears (see `console=False` in the spec) — the app
+   starts silently in the background.
+3. The default browser opens automatically to `http://127.0.0.1:5000/`.
+4. If no admin account exists yet, the user is routed into the **Setup
+   Wizard** (`setup_wizard.py` / `setup_wizard.html`):
+   - Create the first Admin account (username/password).
+   - Enter Company Settings (name, address, logo, contact info).
+   - Set initial office timing / working-hours defaults (all editable
+     later from Settings).
+5. From here on, `/` is the public kiosk attendance screen; Admin/Employee
+   login is one click away.
+
+---
+
+## 9. Troubleshooting Guide
+
+### 9.1 Permission errors (database / uploads / dataset)
+
+**Symptom:** `sqlite3.OperationalError: unable to open database file`, or
+face photos / payslips silently fail to save.
+
+**Cause:** the exe is installed somewhere Windows restricts write access
+(`Program Files`, a read-only network share) without running as
+Administrator.
+
+**Fix:**
+- Move the install to `%LOCALAPPDATA%\AttendancePayrollSystem\` (Section 7.1), or
+- Right-click the exe → Properties → Compatibility → confirm it's not
+  forced to run in a virtualized/read-only mode, or
+- As a last resort, "Run as Administrator" — not recommended as a
+  permanent fix, since it changes file ownership in ways that can cause
+  *different* permission errors for a non-admin user later.
+
+### 9.2 Camera / webcam access fails
+
+**Symptom:** `Could not open webcam`, blank camera preview, or
+`cv2.VideoCapture(0)` returns `isOpened() == False`.
+
+**Checklist:**
+1. **Windows Camera Privacy Settings**: Settings → Privacy & security →
+   Camera → ensure "Let desktop apps access your camera" is **On**. This
+   is the #1 cause on fresh Windows installs — a packaged exe has no
+   camera permission dialog of its own to prompt you.
+2. **Camera already in use**: close Zoom/Teams/Windows Camera app/any
+   other program holding the camera — OpenCV cannot share device access.
+3. **Wrong device index**: if the machine has multiple cameras (e.g. a
+   laptop webcam + a USB kiosk camera), `cv2.VideoCapture(0)` may grab
+   the wrong one. Try `cv2.VideoCapture(1)` in a quick test script to
+   confirm the index, then adjust `FaceCapture.start_capture()` in
+   `ai_engine.py` accordingly for that install.
+4. **Driver issue**: confirm the camera works in the built-in Windows
+   Camera app first — if it doesn't work there, it's a driver problem,
+   not an application problem.
+
+### 9.3 Background scheduler doesn't seem to run
+
+**Symptom:** monthly payroll never auto-generates; auto-logout
+regularization requests never appear at 23:59.
+
+**Checklist:**
+1. Check the log output around startup for:
+   ```
+   Payroll scheduler started
+   DAILY APPROVAL SCHEDULER REGISTERED - 23:59
+   Payroll Next Run: ...
+   ```
+   If these lines are missing, the scheduler failed to start — look for
+   `Failed to start scheduler:` earlier in the log for the actual cause.
+2. **Most common packaged-build cause: missing APScheduler entry-point
+   metadata.** APScheduler discovers its jobstore/trigger plugins via
+   `importlib.metadata`, not plain imports — `pyinstaller-hooks-contrib`
+   plus the explicit `copy_metadata('APScheduler')` in
+   `attendance_app.spec` handles this, but if you ever hand-edit the spec
+   and remove that line, the scheduler will fail silently at init time
+   with no obvious import error to point at.
+3. **The exe was not left running.** Unlike a server, this app has no
+   background service — the scheduler only runs while
+   `AttendancePayrollSystem.exe` is open. If the customer closes the
+   browser tab (but the exe process is still running in the background,
+   which is normal — see 9.6) versus closing the exe process itself, only
+   the latter stops the scheduler. Use Task Manager to confirm
+   `AttendancePayrollSystem.exe` is actually still running.
+4. **System was asleep/off at the scheduled time.** APScheduler cannot
+   run a job while the machine is off or asleep. This is exactly why
+   `scheduler_service.py` includes a reconciliation pass on every startup
+   that detects and backfills a missed payroll period — confirm this ran
+   by checking for `PAYROLL RECONCILIATION CHECK` in the logs after a
+   restart.
+
+### 9.4 Antivirus / Windows Defender false positives
+
+**Symptom:** Defender (or another AV) quarantines the exe, or SmartScreen
+blocks it with "Windows protected your PC."
+
+This is extremely common for PyInstaller-built executables, especially
+ones bundling TensorFlow/OpenCV, and is **not** unique to this project.
+
+**Mitigations, roughly in order of effectiveness:**
+1. **Code-sign the exe** with a purchased code-signing certificate. This
+   is close to mandatory for anything you charge money for — an unsigned
+   exe from an unknown publisher is exactly the SmartScreen/Defender
+   heuristic trigger.
+2. Rebuild with `upx=False` in `attendance_app.spec` — UPX-compressed
+   executables are disproportionately flagged by heuristic AV engines
+   even when clean, because malware also commonly uses UPX to evade
+   signature detection.
+3. Submit the exe to Microsoft for analysis
+   (https://www.microsoft.com/en-us/wdsi/filesubmission) if Defender
+   specifically flags it — false positives on legitimate PyInstaller apps
+   are regularly reviewed and whitelisted this way, though it can take a
+   few days.
+4. As a stopgap for a specific customer site only, an IT admin can add an
+   exclusion for the install folder in Windows Security settings — do not
+   rely on this as your primary distribution strategy.
+
+### 9.5 "ModuleNotFoundError" or "DLL load failed" only in the built exe
+
+**Symptom:** `python app.py` works fine, but the packaged exe crashes on
+startup or the first time a specific feature (face capture, PDF export)
+is used.
+
+**This means a hidden import or data file wasn't bundled.** Work through:
+1. Confirm you built with `pip install pyinstaller-hooks-contrib` present
+   — it ships the community hooks for TensorFlow/MediaPipe/PIL that
+   vanilla PyInstaller doesn't know about.
+2. Check whether the missing module belongs to a package already listed
+   in `attendance_app.spec`'s `hiddenimports`/`collect_submodules` calls —
+   if it's a new dependency you've since added to `requirements.txt`, it
+   needs its own line added to the spec.
+3. Re-run with `pyinstaller attendance_app.spec --clean` — a stale build
+   cache can mask a spec-file fix you already made.
+4. Temporarily set `console=True` in the spec **on your own machine only**
+   to see the actual traceback (never ship a build with `console=True`).
+
+### 9.6 The exe process stays running after closing the browser tab
+
+This is expected behavior, not a bug: closing the browser tab does not
+close the Flask server or the background scheduler — only closing the
+`AttendancePayrollSystem.exe` process (via its window, if one is provided,
+or Task Manager) does. Communicate this clearly to end users if they
+expect "closing the window" to fully quit the app — consider adding a
+system tray icon with an explicit "Quit" action in a future iteration if
+this causes confusion.
+
+---
+
+## 10. Appendix: File Map
+
+| File | Purpose |
+|---|---|
+| `app.py` | Main Flask app, routes, startup block |
+| `launcher.py` | PyInstaller entry point — wraps `app.py` for frozen builds |
+| `config.py` | Environment-aware configuration, frozen-safe `BASE_DIR` |
+| `database.py` | SQLAlchemy/Flask-Migrate init, lightweight ad-hoc migrations |
+| `models.py` | All ORM models |
+| `ai_engine.py` | Face detection/recognition engine, embedding cache, presence tracker |
+| `crypto_utils.py` | At-rest encryption for face photos & custom payslip passwords |
+| `attendance.py` | Core attendance status rule engine |
+| `payroll.py` | Payroll calculation engine |
+| `pdf_generator.py` | Payslip/report PDF generation + AES-256 password protection |
+| `email_service.py` | SMTP email delivery for payslips, resets, notifications |
+| `scheduler_service.py` | APScheduler jobs: auto-logout, monthly payroll, reconciliation |
+| `setup_wizard.py` | First-run admin/company setup flow |
+| `attendance_app.spec` | PyInstaller build spec |
+| `requirements.txt` | Runtime dependencies |
+| `requirements-packaging.txt` | Build-only dependencies (PyInstaller, etc.) |
+
+---
+
+**Questions or issues during packaging?** Work through Section 6.4's build
+verification checklist and Section 9's troubleshooting guide in order —
+the overwhelming majority of PyInstaller packaging issues for this stack
+are covered by one of those two sections.

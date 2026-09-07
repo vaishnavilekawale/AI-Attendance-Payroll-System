@@ -253,6 +253,32 @@
             }
         }
     </style>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script>
+        // Automatically attach the CSRF token (from the meta tag above) as an
+        // X-CSRFToken header on every same-origin, state-changing fetch() call
+        // on this page, so existing fetch()-based AJAX calls keep working
+        // under Flask-WTF's CSRFProtect without having to edit every call site.
+        (function () {
+            var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : null;
+            var originalFetch = window.fetch;
+            window.fetch = function (input, init) {
+                init = init || {};
+                var method = (init.method || 'GET').toUpperCase();
+                if (csrfToken && method !== 'GET' && method !== 'HEAD') {
+                    if (init.headers instanceof Headers) {
+                        if (!init.headers.has('X-CSRFToken')) {
+                            init.headers.set('X-CSRFToken', csrfToken);
+                        }
+                    } else {
+                        init.headers = Object.assign({}, init.headers, { 'X-CSRFToken': csrfToken });
+                    }
+                }
+                return originalFetch.call(this, input, init);
+            };
+        })();
+    </script>
 </head>
 <body>
 
@@ -409,6 +435,20 @@
         let scanInProgress = false;   // prevents overlapping requests if a scan is slow
         const SCAN_INTERVAL_MS = 1800; // how often we send a frame for recognition
 
+        // How many CONSECUTIVE scans must come back "unknown" before we
+        // surface the hard "Face Not Recognized" error. A face is being
+        // detected in every one of these frames - the person IS in front
+        // of the camera - so a single missed match (a lighting flicker, a
+        // blink, a slightly blurred frame) no longer flips the UI straight
+        // to a red error. Instead we hold a steady "in frame" state for a
+        // few seconds first, which removes the abrupt flicker while the
+        // employee is still correctly positioned. Matching security is
+        // completely unaffected: every individual frame is still checked
+        // against the same strict recognition threshold - we simply don't
+        // give up after just one attempt.
+        const UNMATCHED_CONFIRM_THRESHOLD = 3;
+        let unmatchedStreak = 0;
+
         // Rolling log of successful marks shown in the UI without a full page reload,
         // so the camera keeps running continuously for the next person.
         const recentlyMarked = [];
@@ -495,6 +535,9 @@
         // ------------------------------------------------------------------
         function handleScanResults(faces) {
             if (!faces.length) {
+                // Nobody in frame at all - reset the streak so the next
+                // person who steps up gets the full grace window too.
+                unmatchedStreak = 0;
                 setStatus('info', 'bi-camera-video', 'Scanning...', 'No face detected. Please look at the camera.');
                 renderLiveFaces([]);
                 return;
@@ -532,12 +575,27 @@
             }
 
             if (anyLogged) {
+                unmatchedStreak = 0;
+                document.getElementById('employeeIdFallback').style.display = 'none';
                 setStatus('success', 'bi-person-check', 'Attendance Updated', 'Continuing to scan for the next person...');
             } else if (anyUnknown && faces.every(f => f.status === 'unknown')) {
-                setStatus('danger', 'bi-x-circle', 'Face Not Recognized',
-                    'A face was detected but did not match any registered employee.');
-                document.getElementById('employeeIdFallback').style.display = 'block';
+                // A face IS present in this frame - the person is standing
+                // in front of the camera - it just didn't match on this
+                // particular attempt. Only escalate to the hard error after
+                // several consecutive misses, so a momentary lighting/blur
+                // blip doesn't flicker the UI while they're still correctly
+                // positioned.
+                unmatchedStreak += 1;
+                if (unmatchedStreak >= UNMATCHED_CONFIRM_THRESHOLD) {
+                    setStatus('danger', 'bi-x-circle', 'Face Not Recognized',
+                        'A face was detected but did not match any registered employee.');
+                    document.getElementById('employeeIdFallback').style.display = 'block';
+                } else {
+                    setStatus('info', 'bi-person-bounding-box', 'Face In Frame',
+                        'Verifying your identity, please hold still and stay in view...');
+                }
             } else {
+                unmatchedStreak = 0;
                 setStatus('info', 'bi-camera-video', 'Scanning...', 'Watching the camera feed for faces.');
             }
         }

@@ -733,7 +733,8 @@ class ApprovalService:
         
         Args:
             manager_id: ID of the manager (for manager view)
-            admin_view: If True, returns all pending requests (for admin view)
+            admin_view: If True, returns pending requests raised BY MANAGERS
+                        only (for admin view)
             
         Returns:
             list of Attendance objects with pending manual attendance
@@ -757,6 +758,14 @@ class ApprovalService:
                     Employee.department == manager.department,
                     Employee.designation != 'Manager'
                 )
+        elif admin_view:
+            # A regular employee's manual attendance request must go ONLY
+            # to their department manager, and must NOT appear on the
+            # Admin's queue at this initial/pending stage. The Admin's
+            # pending queue is therefore restricted to requests raised BY
+            # Managers themselves (who have no manager above them to
+            # approve their own attendance).
+            query = query.join(Employee).filter(Employee.designation == 'Manager')
         
         requests = query.order_by(Attendance.submission_timestamp.desc()).all()
         logger.info(f"Found {len(requests)} pending manual attendance requests")

@@ -7,6 +7,32 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script>
+        // Automatically attach the CSRF token (from the meta tag above) as an
+        // X-CSRFToken header on every same-origin, state-changing fetch() call
+        // on this page, so existing fetch()-based AJAX calls keep working
+        // under Flask-WTF's CSRFProtect without having to edit every call site.
+        (function () {
+            var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : null;
+            var originalFetch = window.fetch;
+            window.fetch = function (input, init) {
+                init = init || {};
+                var method = (init.method || 'GET').toUpperCase();
+                if (csrfToken && method !== 'GET' && method !== 'HEAD') {
+                    if (init.headers instanceof Headers) {
+                        if (!init.headers.has('X-CSRFToken')) {
+                            init.headers.set('X-CSRFToken', csrfToken);
+                        }
+                    } else {
+                        init.headers = Object.assign({}, init.headers, { 'X-CSRFToken': csrfToken });
+                    }
+                }
+                return originalFetch.call(this, input, init);
+            };
+        })();
+    </script>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">

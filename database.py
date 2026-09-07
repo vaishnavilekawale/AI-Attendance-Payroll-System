@@ -1,7 +1,11 @@
+import logging
+
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from config import Config
 import os
+
+logger = logging.getLogger(__name__)
 
 db = SQLAlchemy()
 migrate = Migrate()
@@ -9,8 +13,39 @@ migrate = Migrate()
 def init_db(app):
     db.init_app(app)
     migrate.init_app(app, db)
-    
+
     with app.app_context():
+        # Diagnostic: log whether the database file already existed
+        # BEFORE db.create_all() touches it. This is the single most
+        # useful line in the whole app for telling a genuine "my data
+        # disappeared" bug apart from a normal fresh install - check
+        # logs/app.log after a restart: if this says "already existed"
+        # every time and the app still shows an empty setup wizard, that
+        # points at something reading from a DIFFERENT file than this one
+        # (e.g. two copies of the exe in different folders). If it says
+        # "did NOT exist" on every single launch, BASE_DIR itself is not
+        # stable across launches - see config.py's temp-folder warning.
+        db_uri = app.config.get('SQLALCHEMY_DATABASE_URI', '')
+        if db_uri.startswith('sqlite:///'):
+            db_file_path = db_uri.replace('sqlite:///', '', 1)
+            pre_existing = os.path.exists(db_file_path)
+            logger.info(
+                "Database file %s %s before this startup (path: %s)",
+                db_file_path,
+                "ALREADY EXISTED" if pre_existing else "did NOT exist",
+                db_file_path,
+            )
+            if not pre_existing:
+                logger.warning(
+                    "No existing database file was found at startup - a "
+                    "brand new, empty database is about to be created. "
+                    "If you expected existing data here, STOP and check "
+                    "BASE_DIR in logs/app.log before proceeding - creating "
+                    "tables below will not itself destroy anything, but "
+                    "using the app from here will start writing into this "
+                    "new, empty file."
+                )
+
         db.create_all()
         
         # Add new columns if they don't exist (for existing databases)
@@ -234,19 +269,35 @@ def init_db(app):
         except Exception as e:
             print(f"Note: employee_login table may not exist yet: {e}")
         
-        # Create default admin user if not exists
+        # ------------------------------------------------------------------
+        # IMPORTANT: this used to unconditionally create a default admin
+        # account (username='admin', password='admin123') on every fresh
+        # install. That meant every deployment of this software shipped
+        # with the exact same, publicly-documented login - a critical
+        # vulnerability, and arguably worse than any of the others fixed
+        # during the security hardening pass, since it required no
+        # guessing at all. First-run admin creation is now handled
+        # entirely by the guided setup wizard (blueprints/setup_wizard.py),
+        # which only allows account creation while zero admins exist.
+        #
+        # For installs that already have the legacy seeded account sitting
+        # in their database from before this fix: rather than silently
+        # leaving a known-password account active, detect it and force a
+        # password change on next login instead of trusting it as-is.
+        # ------------------------------------------------------------------
         from models import Admin, Employee
-        admin = Admin.query.filter_by(username='admin').first()
-        if not admin:
-            from werkzeug.security import generate_password_hash
-            admin = Admin(
-                username='admin',
-                password_hash=generate_password_hash('admin123'),
-                email='admin@company.com'
-            )
-            db.session.add(admin)
+        legacy_default_admin = Admin.query.filter_by(username='admin').first()
+        if legacy_default_admin and legacy_default_admin.check_password('admin123'):
+            legacy_default_admin.force_password_change = True
             db.session.commit()
-            print("Default admin user created: username=admin, password=admin123")
+            print(
+                "SECURITY WARNING: found the legacy default admin account "
+                "(username='admin') still using its original seeded "
+                "password. It has been flagged to require a password "
+                "change on next login. Log in as 'admin' and change the "
+                "password immediately, or delete this account if you have "
+                "already created your own admin via the setup wizard."
+            )
         
         # ------------------------------------------------------------------
         # Create EmployeeLogin records for existing employees
