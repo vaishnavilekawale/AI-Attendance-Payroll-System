@@ -55,6 +55,7 @@ datas = [
     (os.path.join(PROJECT_ROOT, 'static'), 'static'),
     (os.path.join(PROJECT_ROOT, 'dataset'), 'dataset'),
     (os.path.join(PROJECT_ROOT, 'uploads'), 'uploads'),
+    (os.path.join(PROJECT_ROOT, 'uploads', 'payrolls'), os.path.join('uploads', 'payrolls')),
     (os.path.join(PROJECT_ROOT, 'trained_model'), 'trained_model'),
 ]
 
@@ -297,9 +298,7 @@ exe = EXE(
 #     folder; prefer installing to %LOCALAPPDATA%\AttendancePayrollSystem
 #     rather than Program Files.
 # [ ] Confirm the setup wizard runs (create first admin, set company info).
-# [ ] Confirm the license check actually blocks the app when license.lic
-#     is missing/invalid, and runs when it's valid - test this BEFORE
-#     testing face recognition, since it should fail fast.
+
 # [ ] Confirm the background scheduler actually starts without error -
 #     this is where the APScheduler entry-point/metadata issue above
 #     would surface, and it can fail silently in a way that looks like
@@ -310,10 +309,7 @@ exe = EXE(
 #     iteration here.
 # [ ] Confirm PDF payslip generation (including AES-256 encryption via
 #     pikepdf) and, if configured, email sending both work.
-# [ ] Confirm generate_license.py and PRIVATE_KEY_DO_NOT_SHIP.pem are
-#     NOT present anywhere in the built dist/ folder - open the output
-#     directory and manually check for them, since these must never
-#     reach a customer.
+
 # [ ] Check Windows Defender / other AV doesn't flag the exe - try
 #     upx=False if this happens, and consider code-signing the exe with
 #     a purchased certificate, which meaningfully reduces false

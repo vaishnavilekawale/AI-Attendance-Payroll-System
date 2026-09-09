@@ -35,7 +35,7 @@ from attendance import AttendanceManager
 from payroll import PayrollCalculator
 from email_service import EmailService
 from pdf_generator import PDFGenerator, generate_payslip_password
-from scheduler_service import payroll_scheduler
+from scheduler_service import payroll_scheduler, get_payslip_full_path
 from services.attendance_stats import has_rejected_approval, normalize_attendance_status
 import logging
 import atexit
@@ -1535,16 +1535,16 @@ def generate_payslip(id):
 
     filename = f"payslip_{employee.employee_id}_{payroll.month}_{payroll.year}.pdf"
     
-    # Use the same path structure as scheduler_service for consistency
-    from models import PayrollSettings
-    payroll_settings = PayrollSettings.get_settings()
-    base_path = payroll_settings.payslip_storage_path or 'payrolls'
-    payslip_dir = os.path.join(app.config['UPLOAD_FOLDER'], base_path, str(payroll.year), f"{payroll.month:02d}")
+    # BUG FIX: build the path using the SAME shared helper scheduler_service
+    # uses (get_payslip_full_path), so a manually-generated payslip always
+    # lands in exactly the same place an auto-generated one would - always
+    # anchored under Config.UPLOAD_FOLDER. See scheduler_service.py's
+    # get_payslip_full_path()/_get_payslip_path() docstrings for the full
+    # history of the bug this fixes.
+    output_path = get_payslip_full_path(payroll.year, payroll.month, filename)
     
     # Create directory if it doesn't exist
-    os.makedirs(payslip_dir, exist_ok=True)
-    
-    output_path = os.path.join(payslip_dir, filename)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     _, _, _, pg = get_services()
     company_settings = CompanySettings.query.first()
@@ -1567,19 +1567,16 @@ def generate_payslip(id):
     )
 
     payroll.payslip_generated = True
-    
-    # Ha line badal:
-    # payroll.payslip_path = f"uploads/{filename}"
-    
-    # Asya padhhati ne purna relative path save kar:
-    payroll.payslip_path = f"payrolls/{payroll.year}/{payroll.month:02d}/{filename}"
-    
+
+    # BUG FIX: store the exact, full, absolute path the file was just
+    # written to (output_path, from get_payslip_full_path() above), not a
+    # hand-built relative string. This is exactly what scheduler_service.py
+    # stores for auto-generated payrolls, and it's what
+    # send_payslip_email() below (and EmailService) now read directly -
+    # eliminating the "generated here, looked for there" mismatch.
+    payroll.payslip_path = output_path
+
     db.session.commit()
-    # payroll.payslip_generated = True
-    # # Tip: Path madhe jar nested folders astil tar yevaji full relative path save kela tari chalel, 
-    # # pan sathyala ha code run karun bagh.
-    # payroll.payslip_path = f"uploads/{filename}"
-    # db.session.commit()
 
     # 2. Browser cache disable karanyasathi he use kara
     response = make_response(send_file(output_path, as_attachment=True, download_name=filename))
@@ -1599,7 +1596,16 @@ def send_payslip_email(id):
         flash('Please generate payslip first', 'warning')
         return redirect(url_for('payroll'))
     
-    payslip_path = os.path.join(app.config['UPLOAD_FOLDER'], os.path.basename(payroll.payslip_path))
+    # BUG FIX: pass the stored path straight through. It's now always the
+    # full, correct path under Config.UPLOAD_FOLDER (see generate_payslip()
+    # above and scheduler_service.py). Previously this stripped the
+    # year/month sub-folders via os.path.basename() and re-joined with
+    # UPLOAD_FOLDER directly, which pointed at a location the file was
+    # never actually written to. EmailService also independently falls
+    # back to resolving legacy/pre-fix path formats
+    # (see EmailService._resolve_attachment_path), so payslips generated
+    # before this fix can still be emailed successfully.
+    payslip_path = payroll.payslip_path
 
     # Same deterministic password used to protect the PDF at generation
     # time - recomputed here (never persisted) so the email can tell the

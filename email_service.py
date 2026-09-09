@@ -5,7 +5,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from email.utils import formataddr, formatdate, make_msgid
 import os
-from config import Config
+from config import Config, BASE_DIR
 import logging
 
 # Removed logging.basicConfig() to avoid conflict with app.py logging configuration
@@ -97,9 +97,11 @@ class EmailService:
             # generic "unknown file").
             if attachments:
                 for attachment_path in attachments:
-                    if not os.path.exists(attachment_path):
+                    resolved_path = self._resolve_attachment_path(attachment_path)
+                    if resolved_path is None:
                         logger.warning(f"[Email Service] Attachment not found, skipping: {attachment_path}")
                         continue
+                    attachment_path = resolved_path
 
                     filename = os.path.basename(attachment_path)
                     ext = os.path.splitext(filename)[1].lower()
@@ -145,6 +147,54 @@ class EmailService:
             import traceback
             logger.error(f"[Email Service] Full traceback: {traceback.format_exc()}")
             return {'success': False, 'message': str(e)}
+
+    @staticmethod
+    def _resolve_attachment_path(attachment_path):
+        """
+        Resolve an attachment path to a real file on disk, tolerating the
+        path-mismatch bug this fix addresses (see scheduler_service.py's
+        get_payslip_full_path/_get_payslip_path comments for the full
+        history): payslip PDFs have, at various points, been generated
+        under Config.UPLOAD_FOLDER, under a bare 'payrolls/...' folder
+        relative to the app's working directory, or referenced by a path
+        stored relative to Config.UPLOAD_FOLDER in the database.
+
+        Rather than requiring every caller to pass an already-correct
+        absolute path, this tries, in order:
+          1. The path exactly as given (covers already-correct absolute
+             paths, and paths that happen to be valid relative to the
+             current working directory).
+          2. The path resolved relative to Config.UPLOAD_FOLDER - the
+             CANONICAL location going forward for every generated
+             payslip (see scheduler_service.get_payslip_full_path).
+          3. The path resolved relative to Config.BASE_DIR - the legacy
+             location payslips were written to before this fix, kept as
+             a fallback purely so payslips generated before this
+             upgrade can still be emailed successfully.
+          4. Just the file's basename, looked up directly inside
+             Config.UPLOAD_FOLDER - covers the oldest, most-broken
+             legacy behaviour that discarded the year/month
+             sub-folders entirely.
+
+        Returns the first candidate that exists on disk, or None if none
+        of them do.
+        """
+        if not attachment_path:
+            return None
+
+        candidates = [attachment_path]
+
+        if not os.path.isabs(attachment_path):
+            candidates.append(os.path.join(Config.UPLOAD_FOLDER, attachment_path))
+            candidates.append(os.path.join(BASE_DIR, attachment_path))
+
+        candidates.append(os.path.join(Config.UPLOAD_FOLDER, os.path.basename(attachment_path)))
+
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+
+        return None
 
     @staticmethod
     def _html_to_plain_text(html_body):

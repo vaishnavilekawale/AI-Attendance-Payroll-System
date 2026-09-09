@@ -30,6 +30,12 @@ import os
 import sys
 import runpy
 
+# Safe standard output/error redirection for non-console (frozen) environments
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
+
 # Always enforce the license in a packaged build, no matter what
 # FLASK_ENV happens to be set to.
 # os.environ['LICENSE_CHECK_ENABLED'] = 'true'

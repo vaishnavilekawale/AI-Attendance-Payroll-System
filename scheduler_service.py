@@ -11,6 +11,7 @@ from payroll import PayrollCalculator, is_payroll_eligible
 from pdf_generator import PDFGenerator, generate_payslip_password
 from email_service import EmailService
 from database import db
+from config import Config
 import os
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,68 @@ logger = logging.getLogger(__name__)
 # Module-level flag to prevent duplicate scheduler initialization
 # This persists across Flask debug reloader restarts
 _scheduler_initialized = False
+
+
+# ---------------------------------------------------------------------
+# Shared payslip path helpers.
+#
+# BUG FIX: this module used to build payslip storage paths as
+#     os.path.join(base_path, str(year), f"{month:02d}", filename)
+# with base_path defaulting to the bare string 'payrolls' - i.e. a path
+# RELATIVE to whatever the process's current working directory happened
+# to be at the time (e.g. './payrolls/2026/08/payslip_....pdf'). Nothing
+# anchored it to Config.UPLOAD_FOLDER.
+#
+# Meanwhile, app.py's manual "Generate Payslip" route built its path as
+# os.path.join(Config.UPLOAD_FOLDER, base_path, year, month, filename) -
+# i.e. under 'uploads/payrolls/...'. Two different generation code paths
+# wrote to two different real locations on disk depending on how the PDF
+# was created (automatically by the scheduler vs. manually by an admin),
+# and the email-sending code then looked in yet another derived location
+# that matched neither. The end result: a payslip could be generated
+# successfully and still fail to attach to (or simply not be found by)
+# the payslip email.
+#
+# Fix: ALWAYS resolve payslip storage under Config.UPLOAD_FOLDER, via
+# these two shared helpers, so every code path (scheduler auto-generation,
+# reconciliation of missed payroll, and the manual admin-triggered
+# generate/email routes in app.py) computes the exact same path for the
+# exact same (year, month, filename).
+# ---------------------------------------------------------------------
+
+def get_payslip_storage_subdir():
+    """
+    Return the configured payslip storage sub-folder name (relative to
+    Config.UPLOAD_FOLDER), e.g. 'payrolls'. Falls back to 'payrolls' if
+    settings are unavailable (e.g. no app/DB context) or unset.
+    """
+    try:
+        payroll_settings = PayrollSettings.get_settings()
+        return payroll_settings.payslip_storage_path or 'payrolls'
+    except Exception:
+        return 'payrolls'
+
+
+def get_payslip_relative_path(year, month, filename, base_subdir=None):
+    """
+    Return the payslip's path RELATIVE to Config.UPLOAD_FOLDER:
+    "<base_subdir>/<year>/<month:02d>/<filename>".
+    """
+    if base_subdir is None:
+        base_subdir = get_payslip_storage_subdir()
+    return os.path.join(base_subdir, str(year), f"{month:02d}", filename)
+
+
+def get_payslip_full_path(year, month, filename, base_subdir=None):
+    """
+    Return the full, ABSOLUTE filesystem path for a payslip PDF, always
+    anchored under Config.UPLOAD_FOLDER. This is the single source of
+    truth for "where does this payslip live on disk" - every place that
+    generates or reads a payslip file should go through this function
+    (or the equivalent instance method PayrollScheduler._get_payslip_path)
+    rather than building the path by hand.
+    """
+    return os.path.join(Config.UPLOAD_FOLDER, get_payslip_relative_path(year, month, filename, base_subdir))
 
 class PayrollScheduler:
     def __init__(self, app=None):
@@ -342,10 +405,23 @@ class PayrollScheduler:
                 logger.error(traceback.format_exc())
     
     def _get_payslip_path(self, year, month, filename):
-        """Get full path for payslip PDF storage"""
-        payroll_settings = PayrollSettings.get_settings()
-        base_path = payroll_settings.payslip_storage_path or 'payrolls'
-        return os.path.join(base_path, str(year), f"{month:02d}", filename)
+        """
+        Get the full, absolute filesystem path for payslip PDF storage.
+
+        BUG FIX: this now always resolves under Config.UPLOAD_FOLDER (via
+        the module-level get_payslip_full_path() helper above), matching
+        exactly where app.py's manual "Generate Payslip" route writes the
+        file and where EmailService.send_payslip() looks for its
+        attachment. Previously this returned a path relative to the
+        process's current working directory (e.g.
+        './payrolls/2026/08/payslip_....pdf'), which was NOT the same
+        location the email-sending code expected
+        ('<UPLOAD_FOLDER>/payrolls/...') - so an auto-generated payslip
+        could be saved successfully but its email attachment would be
+        silently skipped as "not found".
+        """
+        base_subdir = get_payslip_storage_subdir()
+        return get_payslip_full_path(year, month, filename, base_subdir=base_subdir)
     
     def _get_month_name(self, month):
         """Get month name from month number"""

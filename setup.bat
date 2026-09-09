@@ -17,11 +17,17 @@ call venv\Scripts\activate
 echo Upgrading pip...
 python -m pip install --upgrade pip
 
-:: 5. Install Dependencies
+:: 5. Install Runtime Dependencies
 echo Installing dependencies from requirements.txt...
 pip install -r requirements.txt
 
-:: 6. Setup .env file
+:: 6. Install Packaging Dependencies (for PyInstaller)
+if exist requirements-packaging.txt (
+    echo Installing packaging dependencies...
+    pip install -r requirements-packaging.txt
+)
+
+:: 7. Setup .env file
 if not exist .env (
     if exist .env.example (
         copy .env.example .env
@@ -29,8 +35,20 @@ if not exist .env (
     )
 )
 
+:: 8. Ensure necessary folders exist (Git ignores empty folders)
+if not exist dataset mkdir dataset
+if not exist instance mkdir instance
+if not exist uploads mkdir uploads
+if not exist trained_model mkdir trained_model
+
+:: 9. Build .exe using PyInstaller Spec file automatically
 echo ==========================================
-echo Setup Completed Successfully!
-echo Run 'python launcher.py' to start the app.
+echo Building .exe file using PyInstaller...
+echo ==========================================
+pyinstaller attendance_app.spec --clean
+
+echo ==========================================
+echo Setup and .exe Build Completed Successfully!
+echo Your executable is ready inside the 'dist' folder.
 echo ==========================================
 pause
