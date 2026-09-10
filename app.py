@@ -1929,10 +1929,18 @@ def settings():
         if 'company_logo' in request.files:
             file = request.files['company_logo']
             if file and allowed_file(file.filename):
-                filename = secure_filename(f"company_logo_{file.filename}")
-                logo_path = os.path.join('static/images', filename)
-                file.save(logo_path)
-                settings.company_logo = f"static/images/{filename}"
+                try:
+                    filename = secure_filename(f"company_logo_{file.filename}")
+                    # Use BASE_DIR to ensure path is absolute and persists across restarts
+                    logo_dir = os.path.join(BASE_DIR, 'static', 'images')
+                    os.makedirs(logo_dir, exist_ok=True)
+                    logo_path = os.path.join(logo_dir, filename)
+                    file.save(logo_path)
+                    settings.company_logo = f"static/images/{filename}"
+                except Exception as e:
+                    logger.error(f"Failed to save company logo: {e}")
+                    flash('Failed to save company logo. Please try again.', 'danger')
+
 
         db.session.commit()
 
