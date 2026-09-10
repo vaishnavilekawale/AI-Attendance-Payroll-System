@@ -572,15 +572,19 @@ class AttendanceManager:
                         'late': 0
                     }
                 
-                # Count based on status
-                if attendance.status == 'present' or attendance.status == 'late':
+                # Count based on status - MUST match dashboard summary logic exactly
+                # Dashboard logic (app.py):
+                # - present = status == 'present' only (excludes late and half_day)
+                # - absent = status == 'absent'
+                # - half_day = status == 'half_day'
+                # - late = late_entry flag (can be present, late, or half_day)
+                if attendance.status == 'present':
                     dept_stats[dept]['present'] += 1
                 elif attendance.status == 'half_day':
-                    # Half Day counts as both Present and Half Day
-                    dept_stats[dept]['present'] += 1
                     dept_stats[dept]['half_day'] += 1
                 elif attendance.status == 'absent':
                     dept_stats[dept]['absent'] += 1
+                # Late is counted separately based on flag (not status)
                 if attendance.late_entry:
                     dept_stats[dept]['late'] += 1
             
