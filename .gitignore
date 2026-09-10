@@ -29,6 +29,7 @@ dataset/*
 
 uploads/*
 !uploads/.gitkeep
+!uploads/payrolls/.gitkeep
 
 payrolls/*
 !payrolls/.gitkeep

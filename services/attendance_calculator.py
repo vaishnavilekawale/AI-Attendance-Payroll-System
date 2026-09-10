@@ -30,65 +30,100 @@ class AttendanceCalculator:
     
     def calculate_working_hours(self, attendance):
         """
-        Calculate total working hours from all IN-OUT pairs for a day.
-        
-        This handles unlimited IN/OUT activities by summing all valid pairs.
-        After manager approval, the OUT activity (23:59) is created, so this
-        correctly calculates hours without double-counting attendance.out_time.
-        
-        IMPORTANT: When attendance.in_time and attendance.out_time are both set
-        (e.g., after admin edit), use them directly to preserve cross-day datetime
-        information that AttendanceActivity cannot store (it only stores time + date).
-        
-        Args:
-            attendance: Attendance object with in_time and date
-            
-        Returns:
-            float: Total working hours
+        Calculate total working hours from all IN-OUT pairs for a day
+        with exact integer-based nanoseconds precision (no floating-point errors).
         """
         if not attendance.in_time:
             return 0.0
-        
-        # If both in_time and out_time are set, use them directly
-        # This handles admin edits with cross-day shifts correctly
-        if attendance.in_time and attendance.out_time:
-            total_seconds = (attendance.out_time - attendance.in_time).total_seconds()
-            result = round(total_seconds / 3600, 2)
-            return result
-        
-        # Get all activities for this employee on this date
+
         activities = AttendanceActivity.query.filter_by(
             employee_id=attendance.employee_id,
             attendance_date=attendance.date
-        ).order_by(AttendanceActivity.activity_time).all()
-        
-        if not activities:
-            # No activities recorded and no out_time, return 0
-            return 0.0
-        
-        # Calculate working hours from IN-OUT pairs
-        total_hours = 0.0
-        in_time = None
-        pair_count = 0
-        
-        for activity in activities:
-            if activity.action == 'IN':
-                # Convert time to datetime for calculation
-                in_datetime = datetime.combine(attendance.date, activity.activity_time)
-                in_time = in_datetime
-            elif activity.action == 'OUT' and in_time:
-                # Calculate duration for this IN-OUT pair
-                out_datetime = datetime.combine(attendance.date, activity.activity_time)
-                # Handle case where OUT is next day (cross-day shift)
+        ).order_by(AttendanceActivity.activity_time, AttendanceActivity.id).all()
+
+        print(f"\n--- Activity Breakdown for Employee {attendance.employee_id} on {attendance.date} ---")
+
+        if activities:
+            total_hours = 0.0
+            in_time = None
+            pair_index = 1
+
+            for activity in activities:
+                if activity.action == 'IN':
+                    in_time = datetime.combine(attendance.date, activity.activity_time)
+                elif activity.action == 'OUT' and in_time:
+                    out_datetime = datetime.combine(attendance.date, activity.activity_time)
+                    
+                    # Handle case where OUT is next day (cross-day shift)
+                    if out_datetime < in_time:
+                        out_datetime = out_datetime + timedelta(days=1)
+                    
+                    delta = out_datetime - in_time
+                    pair_seconds = delta.total_seconds()
+                    total_hours += pair_seconds / 3600
+
+                    # Exact calculations using timedelta components
+                    p_min_val = int(pair_seconds // 60)
+                    p_hrs = p_min_val // 60
+                    p_mins = p_min_val % 60
+                    p_secs = int(pair_seconds % 60)
+                    
+                    # Exact 9 digits nanoseconds without float drift (microseconds * 1000)
+                    p_ns = delta.microseconds * 1000
+
+                    in_str = in_time.strftime('%H:%M:%S') + f".{in_time.microsecond * 1000:09d}"
+                    out_str = out_datetime.strftime('%H:%M:%S') + f".{out_datetime.microsecond * 1000:09d}"
+
+                    print(f"  [Pair #{pair_index}] {in_str} -> {out_str}")
+                    print(f"    -> Hours: {p_hrs} | Minutes: {p_mins} | Seconds: {p_secs} | Nanoseconds: {p_ns:09d} (Total Seconds: {pair_seconds})")
+
+                    pair_index += 1
+                    in_time = None
+
+            if in_time and attendance.out_time:
+                out_datetime = attendance.out_time
                 if out_datetime < in_time:
                     out_datetime = out_datetime + timedelta(days=1)
-                duration = (out_datetime - in_time).total_seconds() / 3600
-                pair_count += 1
-                total_hours += duration
-                in_time = None
-        
-        result = round(total_hours, 2)
-        return result
+                
+                delta = out_datetime - in_time
+                pair_seconds = delta.total_seconds()
+                total_hours += pair_seconds / 3600
+
+                p_min_val = int(pair_seconds // 60)
+                p_hrs = p_min_val // 60
+                p_mins = p_min_val % 60
+                p_secs = int(pair_seconds % 60)
+                p_ns = delta.microseconds * 1000
+
+                in_str = in_time.strftime('%H:%M:%S') + f".{in_time.microsecond * 1000:09d}"
+                out_str = out_datetime.strftime('%H:%M:%S') + f".{out_datetime.microsecond * 1000:09d}"
+
+                print(f"  [Pair #{pair_index} - Dangling/Auto-out] {in_str} -> {out_str}")
+                print(f"    -> Hours: {p_hrs} | Minutes: {p_mins} | Seconds: {p_secs} | Nanoseconds: {p_ns:09d} (Total Seconds: {pair_seconds})")
+
+            print(f"Total working hours calculated from activities: {round(total_hours, 2)}\n")
+            return round(total_hours, 2)
+
+        # No activity log at all - fallback to raw span
+        if attendance.in_time and attendance.out_time:
+            delta = attendance.out_time - attendance.in_time
+            total_seconds = delta.total_seconds()
+            
+            p_min_val = int(total_seconds // 60)
+            p_hrs = p_min_val // 60
+            p_mins = p_min_val % 60
+            p_secs = int(total_seconds % 60)
+            p_ns = delta.microseconds * 1000
+
+            in_str = attendance.in_time.strftime('%H:%M:%S') + f".{attendance.in_time.microsecond * 1000:09d}"
+            out_str = attendance.out_time.strftime('%H:%M:%S') + f".{attendance.out_time.microsecond * 1000:09d}"
+
+            print(f"  [Raw Span / Admin Edit] {in_str} -> {out_str}")
+            print(f"    -> Hours: {p_hrs} | Minutes: {p_mins} | Seconds: {p_secs} | Nanoseconds: {p_ns:09d} (Total Seconds: {total_seconds})")
+
+            return round(total_seconds / 3600, 2)
+
+        return 0.0
     
     def calculate_status(self, attendance, working_hours=None, is_final_calculation=False):
         """

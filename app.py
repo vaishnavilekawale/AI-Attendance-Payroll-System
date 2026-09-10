@@ -30,6 +30,13 @@ import json
 from config import config, Config, BASE_DIR
 from database import db, init_db
 from models import Admin, Employee, Attendance, Payroll, Settings, EmployeeLogin, AttendanceActivity, PayrollSettings, CompanySettings, LogoutApprovalRequest
+# `Customer` is no longer imported from models.py here - the isolated
+# licensing_system package (see below) has its own Customer model, in its
+# own database, and nothing else in this file needs models.Customer.
+# NOTE: the old `from licensing import licensing_bp` that used to be here has
+# been removed - that module shared the main `db`/`models.Customer`, which is
+# exactly what the new, fully isolated `licensing_system` package (imported
+# further down, next to its blueprint registration) avoids doing.
 from ai_engine import FaceRecognitionEngine, FaceDetectionEngine, FaceCapture, train_all_employees, get_recognition_tolerance, presence_tracker, preload_employee_embeddings
 from attendance import AttendanceManager
 from payroll import PayrollCalculator
@@ -41,6 +48,7 @@ import logging
 import atexit
 import threading
 import time as time_module
+
 
 # ============================================================
 # LOGGING CONFIGURATION
@@ -84,7 +92,7 @@ logging.getLogger("apscheduler.scheduler").setLevel(logging.INFO)
 logging.getLogger("scheduler_service").setLevel(logging.INFO)
 
 # Attendance calculator:
-# INFO + WARNING बंद, पण ERROR दिसतील
+
 logging.getLogger("services.attendance_calculator").setLevel(logging.ERROR)
 
 # ============================================================
@@ -126,49 +134,6 @@ def get_effective_report_status(attendance):
     # Safety fallback
     return 'pending'
 
-# def get_effective_report_status(attendance):
-#     """
-#     Calculate effective report status using existing attendance business rules.
-    
-#     This function uses the existing AttendanceCalculator to determine the correct
-#     status for reporting, ensuring consistency with the application's existing
-#     Half Day/Present/Absent calculation logic.
-    
-#     Args:
-#         attendance: Attendance object
-        
-#     Returns:
-#         str: Effective status ('present', 'half_day', 'absent', 'pending')
-#     """
-#     from services.attendance_calculator import AttendanceCalculator
-    
-#     # If no IN time, status is absent
-#     if not attendance.in_time:
-#         return 'absent'
-    
-#     # If no OUT time and not past date, status is pending
-#     from datetime import date
-#     if not attendance.out_time and attendance.date >= date.today():
-#         return 'pending'
-    
-#     # For past records with IN time, use existing calculator to determine status
-#     calculator = AttendanceCalculator()
-    
-#     # Recalculate working hours if needed
-#     if not attendance.total_hours:
-#         working_hours = calculator.calculate_working_hours(attendance)
-#     else:
-#         working_hours = attendance.total_hours
-    
-#     # Use existing calculate_status with is_final_calculation=True
-#     # This applies the same Half Day/Present/Absent rules as the rest of the system
-#     effective_status = calculator.calculate_status(
-#         attendance, 
-#         working_hours=working_hours, 
-#         is_final_calculation=True
-#     )
-    
-#     return effective_status
 
 
 def is_payroll_eligible(employee, month, year):
@@ -343,6 +308,14 @@ if app.config['DEBUG']:
 from extensions import csrf, limiter
 csrf.init_app(app)
 
+# The isolated licensing_system blueprint is called by non-browser clients
+# (desktop .exe, payment webhook, public registration form) that never
+# receive a Flask-rendered CSRF token, so it's exempted here, right next
+# to CSRFProtect's own setup. Its admin routes stay protected via their
+# own X-Admin-Api-Key check instead.
+from licensing_system.routes import licensing_bp as isolated_licensing_bp
+csrf.exempt(isolated_licensing_bp)
+
 # Rate limiting - primarily to slow down credential-stuffing / brute-force
 # attempts against /login. Uses in-memory storage by default, which is
 # fine for a single-process desktop/local deployment; point
@@ -376,6 +349,12 @@ app.register_blueprint(setup_bp)
 # isn't (camera/cv2-dependent routes stay in app.py for now).
 from employees import employees_bp
 app.register_blueprint(employees_bp)
+
+# --- Isolated Licensing System -----------------------------------------
+# Own SQLite file, own engine/session, own admin auth, own rate limiter,
+# own email sender - see licensing_system/README.md.
+from licensing_system import init_licensing_system
+init_licensing_system(app)
 
 with app.app_context():
     logger.info(
@@ -1469,12 +1448,16 @@ def attendance_history():
     # Apply display-only auto checkout for past attendance records with missing OUT times
     today = date.today()
     for att in attendances:
-        # logger.info(f"attendance_history - Processing record ID: {att.id}, Date: {att.date}")
-        # logger.info(f"  IN Time: {att.in_time}")
-        # logger.info(f"  OUT Time: {att.out_time}")
+        # Recalculate total_hours/status/overtime/late from the fixed,
+        # break-aware calculator before display. Without this, the table
+        # shows whatever total_hours happened to be stored on the row -
+        # which for any record computed before the calculator fix (or
+        # edited directly) can be the old gross first-IN-to-last-OUT
+        # figure instead of the correct net active time.
+        if att.in_time and att.date < today:
+            am.calculator.recalculate_attendance(att, is_final_calculation=True)
         # Add display_out_time for UI (show "-" after new IN until next OUT)
         am._add_display_out_time(att, att.date)
-        # logger.info(f"  Display OUT Time after _add_display_out_time: {att.display_out_time if hasattr(att, 'display_out_time') else 'N/A'}")
     
     employees = Employee.query.filter_by(status='active').all()
     
@@ -4107,4 +4090,3 @@ if __name__ == '__main__':
         threading.Timer(1.5, lambda: webbrowser.open(SERVER_URL)).start()
 
     app.run(host=SERVER_HOST, port=SERVER_PORT, debug=debug_mode, use_reloader=False)
-
