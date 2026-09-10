@@ -313,8 +313,8 @@ csrf.init_app(app)
 # receive a Flask-rendered CSRF token, so it's exempted here, right next
 # to CSRFProtect's own setup. Its admin routes stay protected via their
 # own X-Admin-Api-Key check instead.
-from licensing_system.routes import licensing_bp as isolated_licensing_bp
-csrf.exempt(isolated_licensing_bp)
+# from licensing_system.routes import licensing_bp as isolated_licensing_bp
+# csrf.exempt(isolated_licensing_bp)
 
 # Rate limiting - primarily to slow down credential-stuffing / brute-force
 # attempts against /login. Uses in-memory storage by default, which is
@@ -353,8 +353,8 @@ app.register_blueprint(employees_bp)
 # --- Isolated Licensing System -----------------------------------------
 # Own SQLite file, own engine/session, own admin auth, own rate limiter,
 # own email sender - see licensing_system/README.md.
-from licensing_system import init_licensing_system
-init_licensing_system(app)
+# from licensing_system import init_licensing_system
+# init_licensing_system(app)
 
 with app.app_context():
     logger.info(
