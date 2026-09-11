@@ -4,7 +4,3 @@
 
 pyinstaller==6.11.1
 pyinstaller-hooks-contrib==2024.10
-
-# Only needed if you enable the optional online license check-in
-# (LICENSE_CHECK_IN_URL) - see licensing/license_manager.py. Leave this
-# uninstalled/unused if running fully offline license verification.

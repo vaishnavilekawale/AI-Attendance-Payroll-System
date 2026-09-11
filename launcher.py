@@ -3,16 +3,11 @@ PyInstaller entry point. Not meant to be run directly during normal
 development - use `python app.py` for that, same as always. This exists
 purely so the packaged .exe has a clean, single entry point that:
 
-  1. Forces the license check on regardless of FLASK_ENV (a packaged
-     build handed to a customer should ALWAYS enforce licensing, whereas
-     `python app.py` during your own development shouldn't require a
-     license.lic file on every dev machine - see app.py's
-     license_check_enabled logic).
-  2. Points DeepFace at its bundled model weights (if you followed the
+  1. Points DeepFace at its bundled model weights (if you followed the
      attendance_app.spec instructions to pre-download and bundle them)
      rather than trying to download them at runtime on a customer's
      possibly-offline machine.
-  3. Runs app.py's existing `if __name__ == '__main__':` startup block
+  2. Runs app.py's existing `if __name__ == '__main__':` startup block
      exactly as-is via runpy.run_module(), so no changes to app.py's own
      structure were needed for packaging.
 
@@ -36,9 +31,6 @@ if sys.stdout is None:
 if sys.stderr is None:
     sys.stderr = open(os.devnull, 'w')
 
-# Always enforce the license in a packaged build, no matter what
-# FLASK_ENV happens to be set to.
-# os.environ['LICENSE_CHECK_ENABLED'] = 'true'
 os.environ.setdefault('FLASK_ENV', 'production')
 
 # ---------------------------------------------------------------------
@@ -77,8 +69,8 @@ if getattr(sys, 'frozen', False):
         # between deepface releases before.
 
 # Run app.py's own module code with __name__ == '__main__', so its
-# existing startup block (license check, folder creation, browser
-# auto-launch, app.run(...)) executes exactly as if you'd typed
+# existing startup block (folder creation, browser auto-launch,
+# app.run(...)) executes exactly as if you'd typed
 # `python app.py` - no duplication of that logic here. Using
 # run_module() (by NAME) rather than run_path() (by FILE PATH) is what
 # makes this work correctly both frozen and unfrozen - see module

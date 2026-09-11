@@ -46,9 +46,7 @@ PROJECT_ROOT = os.path.abspath('.')
 # imported copies of the same module existing at runtime depending on
 # sys.path order (a real source of subtle bugs for shared singletons
 # like extensions.py's csrf/limiter/db objects), and (c) ships plain,
-# human-readable source next to the exe - including, if it happens to
-# be sitting in the project root at build time, generate_license.py,
-# which must NEVER go to a customer.
+# human-readable source next to the exe that a customer never needs.
 # ---------------------------------------------------------------------
 datas = [
     (os.path.join(PROJECT_ROOT, 'templates'), 'templates'),

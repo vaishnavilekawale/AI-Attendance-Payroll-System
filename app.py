@@ -30,13 +30,6 @@ import json
 from config import config, Config, BASE_DIR
 from database import db, init_db
 from models import Admin, Employee, Attendance, Payroll, Settings, EmployeeLogin, AttendanceActivity, PayrollSettings, CompanySettings, LogoutApprovalRequest
-# `Customer` is no longer imported from models.py here - the isolated
-# licensing_system package (see below) has its own Customer model, in its
-# own database, and nothing else in this file needs models.Customer.
-# NOTE: the old `from licensing import licensing_bp` that used to be here has
-# been removed - that module shared the main `db`/`models.Customer`, which is
-# exactly what the new, fully isolated `licensing_system` package (imported
-# further down, next to its blueprint registration) avoids doing.
 from ai_engine import FaceRecognitionEngine, FaceDetectionEngine, FaceCapture, train_all_employees, get_recognition_tolerance, presence_tracker, preload_employee_embeddings
 from attendance import AttendanceManager
 from payroll import PayrollCalculator
@@ -308,14 +301,6 @@ if app.config['DEBUG']:
 from extensions import csrf, limiter
 csrf.init_app(app)
 
-# The isolated licensing_system blueprint is called by non-browser clients
-# (desktop .exe, payment webhook, public registration form) that never
-# receive a Flask-rendered CSRF token, so it's exempted here, right next
-# to CSRFProtect's own setup. Its admin routes stay protected via their
-# own X-Admin-Api-Key check instead.
-# from licensing_system.routes import licensing_bp as isolated_licensing_bp
-# csrf.exempt(isolated_licensing_bp)
-
 # Rate limiting - primarily to slow down credential-stuffing / brute-force
 # attempts against /login. Uses in-memory storage by default, which is
 # fine for a single-process desktop/local deployment; point
@@ -349,12 +334,6 @@ app.register_blueprint(setup_bp)
 # isn't (camera/cv2-dependent routes stay in app.py for now).
 from employees import employees_bp
 app.register_blueprint(employees_bp)
-
-# --- Isolated Licensing System -----------------------------------------
-# Own SQLite file, own engine/session, own admin auth, own rate limiter,
-# own email sender - see licensing_system/README.md.
-# from licensing_system import init_licensing_system
-# init_licensing_system(app)
 
 with app.app_context():
     logger.info(
