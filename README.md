@@ -36,7 +36,7 @@ shippable `.exe` on a client's machine.
 For someone who just wants to get the app running locally, right now:
 
 ```bash
-git clone <your-repo-url> AI_APS
+git clone <https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System> AI_APS
 cd AI_APS
 
 python -m venv venv
@@ -172,7 +172,7 @@ really a local web server.
 ## 4. Running Locally
 
 ```bash
-git clone <your-repo-url> AI_APS
+git clone <https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System> AI_APS
 cd AI_APS
 
 python -m venv venv
