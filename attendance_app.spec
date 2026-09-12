@@ -32,6 +32,25 @@ block_cipher = None
 PROJECT_ROOT = os.path.abspath('.')
 
 # ---------------------------------------------------------------------
+# Application icon - shown in Explorer, the taskbar, Alt-Tab, and the
+# Start Menu/Desktop shortcuts created by installer/AttendancePayrollSystem.iss.
+# Shipping with icon=None (the previous default) uses PyInstaller's generic
+# placeholder icon, which is one of the fastest ways for a paying customer
+# to conclude an app is unfinished - fix this before any commercial build.
+#
+# Same file referenced by installer/AttendancePayrollSystem.iss's
+# SetupIconFile - keep both pointed at the same .ico so the installer and
+# the app itself show matching branding.
+APP_ICON_PATH = os.path.join(PROJECT_ROOT, 'installer', 'app_icon.ico')
+if not os.path.isfile(APP_ICON_PATH):
+    print(f"[spec] WARNING: app icon not found at '{APP_ICON_PATH}'. "
+          f"Building with PyInstaller's default icon instead - place a real "
+          f".ico file there before shipping a customer build.")
+    APP_ICON_PATH = None
+else:
+    print(f"[spec] Using application icon: {APP_ICON_PATH}")
+
+# ---------------------------------------------------------------------
 # Data files: everything the app reads off disk by relative path at
 # runtime, which PyInstaller has no way to know about automatically since
 # it only traces Python imports, not open()/render_template() calls -
@@ -266,7 +285,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,           # point at your own .ico file here before shipping
+    icon=APP_ICON_PATH,
 )
 
 # ---------------------------------------------------------------------
@@ -284,6 +303,9 @@ exe = EXE(
 #     locally and do one face capture) so the auto-detect block above
 #     finds and bundles ~/.deepface/weights instead of printing the
 #     "WARNING: ... building WITHOUT bundled weights" message.
+# [ ] Place a real installer/app_icon.ico BEFORE building, or the exe ships
+#     with PyInstaller's generic default icon (see the "[spec] WARNING: app
+#     icon not found" message above if you forgot this).
 # [ ] Build succeeds with no errors (`pyinstaller attendance_app.spec --clean`).
 # [ ] Run the built exe from a folder OUTSIDE your dev environment (a
 #     fresh temp folder, or better, a clean VM/second machine) - many

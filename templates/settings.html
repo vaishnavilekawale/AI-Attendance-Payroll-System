@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings - AI Attendance System</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -71,7 +71,7 @@
         </div>
     </nav>
 
-    <div class="container-fluid mt-4">
+    <div class="container-fluid py-4 mb-5">
         <div class="row">
             <div class="col-12">
                 <h2 class="mb-4">System Settings</h2>
@@ -284,11 +284,36 @@
                     </div>
                 </div>
 
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-shield-check"></i> Data Backup</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-2">
+                            Download a complete backup of your attendance database,
+                            employee documents, and captured face images as a single
+                            .zip file. Store it somewhere safe — a USB drive, network
+                            share, or cloud storage — separate from this computer.
+                        </p>
+                        <p class="small text-muted">
+                            The backup includes: <code>instance/attendance.db</code>
+                            (all attendance, payroll &amp; employee records),
+                            <code>uploads/</code> (profile photos, generated payslips),
+                            and <code>dataset/</code> (captured face images). Trained
+                            face-recognition encodings are not included since they can
+                            always be regenerated from <code>dataset/</code> via
+                            "Train AI" if ever needed.
+                        </p>
+                        <form method="POST" action="{{ url_for('admin_backup') }}" id="backupForm">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-outline-primary btn-sm" id="backupBtn">
+                                <i class="bi bi-download"></i> Backup Now
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
                 <!-- Admin Management -->
-                <!-- /register locks itself once the first Admin account exists (see
-                     app.py) - /admin/create-admin is the intended, admin_required
-                     replacement for adding further admins afterward, but had no
-                     link anywhere in the UI. This card is that link. -->
                 <div class="card mb-4">
                     <div class="card-header">
                         <h5 class="card-title mb-0">Admin Management</h5>
@@ -309,7 +334,7 @@
                         <h5 class="card-title mb-0">System Info</h5>
                     </div>
                     <div class="card-body">
-                        <p><strong>Version:</strong> 1.0.0</p>
+                        <p><strong>Version:</strong> {{ app_version }}</p>
                         <p><strong>Python:</strong> 3.10.11</p>
                         <p><strong>Flask:</strong> Latest</p>
                         <p><strong>AI Engine:</strong> DeepFace (Facenet512) + OpenCV</p>
@@ -319,6 +344,28 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        (function() {
+            var backupForm = document.getElementById('backupForm');
+            var backupBtn = document.getElementById('backupBtn');
+            if (backupForm && backupBtn) {
+                backupForm.addEventListener('submit', function() {
+                    backupBtn.disabled = true;
+                    backupBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creating backup…';
+                    
+                    // Reset button state after 3 seconds since file download response keeps page active
+                    setTimeout(function() {
+                        backupBtn.disabled = false;
+                        backupBtn.innerHTML = '<i class="bi bi-download"></i> Backup Now';
+                    }, 3000);
+                });
+            }
+        })();
+    </script>
+
+    <footer class="app-footer">
+        AI Attendance &amp; Payroll System &middot; v{{ app_version }}
+    </footer>
 </body>
 </html>

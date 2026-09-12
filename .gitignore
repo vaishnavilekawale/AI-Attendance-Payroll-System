@@ -5,62 +5,74 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
 
 # Environment Variables & Security
 .env
 .env.*
 !.env.example
 
-
 # Database Files
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
-instance/
-
-# Log Files
-*.log
 
 # Sensitive/User Generated Data (folders match exact code paths)
+instance/*
+!instance/.gitkeep
+
 dataset/*
 !dataset/.gitkeep
 
 uploads/*
 !uploads/.gitkeep
-!uploads/payrolls/.gitkeep
-
-payrolls/*
-!payrolls/.gitkeep
 
 trained_model/*
 !trained_model/.gitkeep
 
-# PyInstaller build output (keep attendance_app.spec itself tracked —
+# Log Files
+*.log
+
+# Vendor assets — downloaded at build time by
+# scripts/download_vendor_assets.py, never committed (keeps the app
+# offline-capable without bloating the repo with third-party libs)
+static/vendor/bootstrap/css/*
+!static/vendor/bootstrap/css/.gitkeep
+static/vendor/bootstrap/js/*
+!static/vendor/bootstrap/js/.gitkeep
+static/vendor/bootstrap-icons/*
+!static/vendor/bootstrap-icons/.gitkeep
+static/vendor/chartjs/*
+!static/vendor/chartjs/.gitkeep
+static/vendor/fonts/*
+!static/vendor/fonts/.gitkeep
+
+# Company logo uploaded via Admin → Settings (app.py saves it directly
+# into static/images/ as company_logo_<filename>) — keep the folder
+# tracked for any real static assets, ignore only the uploaded file
+static/images/company_logo_*
+!static/images/.gitkeep
+
+# PyInstaller build output (attendance_app.spec itself stays tracked —
 # only its generated output goes here)
 build/
 dist/
 
+# Inno Setup installer output (installer/AttendancePayrollSystem.iss
+# writes the final Setup.exe here — see OutputDir in the .iss)
+installer/Output/
+
 # Editor / IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # OS junk files
 .DS_Store
 Thumbs.db
-
-# Confirm intent before keeping this — see note above about whether
-# this should exclude static/images/ entirely or just an uploads
-# subfolder within it.
-/static/images/
-
-
-
-
-
-
-
-
-
-

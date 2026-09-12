@@ -1,51 +1,121 @@
-# Flask and Web Framework
-Flask==3.0.0
+# =============================================================================
+# requirements.txt — AI Attendance & Payroll System (runtime dependencies)
+# =============================================================================
+# Target interpreter: Python 3.10.x (3.10.11 recommended). See README.md
+# Section 2.1 for why 3.10 specifically — TensorFlow 2.15, mediapipe 0.10.21,
+# and DeepFace's transitive dependencies all publish official Windows wheels
+# for 3.9–3.11, and 3.10 is the safest intersection. Do NOT use Python 3.12+.
+#
+# Install into a clean virtual environment:
+#     python -m venv venv
+#     venv\Scripts\activate
+#     python -m pip install --upgrade pip
+#     pip install -r requirements.txt
+#
+# Do NOT `pip install` on top of an old venv that may still have plain
+# `opencv-python` installed alongside `opencv-contrib-python` — the two
+# packages both provide the `cv2` module and having both installed causes
+# unpredictable behavior. If in doubt:
+#     pip uninstall -y opencv-python opencv-contrib-python
+#     pip install -r requirements.txt
+#
+# Build/packaging-only tools (PyInstaller, pyinstaller-hooks-contrib) are
+# intentionally NOT in this file — see requirements-packaging.txt. Customers
+# running the packaged .exe never need those; only your build machine does.
+#
+# Verify the install succeeded before touching PyInstaller:
+#     python -c "import cv2, tensorflow, mediapipe, deepface; print('OK')"
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Web framework core
+# ---------------------------------------------------------------------------
+Flask==3.0.3
+Werkzeug==3.0.4
+Jinja2==3.1.4
+itsdangerous==2.2.0
+click==8.1.7
+MarkupSafe==2.1.5
+
+# ---------------------------------------------------------------------------
+# Database / ORM
+# ---------------------------------------------------------------------------
 Flask-SQLAlchemy==3.1.1
-Flask-Migrate==4.0.5
+SQLAlchemy==2.0.35
+Flask-Migrate==4.0.7
+alembic==1.13.3
+# Only required if DATABASE_URL is set to a mysql+pymysql:// URI (see
+# .env.example) — SQLite (the default) needs no driver, it's in the
+# Python standard library. Harmless to leave installed either way.
+PyMySQL==1.1.1
+
+# ---------------------------------------------------------------------------
+# Security / forms / rate limiting
+# ---------------------------------------------------------------------------
 Flask-WTF==1.2.1
-WTForms==3.1.1
-Flask-Limiter==3.5.0
+WTForms==3.1.2
+Flask-Limiter==3.8.0
+limits==3.13.0
+cryptography==43.0.1
 
-# Database
-SQLAlchemy==2.0.23
-PyMySQL==1.1.0
+# ---------------------------------------------------------------------------
+# Configuration / environment
+# ---------------------------------------------------------------------------
+python-dotenv==1.0.1
 
-# AI and Computer Vision
-# NOTE: opencv-contrib-python is a superset of opencv-python (same `cv2`
-# namespace, plus the "contrib" modules). Installing both in the same
-# environment creates two competing installs of `cv2`; which one "wins"
-# depends on install order rather than being a defined, reproducible
-# state, and this has been a real source of "works on my machine" build
-# failures. Keep ONLY opencv-contrib-python.
+# ---------------------------------------------------------------------------
+# Background scheduling (auto-logout, monthly payroll runs, reconciliation)
+# ---------------------------------------------------------------------------
+APScheduler==3.10.4
+tzlocal==5.2
+
+# ---------------------------------------------------------------------------
+# Numerical / data handling
+# ---------------------------------------------------------------------------
+# Pinned <2.0 deliberately: TensorFlow 2.15 and mediapipe 0.10.21 (below)
+# were both built against NumPy 1.x's ABI and are NOT compatible with
+# NumPy 2.x - installing numpy>=2 breaks face recognition at import time
+# with a binary-incompatibility error, not a clean ImportError.
+numpy==1.26.4
+pandas==2.2.3
+
+# ---------------------------------------------------------------------------
+# Computer vision / face recognition stack
+# ---------------------------------------------------------------------------
+# Plain `opencv-python` must NEVER also be installed alongside this - both
+# packages provide the same `cv2` import and having both present causes
+# whichever installed last to silently "win", which is a nightmare to
+# debug. Only opencv-contrib-python belongs in this file.
 opencv-contrib-python==4.8.1.78
-deepface==0.0.79
 mediapipe==0.10.21
-numpy==1.26.2
+# TensorFlow 2.15 is the pinned major/minor for Windows wheel availability
+# with mediapipe 0.10.21 and DeepFace (see README.md Section 2.1). tf-keras
+# provides the Keras 2 API that DeepFace's model-loading code expects; it
+# must be installed alongside tensorflow==2.15 (which still defaults to
+# Keras 2 natively, but pinning tf-keras explicitly avoids ambiguity if pip
+# ever resolves a newer, Keras-3-only TensorFlow as a transitive dependency
+# of something else).
 tensorflow==2.15.0
 tf-keras==2.15.1
+deepface==0.0.93
+gdown==5.2.0
 
-# Image Processing
-Pillow==10.1.0
-
-# PDF Generation
-reportlab==4.0.7
+# ---------------------------------------------------------------------------
+# PDF generation (payslips, reports) & password protection
+# ---------------------------------------------------------------------------
+reportlab==4.2.5
+# Required by reportlab's Image()/ImageReader for embedding the company
+# logo and any raster images into generated PDFs.
+Pillow==10.4.0
+# AES-256 PDF password protection (see pdf_generator.py encrypt_pdf()).
+pikepdf==9.4.1
+# Optional QR code generation on payslips/reports - pdf_generator.py
+# guards this import and degrades gracefully if missing, but it's a small,
+# pure-Python package with no reason to leave out of a standard install.
 qrcode==7.4.2
-pikepdf==9.4.2
 
-# Email
-python-dotenv==1.0.0
-
-# Security
-Werkzeug==3.0.1
-cryptography==43.0.3
-
-# Utilities
-python-dateutil==2.8.2
-
-# Scheduler for automatic payroll generation
-APScheduler==3.10.4
-
-# Development (optional)
-pytest==7.4.3
-pytest-flask==1.3.0
-
+# ---------------------------------------------------------------------------
+# HTTP client (used by download_vendor_assets.py in scripts/, and any
+# outbound calls the app itself makes)
+# ---------------------------------------------------------------------------
+requests==2.32.3

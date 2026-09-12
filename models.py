@@ -93,16 +93,130 @@ class Employee(db.Model):
     role = db.Column(db.String(20), default='employee')  # admin, employee, manager
     must_change_password = db.Column(db.Boolean, default=True)
     last_login = db.Column(db.DateTime)
-    
+
+    # ------------------------------------------------------------------
+    # BIOMETRIC DATA CONSENT (DPDP Act, 2023 / privacy compliance)
+    # ------------------------------------------------------------------
+    # Face images captured for attendance recognition are "biometric data"
+    # under India's Digital Personal Data Protection Act, 2023 (and treated
+    # similarly under GDPR Art. 9 / most global privacy regimes) - a
+    # sensitive/special category of personal data that requires clear,
+    # informed, explicit, and separately recorded consent BEFORE
+    # collection, not a blanket "I agree to the terms" checkbox buried in
+    # onboarding paperwork.
+    #
+    # These columns hold the CURRENT consent state for quick checks (e.g.
+    # "can we let this employee start face capture right now?"). They are
+    # deliberately NOT the only record of consent - see BiometricConsentLog
+    # below for the append-only audit trail a regulator or the employee
+    # themself may ask to see later. Withdrawing consent must update these
+    # columns (biometric_consent_given=False, timestamp of withdrawal) AND
+    # append a new BiometricConsentLog row; it must never simply delete or
+    # overwrite prior history.
+    biometric_consent_given = db.Column(
+        db.Boolean, nullable=False, default=False,
+        doc="Current biometric (face data) collection consent status. "
+            "Must be True before /api/upload-face-image or /capture-face "
+            "will accept any image for this employee - enforced in "
+            "app.py, not just in the UI, since a UI checkbox alone is not "
+            "a real control.",
+    )
+    biometric_consent_timestamp = db.Column(
+        db.DateTime, nullable=True,
+        doc="UTC timestamp of the most recent consent decision (grant or "
+            "withdrawal) reflected in biometric_consent_given. NULL means "
+            "no consent decision has ever been recorded for this employee.",
+    )
+    biometric_consent_version = db.Column(
+        db.String(20), nullable=True,
+        doc="Version identifier of the privacy/consent notice the employee "
+            "agreed to (e.g. 'v1.0'). Bump this whenever the notice text "
+            "changes materially so previously-collected consent can be "
+            "distinguished from consent to the current wording, and so "
+            "affected employees can be prompted to re-consent.",
+    )
+    biometric_consent_ip_address = db.Column(
+        db.String(45), nullable=True,
+        doc="IP address (IPv4/IPv6) the consent decision was submitted "
+            "from, for the audit trail. Best-effort only - this is a "
+            "single desktop/LAN deployment behind Werkzeug, not a public "
+            "internet-facing service, so treat this as supporting "
+            "evidence rather than strong identity proof.",
+    )
+
     # Relationships
     attendance_records = db.relationship('Attendance', backref='employee', lazy=True, cascade='all, delete-orphan')
     payroll_records = db.relationship('Payroll', backref='employee', lazy=True, cascade='all, delete-orphan')
-    
+    consent_logs = db.relationship('BiometricConsentLog', backref='employee', lazy=True, cascade='all, delete-orphan')
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
     
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+    def record_biometric_consent(self, granted, ip_address=None, policy_version='v1.0', notes=None):
+        """
+        Single entry point for changing biometric consent state. Always use
+        this instead of setting biometric_consent_given directly, so the
+        current-state columns and the append-only audit log can never drift
+        out of sync with each other.
+
+        `granted=True`  -> employee/admin has just given consent (checkbox
+                            ticked on the consent modal before face capture).
+        `granted=False` -> consent has been withdrawn (e.g. employee asked
+                            for their biometric data collection to stop).
+                            This method does NOT delete any already-captured
+                            face images/embeddings - that is a separate,
+                            explicit "erase biometric data" action, since
+                            withdrawing consent for future collection and
+                            requesting deletion of already-collected data
+                            are two distinct data-subject rights under DPDP.
+        """
+        now = datetime.utcnow()
+        self.biometric_consent_given = bool(granted)
+        self.biometric_consent_timestamp = now
+        self.biometric_consent_version = policy_version
+        self.biometric_consent_ip_address = ip_address
+
+        log_entry = BiometricConsentLog(
+            employee_id=self.id,
+            granted=bool(granted),
+            policy_version=policy_version,
+            ip_address=ip_address,
+            notes=notes,
+            created_at=now,
+        )
+        db.session.add(log_entry)
+        return log_entry
+
+
+class BiometricConsentLog(db.Model):
+    """
+    Append-only audit trail of every biometric consent decision (grant or
+    withdrawal) made for an employee, across the employee's entire lifetime
+    at the company.
+
+    WHY THIS EXISTS SEPARATELY FROM Employee.biometric_consent_given:
+    the columns on Employee only ever hold the CURRENT state - if an
+    employee grants consent, later withdraws it, then grants it again, the
+    Employee row shows only the most recent decision. Under DPDP (and most
+    other privacy regimes), an organization must be able to demonstrate
+    consent history on request - not just current status - so this table
+    is intentionally never updated or deleted, only appended to. Rows are
+    NOT cascaded-deleted independently; they cascade only if the parent
+    Employee row itself is deleted (see Employee.consent_logs), matching
+    how the rest of this codebase handles employee-owned child records.
+    """
+    __tablename__ = 'biometric_consent_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    granted = db.Column(db.Boolean, nullable=False)
+    policy_version = db.Column(db.String(20), nullable=True)
+    ip_address = db.Column(db.String(45), nullable=True)
+    notes = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 class Attendance(db.Model):
     __tablename__ = 'attendance'

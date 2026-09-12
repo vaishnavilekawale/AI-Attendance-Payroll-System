@@ -1,10 +1,24 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
 
+# ---------------------------------------------------------------------------
+# APPLICATION VERSION
+# ---------------------------------------------------------------------------
+# Single source of truth for the app's version number. Bump this on every
+# release you hand off to a customer, and reference it (not a hardcoded
+# string) anywhere the version needs to be shown - the footer (via the
+# app_version context processor below), the Settings > System Info card
+# (templates/settings.html), and attendance_app.spec's VersionInfoVersion,
+# so a support conversation ("what version are you running?") always has an
+# unambiguous, single-place-to-check answer instead of several hardcoded
+# strings that can silently drift out of sync with each other.
+__version__ = "1.0.0"
+
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file, send_from_directory, flash, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename, safe_join
 import io
+import zipfile
 import crypto_utils
 from auth_decorators import login_required, admin_required, employee_required
 from auth_helpers import create_admin_from_request_form
@@ -29,7 +43,7 @@ import json
 
 from config import config, Config, BASE_DIR
 from database import db, init_db
-from models import Admin, Employee, Attendance, Payroll, Settings, EmployeeLogin, AttendanceActivity, PayrollSettings, CompanySettings, LogoutApprovalRequest
+from models import Admin, Employee, Attendance, Payroll, Settings, EmployeeLogin, AttendanceActivity, PayrollSettings, CompanySettings, LogoutApprovalRequest, BiometricConsentLog
 from ai_engine import FaceRecognitionEngine, FaceDetectionEngine, FaceCapture, train_all_employees, get_recognition_tolerance, presence_tracker, preload_employee_embeddings
 from attendance import AttendanceManager
 from payroll import PayrollCalculator
@@ -300,6 +314,21 @@ if app.config['DEBUG']:
 # instances without causing a circular import with app.py.
 from extensions import csrf, limiter
 csrf.init_app(app)
+
+
+@app.context_processor
+def inject_app_version():
+    """
+    Makes `app_version` available in every template's Jinja context
+    automatically, without every render_template() call needing to pass it
+    explicitly. Used by the UI footer (see templates - each page includes
+    a small "AI Attendance & Payroll System v{{ app_version }}" line) and
+    by templates/settings.html's System Info card, which previously had
+    "1.0.0" hardcoded directly in the template - now both read from the
+    same __version__ constant defined at the top of this file.
+    """
+    return {'app_version': __version__}
+
 
 # Rate limiting - primarily to slow down credential-stuffing / brute-force
 # attempts against /login. Uses in-memory storage by default, which is
@@ -1241,14 +1270,27 @@ def face_registration(id):
                          min_face_images=min_face_images,
                          current_face_images=current_count,
                          remaining_images=remaining_images,
-                         employee_image_counts=employee_image_counts)
+                         employee_image_counts=employee_image_counts,
+                         biometric_consent_given=employee.biometric_consent_given)
 
 @app.route('/capture-face/<int:id>', methods=['POST'])
 @login_required
 @admin_required
 def capture_face(id):
     employee = Employee.query.get_or_404(id)
-    
+
+    # BIOMETRIC CONSENT GATE (DPDP compliance) - enforced server-side, not
+    # just by disabling a button in the UI, since a UI-only gate can be
+    # bypassed by anyone who can POST directly to this endpoint. See
+    # models.py (Employee.record_biometric_consent / BiometricConsentLog)
+    # and the consent checkbox in templates/add_employee.html's Face
+    # Registration modal, which calls POST /employees/<id>/biometric-consent
+    # before the "Start Camera" button is ever enabled.
+    if not employee.biometric_consent_given:
+        flash('Biometric (face) data consent has not been recorded for this employee yet. '
+              'Please tick the consent checkbox in the Face Registration dialog first.', 'danger')
+        return redirect(url_for('face_registration', id=id))
+
     # Get minimum face images required from Settings
     settings = Settings.get_settings()
     min_face_images = settings.min_face_images_required if settings else 20
@@ -1956,6 +1998,97 @@ def settings():
         email_test = es.test_email_connection()
     
     return render_template('settings.html', settings=settings, email_test=email_test)
+
+
+@app.route('/admin/backup', methods=['POST'])
+@login_required
+@admin_required
+def admin_backup():
+    """
+    Bundle the SQLite database, uploads/, and dataset/ into a single
+    timestamped .zip under BASE_DIR/backups/, then stream it back to the
+    admin's browser as a download.
+
+    WHY THIS MATTERS: this app's entire data footprint - attendance
+    history, payroll records, employee records, and captured biometric
+    face images - lives in a handful of local files/folders next to the
+    .exe (see config.py's BASE_DIR resolution). There is no cloud copy,
+    no managed database, nothing else backing this up. A single disk
+    failure or an accidental "delete this folder" on the host machine
+    means total, permanent data loss for the business. This route is the
+    minimum viable safety net: a one-click, on-demand export the admin
+    can save to a USB drive, a network share, or cloud storage of their
+    choice - see scheduler_service.py if you want to additionally wire
+    this up as a recurring nightly job rather than only on-demand.
+
+    WHAT IS INCLUDED:
+        instance/attendance.db  - the SQLite database itself
+        uploads/                - profile photos, generated payslip PDFs
+        dataset/                - captured face images used for training
+    trained_model/ (the derived face-recognition encodings) is
+    intentionally NOT included - it is fully regenerable from dataset/ via
+    "Train AI" and including it would only make the archive larger without
+    protecting anything that couldn't already be rebuilt from what IS
+    included.
+
+    SQLITE SAFETY NOTE: db.session.commit() (a no-op if there's nothing
+    pending) plus SQLAlchemy's connection handling means there is no
+    open write transaction at the moment the file is copied in the
+    common case, but this is still a simple file copy of a live SQLite
+    file, not a proper `sqlite3 .backup` / VACUUM INTO snapshot. For a
+    single-admin, low-write-concurrency desktop deployment (this app's
+    actual usage pattern) that is an acceptable, pragmatic trade-off; it
+    is not the right approach for a busy multi-writer server database.
+    """
+    db_path = os.path.join(BASE_DIR, 'instance', 'attendance.db')
+    uploads_dir = Config.UPLOAD_FOLDER
+    dataset_dir = Config.DATASET_FOLDER
+    backups_dir = os.path.join(BASE_DIR, 'backups')
+
+    try:
+        os.makedirs(backups_dir, exist_ok=True)
+
+        # Make sure everything SQLAlchemy is holding is actually flushed to
+        # disk before we copy the file out from under it.
+        db.session.commit()
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_filename = f'attendance_backup_{timestamp}.zip'
+        backup_path = os.path.join(backups_dir, backup_filename)
+
+        with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            if os.path.isfile(db_path):
+                zf.write(db_path, arcname=os.path.join('instance', 'attendance.db'))
+            else:
+                logger.warning("Backup: no SQLite file found at %s (using a non-SQLite "
+                                "DATABASE_URL? that database is not included in this zip - "
+                                "back it up via your DB server's own tooling instead).", db_path)
+
+            for source_dir, arc_root in ((uploads_dir, 'uploads'), (dataset_dir, 'dataset')):
+                if not os.path.isdir(source_dir):
+                    continue
+                for root, _dirs, files in os.walk(source_dir):
+                    for fname in files:
+                        full_path = os.path.join(root, fname)
+                        rel_path = os.path.join(arc_root, os.path.relpath(full_path, source_dir))
+                        zf.write(full_path, arcname=rel_path)
+
+        logger.info("Backup created by admin_id=%s: %s (%s bytes)",
+                    session.get('admin_id'), backup_path, os.path.getsize(backup_path))
+        flash(f'Backup created successfully: {backup_filename}. Your download should start automatically.', 'success')
+
+        return send_file(
+            backup_path,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=backup_filename,
+        )
+
+    except Exception as e:
+        logger.exception("Backup failed")
+        flash(f'Backup failed: {e}. Your existing data has not been modified.', 'danger')
+        return redirect(url_for('settings'))
+
 
 @app.route('/payroll-settings', methods=['GET', 'POST'])
 @login_required
@@ -3148,6 +3281,50 @@ def face_dataset_status(employee_id):
     })
 
 
+@app.route('/employees/<int:employee_id>/biometric-consent', methods=['POST'])
+@login_required
+@admin_required
+def record_biometric_consent(employee_id):
+    """
+    Record (or withdraw) biometric data collection consent for an employee.
+
+    Called by the consent checkbox in the Face Registration modal
+    (templates/add_employee.html) BEFORE the "Start Camera" button is
+    enabled. This is the single write path for biometric consent - see
+    Employee.record_biometric_consent() in models.py, which updates the
+    current-state columns on Employee AND appends an immutable
+    BiometricConsentLog row in the same transaction.
+
+    Expects JSON or form body: {"consent": true|false}. Admin-only (like
+    every other employee-management action in this app) because, in this
+    system, it is the admin operating the on-premise capture station who
+    ticks the box on the employee's behalf at enrollment time, having
+    explained the notice to them in person - this endpoint is the system-
+    of-record for that moment, not a public self-service consent form.
+    """
+    employee = Employee.query.get_or_404(employee_id)
+
+    payload = request.get_json(silent=True) or request.form
+    consent_raw = payload.get('consent')
+    consent_granted = str(consent_raw).strip().lower() in ('1', 'true', 'yes', 'on')
+
+    policy_version = (payload.get('policy_version') or 'v1.0')
+
+    employee.record_biometric_consent(
+        granted=consent_granted,
+        ip_address=request.remote_addr,
+        policy_version=policy_version,
+    )
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'employee_id': employee.id,
+        'biometric_consent_given': employee.biometric_consent_given,
+        'biometric_consent_timestamp': employee.biometric_consent_timestamp.isoformat() if employee.biometric_consent_timestamp else None,
+    })
+
+
 @app.route('/api/upload-face-image', methods=['POST'])
 @login_required
 def upload_face_image():
@@ -3175,6 +3352,22 @@ def upload_face_image():
 
     if not employee:
         return jsonify({'success': False, 'message': 'Employee not found'}), 404
+
+    # BIOMETRIC CONSENT GATE (DPDP compliance) - this is the actual browser
+    # webcam capture path used by the Face Registration modal's JS, so this
+    # check (not just the one in capture_face(), which is a legacy/desktop
+    # cv2 path) is the one that matters for the real UI flow. Consent is
+    # recorded by POST /employees/<id>/biometric-consent, called when the
+    # admin ticks the consent checkbox in that modal; the frontend also
+    # disables "Start Camera" until that call succeeds, but this server-side
+    # check is the actual control - the frontend check is only a UX nicety.
+    if not employee.biometric_consent_given:
+        return jsonify({
+            'success': False,
+            'message': 'Biometric data consent has not been recorded for this employee. '
+                        'Tick the consent checkbox before starting face capture.',
+            'consent_required': True,
+        }), 403
 
     required_count = _get_required_face_image_count()
 

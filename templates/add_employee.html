@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Employees - AI Attendance System</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
@@ -646,6 +646,53 @@
                         <span id="faceStatusRemainingText"></span>
                     </div>
 
+                    <!-- ============================================================
+                         BIOMETRIC DATA CONSENT (DPDP Act, 2023 / privacy compliance)
+                         ============================================================
+                         Face images are sensitive "biometric data". This notice and
+                         checkbox must be shown and explicitly ticked BEFORE the camera
+                         can be started - not a pre-checked box, not implied by simply
+                         opening this dialog. Ticking it calls
+                         POST /employees/<id>/biometric-consent, which is the actual
+                         server-side record (see models.py Employee.record_biometric_consent
+                         and BiometricConsentLog). The "Start Camera" button stays
+                         disabled by both the `disabled` attribute below AND a redundant
+                         JS check - and the /api/upload-face-image and /capture-face
+                         endpoints refuse to accept images server-side regardless of what
+                         the browser does, so this is a real control, not just UI polish. -->
+                    <div class="alert alert-warning" id="biometricConsentPanel">
+                        <h6 class="mb-2"><i class="bi bi-fingerprint"></i> Biometric Data Collection Consent</h6>
+                        <p class="mb-2" style="font-size: 0.9rem;">
+                            To enable AI-based face recognition attendance, this system will
+                            capture and permanently store <strong>facial images and face
+                            recognition embeddings (biometric data)</strong> for
+                            <strong>{{ employee.name }}</strong>. This data will be used
+                            solely to identify {{ employee.name }} for attendance marking,
+                            will be stored locally on this company's own server/device
+                            (never transmitted to a third party), and will be retained
+                            until the employee separates from the company or explicitly
+                            withdraws consent and requests deletion. {{ employee.name }}
+                            has the right to withdraw this consent at any time.
+                        </p>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="biometricConsentCheckbox"
+                                   {% if biometric_consent_given %}checked{% endif %}>
+                            <label class="form-check-label" for="biometricConsentCheckbox">
+                                I confirm that <strong>{{ employee.name }}</strong> has been
+                                informed of, and has explicitly given consent to, the
+                                collection and storage of their biometric (facial
+                                recognition) data as described above.
+                            </label>
+                        </div>
+                        <div class="mt-2" id="consentStatusText">
+                            {% if biometric_consent_given %}
+                                <span class="text-success"><i class="bi bi-check-circle-fill"></i> Consent already on record for this employee.</span>
+                            {% else %}
+                                <span class="text-muted"><i class="bi bi-info-circle"></i> Consent has not been recorded yet. Tick the box above to enable capture.</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
                     <div class="mb-3" id="captureSection">
                         <label class="form-label">Number of Images to Capture</label>
                         <input type="number" class="form-control" id="numImages" value="{{ remaining_images if remaining_images is defined else 20 }}" min="1" readonly data-remaining="{{ remaining_images if remaining_images is defined else 20 }}">
@@ -657,7 +704,7 @@
                     </div>
 
                     <div class="text-center mb-3">
-                        <button type="button" class="btn btn-primary" id="startCameraBtn">
+                        <button type="button" class="btn btn-primary" id="startCameraBtn" {% if not biometric_consent_given %}disabled{% endif %}>
                             <i class="bi bi-camera-video"></i> Start Camera
                         </button>
                         <button type="button" class="btn btn-success" id="captureBtn" style="display: none;" disabled>
@@ -725,6 +772,59 @@
                 const faceStatusRemainingText = document.getElementById('faceStatusRemainingText');
                 const numImagesInput = document.getElementById('numImages');
                 const captureHelpText = document.getElementById('captureHelpText');
+                const biometricConsentCheckbox = document.getElementById('biometricConsentCheckbox');
+                const consentStatusText = document.getElementById('consentStatusText');
+
+                // Server-recorded truth, kept in sync with the checkbox. Capture
+                // controls must never be enabled from consentGiven=false, even if
+                // status polling would otherwise want to enable them (see the
+                // `consentGiven &&` guard added to applyStatus() below).
+                let consentGiven = {{ 'true' if biometric_consent_given else 'false' }};
+
+                function setConsentStatusText(granted) {
+                    if (granted) {
+                        consentStatusText.innerHTML = '<span class="text-success"><i class="bi bi-check-circle-fill"></i> Consent recorded for this employee.</span>';
+                    } else {
+                        consentStatusText.innerHTML = '<span class="text-muted"><i class="bi bi-info-circle"></i> Consent has not been recorded yet. Tick the box above to enable capture.</span>';
+                    }
+                }
+
+                if (biometricConsentCheckbox) {
+                    biometricConsentCheckbox.addEventListener('change', function() {
+                        const wantsConsent = biometricConsentCheckbox.checked;
+
+                        // Disable the checkbox while the request is in flight so a
+                        // double-click can't fire two overlapping requests.
+                        biometricConsentCheckbox.disabled = true;
+
+                        fetch('/employees/' + employeeId + '/biometric-consent', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ consent: wantsConsent, policy_version: 'v1.0' })
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            biometricConsentCheckbox.disabled = false;
+                            if (data.success) {
+                                consentGiven = data.biometric_consent_given;
+                                biometricConsentCheckbox.checked = consentGiven;
+                                setConsentStatusText(consentGiven);
+                                // Re-run the existing dataset-status logic so the
+                                // Start Camera button reflects the new consent
+                                // state immediately, without duplicating its rules.
+                                refreshStatus();
+                            } else {
+                                biometricConsentCheckbox.checked = !wantsConsent;
+                                alert('Could not update biometric consent: ' + (data.message || 'Unknown error'));
+                            }
+                        })
+                        .catch(err => {
+                            biometricConsentCheckbox.disabled = false;
+                            biometricConsentCheckbox.checked = !wantsConsent;
+                            alert('Could not update biometric consent: ' + err.message);
+                        });
+                    });
+                }
 
                 // Applies a freshly-fetched status object to the UI: enables or
                 // disables capture, and switches between the "capture" view and
@@ -750,13 +850,17 @@
 
                         // Only re-enable "Start Camera"/"Capture" if we are not
                         // already mid-capture and the camera isn't already running.
+                        // The `consentGiven` guard is the frontend half of the
+                        // biometric consent gate - the server-side checks in
+                        // /api/upload-face-image and /capture-face are the real
+                        // enforcement, this just keeps the UI honest about it.
                         if (!capturing) {
                             if (stream) {
                                 captureBtn.style.display = 'inline-block';
-                                captureBtn.disabled = false;
+                                captureBtn.disabled = !consentGiven;
                             } else {
                                 startCameraBtn.style.display = 'inline-block';
-                                startCameraBtn.disabled = false;
+                                startCameraBtn.disabled = !consentGiven;
                                 captureBtn.style.display = 'none';
                             }
                         }
@@ -832,6 +936,10 @@
 
                 startCameraBtn.addEventListener('click', async function() {
                     if (startCameraBtn.disabled) return;
+                    if (!consentGiven) {
+                        alert('Please record biometric data consent for this employee before starting the camera.');
+                        return;
+                    }
                     try {
                         stream = await navigator.mediaDevices.getUserMedia({ video: true });
                         video.srcObject = stream;
@@ -1165,6 +1273,6 @@
     </script>
     {% endif %}
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
 </body>
 </html>

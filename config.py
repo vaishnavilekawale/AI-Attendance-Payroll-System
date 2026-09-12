@@ -299,8 +299,64 @@ class Config:
     # this is not simply `os.environ.get('DATABASE_URL') or <default>`.
     SQLALCHEMY_DATABASE_URI = _resolve_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+
     # Session Configuration
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
+
+    # ------------------------------------------------------------------
+    # SESSION COOKIE SECURITY - READ THIS BEFORE CHANGING SESSION_COOKIE_SECURE
+    # ------------------------------------------------------------------
+    # SESSION_COOKIE_SECURE = False is INTENTIONAL, not an oversight, for
+    # this application's deployment model. Flask's `Secure` cookie flag
+    # tells the browser "only ever send this cookie over HTTPS" - if it is
+    # True while the app is served over plain HTTP, the browser will
+    # SILENTLY DROP the session cookie on every request, which breaks
+    # login entirely (the user appears to get logged out immediately after
+    # signing in, with no visible error).
+    #
+    # This app is a single-machine / local-network desktop-style deployment:
+    # PyInstaller packages it into a standalone .exe (see attendance_app.spec
+    # and launcher.py) that a non-technical office admin double-clicks, and
+    # it serves the Flask app over plain HTTP on the LOOPBACK interface -
+    # http://127.0.0.1:<port> - opened automatically in the customer's
+    # default browser. There is no public-facing HTTPS endpoint, no reverse
+    # proxy terminating TLS, and traffic never leaves the local machine (or,
+    # at most, the local LAN if COMPANY_NAME configures a LAN-bound host -
+    # see the deployment notes in README.md). Setting SESSION_COOKIE_SECURE
+    # = True in this configuration would not add any real security (there is
+    # no network hop for TLS to protect against on 127.0.0.1 loopback
+    # traffic) and would instead simply break every login, because the
+    # browser would refuse to send the cookie back to a plain-HTTP origin.
+    #
+    # WHEN YOU **DO** NEED TO CHANGE THIS:
+    # If you deploy this application differently - e.g. behind an Nginx/
+    # Caddy reverse proxy terminating real TLS, on a shared server reachable
+    # over the internet, or anywhere a network attacker could realistically
+    # sit between the browser and this Flask process - you MUST:
+    #   1. Set SESSION_COOKIE_SECURE = True (only over an origin that is
+    #      actually served via https://, or the cookie will be dropped -
+    #      see above).
+    #   2. Terminate real TLS in front of Flask (a self-signed/local cert
+    #      is not sufficient for production; use a proper CA-issued cert,
+    #      e.g. via Let's Encrypt).
+    #   3. Consider also setting PREFERRED_URL_SCHEME = 'https' and, if
+    #      behind a reverse proxy, wrapping the WSGI app with
+    #      werkzeug.middleware.proxy_fix.ProxyFix so Flask correctly sees
+    #      the original scheme/host from X-Forwarded-* headers.
+    # ProductionConfig below re-states SESSION_COOKIE_SECURE = False with
+    # its own comment for exactly this reason: "production" in this
+    # codebase means "the hardened default config class", NOT "internet-
+    # facing HTTPS deployment" - don't assume the two are the same thing
+    # when reading this file. If you are the one setting up an
+    # internet-facing HTTPS deployment, flip both this line and
+    # ProductionConfig's copy to True as part of that work, per the steps
+    # above.
+    #
+    # SESSION_COOKIE_HTTPONLY and SESSION_COOKIE_SAMESITE below are NOT
+    # loopback-specific - they defend against XSS-driven cookie theft and
+    # cross-site request forgery respectively, both of which are just as
+    # relevant on localhost as anywhere else, so they stay on regardless of
+    # the HTTPS situation.
     SESSION_COOKIE_SECURE = False
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
@@ -372,7 +428,13 @@ class DevelopmentConfig(Config):
 
 class ProductionConfig(Config):
     DEBUG = False
-    SESSION_COOKIE_SECURE = False  # Set to True if using HTTPS in production
+    # See the long SESSION_COOKIE_SECURE comment block on the base Config
+    # class above before touching this. Short version: this stays False
+    # because this app is served over plain HTTP on 127.0.0.1 loopback
+    # (PyInstaller desktop deployment) - only flip to True if you put a
+    # real HTTPS reverse proxy in front of Flask AND update
+    # PREFERRED_URL_SCHEME / ProxyFix accordingly, per that comment block.
+    SESSION_COOKIE_SECURE = False
 
 class TestingConfig(Config):
     """
