@@ -6,7 +6,7 @@
 
 Built with Flask · DeepFace (FaceNet512) · SQLAlchemy · APScheduler · ReportLab
 
-[![Python](https://img.shields.io/badge/Python-3.10-blue)]()
+[![Python](https://img.shields.io/badge/Python-3.10.11-blue)]()
 [![Flask](https://img.shields.io/badge/Flask-3.x-black)]()
 [![Tests](https://img.shields.io/badge/tests-395%20passing-brightgreen)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-lightgrey)]()
