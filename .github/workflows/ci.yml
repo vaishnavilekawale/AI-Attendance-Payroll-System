@@ -34,3 +34,9 @@ jobs:
           DATABASE_URL: "sqlite:////home/runner/work/AI-Attendance-Payroll-System/AI-Attendance-Payroll-System/instance/attendance.db"
         run: |
           python -c "from app import app, db; app.app_context().push(); db.create_all(); print('App and Database loaded successfully!')"
+
+      - name: Run Pytest Tests
+        env:
+          SECRET_KEY: "test-secret-key-for-ci"
+        run: |
+          pytest
