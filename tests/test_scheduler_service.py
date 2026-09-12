@@ -98,7 +98,8 @@ def test_get_payslip_full_path():
 
     result = get_payslip_full_path(2026, 8, 'payslip_test.pdf')
     expected = os.path.join(Config.UPLOAD_FOLDER, 'payrolls', '2026', '08', 'payslip_test.pdf')
-    assert result == expected
+    # Normalize paths for comparison (handle Windows path separators)
+    assert os.path.normpath(result) == os.path.normpath(expected)
 
 
 def test_get_payslip_full_path_with_custom_base():
@@ -108,7 +109,8 @@ def test_get_payslip_full_path_with_custom_base():
 
     result = get_payslip_full_path(2026, 8, 'payslip_test.pdf', base_subdir='custom')
     expected = os.path.join(Config.UPLOAD_FOLDER, 'custom', '2026', '08', 'payslip_test.pdf')
-    assert result == expected
+    # Normalize paths for comparison (handle Windows path separators)
+    assert os.path.normpath(result) == os.path.normpath(expected)
 
 
 # ========================================================================
@@ -607,7 +609,8 @@ def test_get_payslip_path(app_context):
 
     result = scheduler._get_payslip_path(2026, 8, 'payslip_test.pdf')
     expected = os.path.join(Config.UPLOAD_FOLDER, 'payrolls', '2026', '08', 'payslip_test.pdf')
-    assert result == expected
+    # Normalize paths for comparison (handle Windows path separators)
+    assert os.path.normpath(result) == os.path.normpath(expected)
 
 
 def test_get_month_name():

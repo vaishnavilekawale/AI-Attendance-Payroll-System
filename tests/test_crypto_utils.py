@@ -147,7 +147,9 @@ def test_env_file_path():
     from config import BASE_DIR
 
     expected = os.path.join(BASE_DIR, '.env')
-    assert _env_file_path() == expected
+    result = _env_file_path()
+    # Normalize paths for comparison (handle Windows path separators)
+    assert os.path.normpath(result) == os.path.normpath(expected)
 
 
 def test_decrypt_bytes_invalid_token():
