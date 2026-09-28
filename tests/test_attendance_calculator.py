@@ -194,7 +194,7 @@ def test_process_auto_checkout_calculates_hours(app_context, make_employee):
     assert attendance.total_hours > 14
 
 
-def test_calculate_attendance_with_absent(app_context, make_employee):
+def test_calculate_attendance_with_absent(app_context, make_employee, non_sunday_date):
     """Test calculate_attendance_with_absent includes absent employees."""
     from attendance import AttendanceManager
     from models import Employee
@@ -205,13 +205,13 @@ def test_calculate_attendance_with_absent(app_context, make_employee):
     employee2 = make_employee(employee_id='EMP002', status='active')
 
     manager = AttendanceManager()
-    records = manager.calculate_attendance_with_absent(date.today())
+    records = manager.calculate_attendance_with_absent(non_sunday_date)
 
     # Should return records for all active employees
     assert len(records) >= 2
 
 
-def test_calculate_attendance_with_absent_excludes_inactive(app_context, make_employee):
+def test_calculate_attendance_with_absent_excludes_inactive(app_context, make_employee, non_sunday_date):
     """Test calculate_attendance_with_absent excludes inactive employees."""
     from attendance import AttendanceManager
     from models import Employee
@@ -222,7 +222,7 @@ def test_calculate_attendance_with_absent_excludes_inactive(app_context, make_em
     employee2 = make_employee(employee_id='EMP002', status='inactive')
 
     manager = AttendanceManager()
-    records = manager.calculate_attendance_with_absent(date.today())
+    records = manager.calculate_attendance_with_absent(non_sunday_date)
 
     # Should only include active employees
     employee_ids = [r.employee.id for r in records]

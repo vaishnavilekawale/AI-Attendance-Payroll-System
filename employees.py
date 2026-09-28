@@ -29,6 +29,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from werkzeug.security import generate_password_hash
 from werkzeug.utils import secure_filename
 
+from config import Config
 from database import db
 from models import (
     Employee, EmployeeLogin, Settings, Attendance, Payroll,
@@ -80,7 +81,7 @@ def employees():
     settings = Settings.get_settings()
     min_face_images = settings.min_face_images_required if settings else 20
 
-    dataset_folder = os.path.join(current_app.root_path, 'dataset')
+    dataset_folder = Config.DATASET_FOLDER
     employee_image_counts = _employee_image_counts(dataset_folder, employees_page.items)
 
     return render_template('add_employee.html',
@@ -241,7 +242,7 @@ def edit_employee(id):
     settings = Settings.get_settings()
     min_face_images = settings.min_face_images_required if settings else 20
 
-    dataset_folder = os.path.join(current_app.root_path, 'dataset')
+    dataset_folder = Config.DATASET_FOLDER
     employee_image_counts = _employee_image_counts(dataset_folder, all_employees)
 
     if request.method == 'POST':
@@ -401,7 +402,7 @@ def delete_employee(id):
         except Exception:
             pass
 
-    dataset_folder = os.path.join(current_app.root_path, 'dataset', str(id))
+    dataset_folder = os.path.join(Config.DATASET_FOLDER, str(id))
     if os.path.exists(dataset_folder):
         try:
             shutil.rmtree(dataset_folder)
@@ -426,7 +427,7 @@ def view_employee(id):
     settings = Settings.get_settings()
     min_face_images = settings.min_face_images_required if settings else 20
 
-    dataset_folder = os.path.join(current_app.root_path, 'dataset')
+    dataset_folder = Config.DATASET_FOLDER
     employee_image_counts = _employee_image_counts(dataset_folder, all_employees)
 
     emp_folder = os.path.join(dataset_folder, str(employee.id))

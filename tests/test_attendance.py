@@ -124,7 +124,7 @@ def test_attendance_manager_initialization():
     assert manager.calculator is not None
 
 
-def test_mark_attendance_first_in(app_context, make_employee):
+def test_mark_attendance_first_in(app_context, make_employee, frozen_weekday_datetime):
     """Test mark_attendance for first IN of the day."""
     from attendance import AttendanceManager
     from models import Attendance
@@ -139,13 +139,13 @@ def test_mark_attendance_first_in(app_context, make_employee):
 
     attendance = Attendance.query.filter_by(
         employee_id=employee.id,
-        date=date.today()
+        date=frozen_weekday_datetime.date()
     ).first()
     assert attendance is not None
     assert attendance.in_time is not None
 
 
-def test_mark_attendance_out_after_in(app_context, make_employee):
+def test_mark_attendance_out_after_in(app_context, make_employee, frozen_weekday_datetime):
     """Test mark_attendance for OUT after IN."""
     from attendance import AttendanceManager
     from models import Attendance
@@ -164,7 +164,7 @@ def test_mark_attendance_out_after_in(app_context, make_employee):
 
     attendance = Attendance.query.filter_by(
         employee_id=employee.id,
-        date=date.today()
+        date=frozen_weekday_datetime.date()
     ).first()
     assert attendance.out_time is not None
 
@@ -180,7 +180,7 @@ def test_mark_attendance_employee_not_found(app_context):
     assert 'not found' in result['message'].lower()
 
 
-def test_mark_in_success(app_context, make_employee):
+def test_mark_in_success(app_context, make_employee, frozen_weekday_datetime):
     """Test mark_in creates attendance record."""
     from attendance import AttendanceManager
     from models import Attendance
@@ -195,7 +195,7 @@ def test_mark_in_success(app_context, make_employee):
 
     attendance = Attendance.query.filter_by(
         employee_id=employee.id,
-        date=date.today()
+        date=frozen_weekday_datetime.date()
     ).first()
     assert attendance is not None
 

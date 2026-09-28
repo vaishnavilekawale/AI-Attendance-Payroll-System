@@ -314,13 +314,13 @@
                 Marking attendance doesn't require an account. If you need dashboards, reports,
                 payroll, or approvals, sign in below.
             </p>
-            <a href="{{ url_for('login', role='admin') }}" class="login-option-btn text-decoration-none text-dark">
+            <a href="{{ url_for('auth.login', role='admin') }}" class="login-option-btn text-decoration-none text-dark">
                 <i class="bi bi-shield-lock"></i>
                 <div>
                     <div class="fw-bold">Admin Login</div>
                 </div>
             </a>
-            <a href="{{ url_for('login', role='employee') }}" class="login-option-btn text-decoration-none text-dark">
+            <a href="{{ url_for('auth.login', role='employee') }}" class="login-option-btn text-decoration-none text-dark">
                 <i class="bi bi-person"></i>
                 <div>
                     <div class="fw-bold">Manager/Employee Login</div>

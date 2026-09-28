@@ -6,7 +6,22 @@ These specifically exercise the blueprint-scoped endpoint names
 rewiring that came with the migration, plus a real end-to-end add -> edit
 -> delete flow against the DB.
 """
+import pytest
 from flask import url_for
+
+
+@pytest.fixture(autouse=True)
+def _isolated_dataset(tmp_path, monkeypatch):
+    """Never let these tests touch the real dataset/ folder.
+
+    Test employees always get database id 1 (fresh DB per test), and the
+    delete-employee route removes dataset/<id>/ - without this fixture,
+    running the suite would wipe the real face images of whichever real
+    employee has id 1.
+    """
+    import employees
+    monkeypatch.setattr(employees.Config, 'DATASET_FOLDER', str(tmp_path))
+    return tmp_path
 
 
 def _login_as_admin(client, make_admin):
@@ -140,3 +155,19 @@ def test_delete_employee_removes_employee_and_login_creds(client, make_admin, ma
 
     from models import Employee
     assert Employee.query.get(employee_id) is None
+
+
+def test_delete_employee_removes_only_that_employees_face_folder(client, make_admin, make_employee, _isolated_dataset):
+    import os
+    _login_as_admin(client, make_admin)
+    employee = make_employee(employee_id='EMP0001', name='Dave Deleteme')
+    mine = _isolated_dataset / str(employee.id)
+    other = _isolated_dataset / '999'
+    mine.mkdir(); other.mkdir()
+    (mine / 'a.jpg').write_bytes(b'x')
+    (other / 'b.jpg').write_bytes(b'y')
+
+    client.get(f'/employees/delete/{employee.id}', follow_redirects=True)
+
+    assert not mine.exists()                       # this employee's photos are gone
+    assert (other / 'b.jpg').exists()              # nobody else's are touched

@@ -39,6 +39,44 @@ def has_rejected_approval(attendance):
     )
 
 
+def get_effective_report_status(attendance):
+    """
+    Return the canonical attendance status used by reports and PDFs.
+    Finalized attendance uses the status already calculated and stored
+    on the Attendance record.
+
+    Rules:
+    - REJECTED logout approval requests are ALWAYS treated as ABSENT.
+    - Today's attendance is not finalized while the work day is ongoing,
+      so it stays 'pending' (NOT_MARKED) until the day ends at midnight.
+    - Past dates without an IN time are ABSENT.
+
+    Moved here from app.py so it can be shared between app.py's
+    dashboard() route and reports_routes.py's employee_reports() route
+    without either module importing from the other.
+    """
+    # REJECTED logout approvals are treated strictly as ABSENT
+    if has_rejected_approval(attendance):
+        return 'absent'
+
+    # Today's attendance without OUT is still pending / NOT_MARKED
+    if not attendance.out_time and attendance.date >= date.today():
+        return 'pending'
+
+    # No IN = Absent (applies to finalized past dates only)
+    if not attendance.in_time:
+        return 'absent'
+
+    # For finalized/past attendance, use the stored final status
+    status = (attendance.status or '').lower().strip()
+
+    if status in ('present', 'half_day', 'absent'):
+        return status
+
+    # Safety fallback
+    return 'pending'
+
+
 def normalize_attendance_status(status):
     """
     Normalize attendance status to canonical values for reporting and payroll.

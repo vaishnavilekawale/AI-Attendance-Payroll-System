@@ -15,7 +15,7 @@ def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'admin_id' not in session and 'employee_id' not in session:
-            return redirect(url_for('login'))
+            return redirect(url_for('auth.login'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -26,7 +26,7 @@ def admin_required(f):
     def decorated_function(*args, **kwargs):
         if 'admin_id' not in session:
             flash('Access Denied. Admin access required.', 'danger')
-            return redirect(url_for('login'))
+            return redirect(url_for('auth.login'))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -38,9 +38,9 @@ def employee_required(f):
     def decorated_function(*args, **kwargs):
         if 'employee_id' not in session:
             flash('Access Denied. Employee access required.', 'danger')
-            return redirect(url_for('employee_login'))
+            return redirect(url_for('auth.login'))
         if 'employee_id' in kwargs and kwargs['employee_id'] != session['employee_id']:
             flash('Access Denied. You can only view your own information.', 'danger')
-            return redirect(url_for('employee_dashboard'))
+            return redirect(url_for('attendance.employee_dashboard'))
         return f(*args, **kwargs)
     return decorated_function

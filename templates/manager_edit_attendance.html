@@ -11,7 +11,7 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('employee_dashboard') }}">
+            <a class="navbar-brand" href="{{ url_for('attendance.employee_dashboard') }}">
                 <i class="bi bi-person-badge"></i> AI Attendance System
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -20,34 +20,34 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_dashboard') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.employee_dashboard') }}">
                             <i class="bi bi-speedometer2"></i> Dashboard
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_attendance') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.employee_attendance') }}">
                             <i class="bi bi-calendar-check"></i> My Attendance
                         </a>
                     </li>
                     {% if manager and manager.designation == 'Manager' %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('manager_approvals') }}">
+                        <a class="nav-link" href="{{ url_for('approvals.manager_approvals') }}">
                             <i class="bi bi-check-circle"></i> Approvals
                         </a>
                     </li>
                     {% endif %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_payroll') }}">
+                        <a class="nav-link" href="{{ url_for('payroll.employee_payroll') }}">
                             <i class="bi bi-cash"></i> My Payroll
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_reports') }}">
+                        <a class="nav-link" href="{{ url_for('reports.employee_reports') }}">
                             <i class="bi bi-file-earmark-bar-graph"></i> My Reports
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_profile') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.employee_profile') }}">
                             <i class="bi bi-person"></i> My Profile
                         </a>
                     </li>
@@ -58,9 +58,9 @@
                             <i class="bi bi-person-circle"></i> {{ session.employee_username }}
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{{ url_for('employee_profile') }}">Profile</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('attendance.employee_profile') }}">Profile</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
                         </ul>
                     </li>
                 </ul>
@@ -128,7 +128,7 @@
                                 <button type="submit" class="btn btn-primary">
                                     <i class="bi bi-save"></i> Save Changes
                                 </button>
-                                <a href="{{ url_for('employee_attendance') }}" class="btn btn-secondary">
+                                <a href="{{ url_for('attendance.employee_attendance') }}" class="btn btn-secondary">
                                     <i class="bi bi-x-circle"></i> Cancel
                                 </a>
                             </div>

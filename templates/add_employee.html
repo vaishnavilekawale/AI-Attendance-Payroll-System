@@ -11,7 +11,7 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+            <a class="navbar-brand" href="{{ url_for('attendance.dashboard') }}">
                 <i class="bi bi-person-badge"></i> AI Attendance System
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -20,7 +20,7 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.dashboard') }}">
                             <i class="bi bi-speedometer2"></i> Dashboard
                         </a>
                     </li>
@@ -30,27 +30,27 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('attendance') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.attendance') }}">
                             <i class="bi bi-calendar-check"></i> Attendance
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('payroll') }}">
+                        <a class="nav-link" href="{{ url_for('payroll.payroll') }}">
                             <i class="bi bi-cash"></i> Payroll
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('reports') }}">
+                        <a class="nav-link" href="{{ url_for('reports.reports') }}">
                             <i class="bi bi-file-earmark-bar-graph"></i> Reports
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('settings') }}">
+                        <a class="nav-link" href="{{ url_for('settings.settings') }}">
                             <i class="bi bi-gear"></i> Settings
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('admin_approvals') }}">
+                        <a class="nav-link" href="{{ url_for('approvals.admin_approvals') }}">
                             <i class="bi bi-check-circle"></i> Approvals
                         </a>
                     </li>
@@ -61,9 +61,9 @@
                             <i class="bi bi-person-circle"></i> {{ session.admin_username }}
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change Password</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}">Change Password</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
                         </ul>
                     </li>
                 </ul>
@@ -151,7 +151,7 @@
                                                 <a href="{{ url_for('employees.view_employee', id=emp.id) }}" class="btn btn-sm btn-info">
                                                     <i class="bi bi-eye"></i>
                                                 </a>
-                                                <a href="{{ url_for('face_registration', id=emp.id) }}" class="btn btn-sm btn-warning">
+                                                <a href="{{ url_for('attendance.face_registration', id=emp.id) }}" class="btn btn-sm btn-warning">
                                                     <i class="bi bi-camera"></i>
                                                 </a>
                                                 <a href="{{ url_for('employees.edit_employee', id=emp.id) }}" class="btn btn-sm btn-primary">
@@ -748,6 +748,21 @@
 
                 // Only initialize webcam logic if modal exists
                 const employeeId = {{ employee.id | tojson }};
+                // CSRF FIX: every state-changing fetch() call in this modal (the
+                // biometric-consent POST below, and the upload/train calls further
+                // down) must send this header, or Flask-WTF's CSRFProtect rejects
+                // the request with a 400 response BEFORE it ever reaches our route
+                // handler. Flask's default error page for that is HTML, not JSON -
+                // which is exactly why the old code's `.then(response => response.json())`
+                // blew up with "Unexpected token '<', "<!DOCTYPE"... is not valid
+                // JSON": it was trying to JSON-parse Flask's HTML error page. The
+                // upload/train calls already build a FormData with a csrf_token
+                // field (forms bypass this because Flask-WTF also accepts the
+                // token from form data) - only the JSON-body consent fetch was
+                // missing it, since JSON bodies are not form data and Flask-WTF has
+                // no way to see a token inside a JSON payload; it must come via
+                // this header instead.
+                const csrfToken = "{{ csrf_token() }}";
                 const STATUS_URL = '/api/face-dataset-status/' + employeeId;
                 const POLL_INTERVAL_MS = 5000; // periodically re-check in case the
                                                 // dataset folder is deleted on the
@@ -799,7 +814,10 @@
 
                         fetch('/employees/' + employeeId + '/biometric-consent', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': csrfToken
+                            },
                             body: JSON.stringify({ consent: wantsConsent, policy_version: 'v1.0' })
                         })
                         .then(response => response.json())
@@ -994,7 +1012,7 @@
 
                         const trainFormData = new FormData();
                         trainFormData.append('employee_id', employeeId);
-                        trainFormData.append('csrf_token', '{{ csrf_token() }}');
+                        trainFormData.append('csrf_token', csrfToken);
 
                         fetch('/api/train-face-model', {
                             method: 'POST',
@@ -1032,7 +1050,7 @@
                         const formData = new FormData();
                         formData.append('image', blob);
                         formData.append('employee_id', employeeId);
-                        formData.append('csrf_token', '{{ csrf_token() }}');
+                        formData.append('csrf_token', csrfToken);
 
                         fetch('/api/upload-face-image', {
                             method: 'POST',

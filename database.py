@@ -171,6 +171,32 @@ def init_db(app):
             with db.engine.connect() as conn:
                 conn.execute(db.text("ALTER TABLE employees ADD COLUMN other_deduction FLOAT DEFAULT 0.0"))
                 conn.commit()
+
+        if 'biometric_consent_given' not in columns:
+            with db.engine.connect() as conn:
+                # Existing employees default to True (consent already
+                # collected in person before this field existed) so that
+                # upgrading the app never silently blocks face capture for
+                # employees already using it.
+                conn.execute(db.text(
+                    "ALTER TABLE employees ADD COLUMN biometric_consent_given BOOLEAN DEFAULT 1"
+                ))
+                conn.commit()
+
+        if 'biometric_consent_timestamp' not in columns:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE employees ADD COLUMN biometric_consent_timestamp DATETIME"))
+                conn.commit()
+
+        if 'biometric_consent_version' not in columns:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE employees ADD COLUMN biometric_consent_version VARCHAR(20)"))
+                conn.commit()
+
+        if 'biometric_consent_ip_address' not in columns:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE employees ADD COLUMN biometric_consent_ip_address VARCHAR(45)"))
+                conn.commit()
         
         # Add new columns to payroll table
         try:

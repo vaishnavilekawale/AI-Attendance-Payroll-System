@@ -11,7 +11,7 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('dashboard') }}">
+            <a class="navbar-brand" href="{{ url_for('attendance.dashboard') }}">
                 <i class="bi bi-person-badge"></i> AI Attendance System
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -20,7 +20,7 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.dashboard') }}">
                             <i class="bi bi-speedometer2"></i> Dashboard
                         </a>
                     </li>
@@ -30,27 +30,27 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('attendance') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.attendance') }}">
                             <i class="bi bi-calendar-check"></i> Attendance
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('payroll') }}">
+                        <a class="nav-link" href="{{ url_for('payroll.payroll') }}">
                             <i class="bi bi-cash"></i> Payroll
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('reports') }}">
+                        <a class="nav-link" href="{{ url_for('reports.reports') }}">
                             <i class="bi bi-file-earmark-bar-graph"></i> Reports
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('settings') }}">
+                        <a class="nav-link" href="{{ url_for('settings.settings') }}">
                             <i class="bi bi-gear"></i> Settings
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('admin_approvals') }}">
+                        <a class="nav-link" href="{{ url_for('approvals.admin_approvals') }}">
                             <i class="bi bi-check-circle"></i> Approvals
                         </a>
                     </li>
@@ -61,9 +61,9 @@
                             <i class="bi bi-person-circle"></i> {{ session.admin_username }}
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{{ url_for('change_password') }}">Change Password</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}">Change Password</a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
                         </ul>
                     </li>
                 </ul>
@@ -98,7 +98,7 @@
 
         <div class="row">
             <div class="col-lg-8">
-                <form method="POST" action="{{ url_for('settings') }}" enctype="multipart/form-data">
+                <form method="POST" action="{{ url_for('settings.settings') }}" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <!-- Company Settings -->
                     <div class="card mb-4">
@@ -240,10 +240,10 @@
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-save"></i> Save Settings
                         </button>
-                        <a href="{{ url_for('settings', test_email=1) }}" class="btn btn-info">
+                        <a href="{{ url_for('settings.settings', test_email=1) }}" class="btn btn-info">
                             <i class="bi bi-envelope"></i> Test Email Connection
                         </a>
-                        <a href="{{ url_for('train_ai') }}" class="btn btn-warning">
+                        <a href="{{ url_for('attendance.train_ai') }}" class="btn btn-warning">
                             <i class="bi bi-cpu"></i> Retrain AI Model
                         </a>
                     </div>
@@ -304,7 +304,7 @@
                             always be regenerated from <code>dataset/</code> via
                             "Train AI" if ever needed.
                         </p>
-                        <form method="POST" action="{{ url_for('admin_backup') }}" id="backupForm">
+                        <form method="POST" action="{{ url_for('settings.admin_backup') }}" id="backupForm">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-outline-primary btn-sm" id="backupBtn">
                                 <i class="bi bi-download"></i> Backup Now
@@ -323,7 +323,7 @@
                             Add another administrator account. Existing admins are
                             unaffected — this only creates a new one.
                         </p>
-                        <a href="{{ url_for('create_admin') }}" class="btn btn-outline-primary btn-sm">
+                        <a href="{{ url_for('auth.create_admin') }}" class="btn btn-outline-primary btn-sm">
                             <i class="bi bi-person-plus"></i> Manage Admins
                         </a>
                     </div>

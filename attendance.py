@@ -47,7 +47,7 @@ def auto_checkout_pending_attendance():
                 # Future dates skip करा
                 if attendance.date > today:
                     continue
-                employee = Employee.query.get(attendance.employee_id)
+                employee = db.session.get(Employee, attendance.employee_id)
                 if not employee:
                     logger.warning(f"Employee not found for attendance ID {attendance.id}")
                     continue
@@ -114,7 +114,7 @@ class AttendanceManager:
     def mark_attendance(self, employee_id, confidence=None):
         """Mark attendance for employee (IN or OUT)"""
         today = datetime.now().date()
-        employee = Employee.query.get(employee_id)
+        employee = db.session.get(Employee, employee_id)
         
         if not employee:
             return {'success': False, 'message': 'Employee not found'}
@@ -179,7 +179,7 @@ class AttendanceManager:
         ID to avoid detached-instance / cross-session issues.
         """
         try:
-            attendance = Attendance.query.get(attendance_id)
+            attendance = db.session.get(Attendance, attendance_id)
             if attendance is None:
                 logger.error(
                     f"Background calculation: attendance record "
@@ -864,7 +864,7 @@ class AttendanceManager:
 #                 # Future dates skip करा
 #                 if attendance.date > today:
 #                     continue
-#                 employee = Employee.query.get(attendance.employee_id)
+#                 employee = db.session.get(Employee, attendance.employee_id)
 #                 if not employee:
 #                     logger.warning(f"Employee not found for attendance ID {attendance.id}")
 #                     continue
@@ -931,7 +931,7 @@ class AttendanceManager:
 #     def mark_attendance(self, employee_id, confidence=None):
 #         """Mark attendance for employee (IN or OUT)"""
 #         today = datetime.now().date()
-#         employee = Employee.query.get(employee_id)
+#         employee = db.session.get(Employee, employee_id)
         
 #         if not employee:
 #             return {'success': False, 'message': 'Employee not found'}
@@ -996,7 +996,7 @@ class AttendanceManager:
 #         ID to avoid detached-instance / cross-session issues.
 #         """
 #         try:
-#             attendance = Attendance.query.get(attendance_id)
+#             attendance = db.session.get(Attendance, attendance_id)
 #             if attendance is None:
 #                 logger.error(
 #                     f"Background calculation: attendance record "

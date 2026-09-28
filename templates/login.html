@@ -307,7 +307,7 @@
                 {% endif %}
             {% endwith %}
             
-            <form method="POST" action="{{ url_for('login') }}" id="loginForm" novalidate>
+            <form method="POST" action="{{ url_for('auth.login') }}" id="loginForm" novalidate>
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="role" id="roleInput" value="admin">
                 
@@ -351,13 +351,13 @@
             </form>
             
             <div class="text-center mt-4" id="forgotPasswordSection">
-                <a href="{{ url_for('forgot_password') }}" class="text-decoration-none" id="forgotPasswordLink">
+                <a href="{{ url_for('auth.forgot_password') }}" class="text-decoration-none" id="forgotPasswordLink">
                     <i class="bi bi-question-circle me-1"></i> Forgot Password?
                 </a>
             </div>
             
             <div class="text-center mt-3" id="registerSection">
-                <small class="text-muted">Don't have an admin account? <a href="{{ url_for('register') }}" class="text-decoration-none">Register</a></small>
+                <small class="text-muted">Don't have an admin account? <a href="{{ url_for('auth.register') }}" class="text-decoration-none">Register</a></small>
             </div>
             
             <div class="text-center mt-4">
@@ -395,7 +395,7 @@
                 usernameInput.placeholder = 'Enter username';
                 usernameFeedback.textContent = 'Username is required (minimum 3 characters)';
                 forgotPasswordSection.style.display = 'block';
-                forgotPasswordLink.href = "{{ url_for('forgot_password') }}";
+                forgotPasswordLink.href = "{{ url_for('auth.forgot_password') }}";
                 registerSection.style.display = 'block';
                 defaultCredentials.textContent = 'Default: admin / admin123';
             } else {
@@ -407,7 +407,7 @@
                 usernameInput.placeholder = 'Enter Employee ID (e.g., EMP0001)';
                 usernameFeedback.textContent = 'Employee ID is required';
                 forgotPasswordSection.style.display = 'block';
-                forgotPasswordLink.href = "{{ url_for('employee_forgot_password') }}";
+                forgotPasswordLink.href = "{{ url_for('auth.employee_forgot_password') }}";
                 registerSection.style.display = 'none';
                 defaultCredentials.textContent = 'Default: Your Employee ID (e.g., EMP0001)';
             }

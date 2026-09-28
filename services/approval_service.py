@@ -4,7 +4,7 @@ Handles creation, approval, and rejection of logout approval requests
 Also handles manual attendance approval workflow
 """
 from datetime import datetime, time
-from models import Employee, Attendance, LogoutApprovalRequest, AttendanceActivity, Admin
+from models import Employee, Attendance, LogoutApprovalRequest, AttendanceActivity, Admin, now_ist
 from database import db
 from sqlalchemy.exc import IntegrityError
 import logging
@@ -79,7 +79,7 @@ class ApprovalService:
                 manager_id=manager.id,
                 request_type='auto_logout',
                 status='pending',
-                created_at=datetime.utcnow()
+                created_at=now_ist()
             )
             
             db.session.add(request)
@@ -187,7 +187,7 @@ class ApprovalService:
             dict with success status and message
         """
         try:
-            request = LogoutApprovalRequest.query.get(request_id)
+            request = db.session.get(LogoutApprovalRequest, request_id)
             
             if not request:
                 return {'success': False, 'message': 'Approval request not found'}
@@ -200,7 +200,7 @@ class ApprovalService:
                 return {'success': False, 'message': 'You are not authorized to approve this request'}
             
             # Get the attendance record
-            attendance = Attendance.query.get(request.attendance_id)
+            attendance = db.session.get(Attendance, request.attendance_id)
             
             if not attendance:
                 return {'success': False, 'message': 'Attendance record not found'}
@@ -241,7 +241,7 @@ class ApprovalService:
             
             # Update the approval request
             request.status = 'approved'
-            request.approved_at = datetime.now()
+            request.approved_at = now_ist()
             request.approved_by = approver_id
             
             db.session.commit()
@@ -269,7 +269,7 @@ class ApprovalService:
             dict with success status and message
         """
         try:
-            request = LogoutApprovalRequest.query.get(request_id)
+            request = db.session.get(LogoutApprovalRequest, request_id)
             
             if not request:
                 return {'success': False, 'message': 'Approval request not found'}
@@ -283,12 +283,12 @@ class ApprovalService:
             
             # Update the approval request
             request.status = 'rejected'
-            request.approved_at = datetime.now()
+            request.approved_at = now_ist()
             request.approved_by = approver_id
             request.remarks = remarks
             
             # Get the attendance record so it can be marked ABSENT on rejection
-            attendance = Attendance.query.get(request.attendance_id)
+            attendance = db.session.get(Attendance, request.attendance_id)
             
             logger.info(f"AUTO LOGOUT REJECTED")
             logger.info(f"Attendance ID: {attendance.id if attendance else 'N/A'}")
@@ -377,7 +377,7 @@ class ApprovalService:
             dict with success status and message
         """
         try:
-            request = LogoutApprovalRequest.query.get(request_id)
+            request = db.session.get(LogoutApprovalRequest, request_id)
             
             if not request:
                 return {'success': False, 'message': 'Approval request not found'}
@@ -386,7 +386,7 @@ class ApprovalService:
                 return {'success': False, 'message': f'Request already {request.status}'}
             
             # Get the attendance record
-            attendance = Attendance.query.get(request.attendance_id)
+            attendance = db.session.get(Attendance, request.attendance_id)
             
             if not attendance:
                 return {'success': False, 'message': 'Attendance record not found'}
@@ -423,7 +423,7 @@ class ApprovalService:
             
             # Update the approval request
             request.status = 'approved'
-            request.approved_at = datetime.now()
+            request.approved_at = now_ist()
             request.approved_by = admin_id
             
             db.session.commit()
@@ -451,7 +451,7 @@ class ApprovalService:
             dict with success status and message
         """
         try:
-            request = LogoutApprovalRequest.query.get(request_id)
+            request = db.session.get(LogoutApprovalRequest, request_id)
             
             if not request:
                 return {'success': False, 'message': 'Approval request not found'}
@@ -461,12 +461,12 @@ class ApprovalService:
             
             # Update the approval request
             request.status = 'rejected'
-            request.approved_at = datetime.now()
+            request.approved_at = now_ist()
             request.approved_by = admin_id
             request.remarks = remarks
             
             # Get related attendance record
-            attendance = Attendance.query.get(request.attendance_id)
+            attendance = db.session.get(Attendance, request.attendance_id)
             
             if attendance:
                 # Mark attendance as ABSENT
@@ -649,7 +649,7 @@ class ApprovalService:
         """
         logger.info(f"approve_manual_attendance called for Attendance ID: {attendance_id}")
         
-        attendance = Attendance.query.get(attendance_id)
+        attendance = db.session.get(Attendance, attendance_id)
         if not attendance:
             logger.error(f"Attendance record not found: {attendance_id}")
             return {'success': False, 'message': 'Attendance record not found'}
@@ -666,7 +666,7 @@ class ApprovalService:
             attendance.approval_status = 'approved'
             # Clear any stale rejection remark from a previous cycle on this record.
             attendance.rejection_remarks = None
-            attendance.updated_at = datetime.utcnow()
+            attendance.updated_at = now_ist()
             db.session.commit()
             
             logger.info(f"Manual attendance approved - Attendance ID: {attendance_id}, Approver ID: {approver_id}")
@@ -694,7 +694,7 @@ class ApprovalService:
         """
         logger.info(f"reject_manual_attendance called for Attendance ID: {attendance_id}")
         
-        attendance = Attendance.query.get(attendance_id)
+        attendance = db.session.get(Attendance, attendance_id)
         if not attendance:
             logger.error(f"Attendance record not found: {attendance_id}")
             return {'success': False, 'message': 'Attendance record not found'}
@@ -713,7 +713,7 @@ class ApprovalService:
             # approval dashboards (previously this was only logged/emailed
             # and never saved, so it never rendered anywhere).
             attendance.rejection_remarks = remarks
-            attendance.updated_at = datetime.utcnow()
+            attendance.updated_at = now_ist()
             db.session.commit()
             
             logger.info(f"Manual attendance rejected - Attendance ID: {attendance_id}, Approver ID: {approver_id}, Remarks: {remarks}")
@@ -752,7 +752,7 @@ class ApprovalService:
             # the Admin, so any request belonging to an employee whose
             # designation is 'Manager' (including the manager themselves) is
             # excluded here regardless of department match.
-            manager = Employee.query.get(manager_id)
+            manager = db.session.get(Employee, manager_id)
             if manager:
                 query = query.join(Employee).filter(
                     Employee.department == manager.department,
@@ -794,7 +794,7 @@ class ApprovalService:
         )
 
         if not admin_view and manager_id:
-            manager = Employee.query.get(manager_id)
+            manager = db.session.get(Employee, manager_id)
             if manager:
                 query = query.join(Employee).filter(
                     Employee.department == manager.department,

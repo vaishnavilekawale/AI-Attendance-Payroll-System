@@ -11,7 +11,7 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
-            <a class="navbar-brand" href="{{ url_for('employee_dashboard') }}">
+            <a class="navbar-brand" href="{{ url_for('attendance.employee_dashboard') }}">
                 <i class="bi bi-person-badge"></i> AI Attendance System
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -20,35 +20,35 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_dashboard') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.employee_dashboard') }}">
                             <i class="bi bi-speedometer2"></i> Dashboard
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_attendance') }}">
+                        <a class="nav-link" href="{{ url_for('attendance.employee_attendance') }}">
                             <i class="bi bi-calendar-check"></i> My Attendance
                         </a>
                     </li>
                     
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_payroll') }}">
+                        <a class="nav-link" href="{{ url_for('payroll.employee_payroll') }}">
                             <i class="bi bi-cash"></i> My Payroll
                         </a>
                     </li>
                     {% if current_user and current_user.designation == 'Manager' %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('manager_approvals') }}">
+                        <a class="nav-link" href="{{ url_for('approvals.manager_approvals') }}">
                             <i class="bi bi-check-circle"></i> Approvals
                         </a>
                     </li>
                     {% endif %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('employee_reports') }}">
+                        <a class="nav-link" href="{{ url_for('reports.employee_reports') }}">
                             <i class="bi bi-file-earmark-bar-graph"></i> My Reports
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" href="{{ url_for('employee_profile') }}">
+                        <a class="nav-link active" href="{{ url_for('attendance.employee_profile') }}">
                             <i class="bi bi-person"></i> My Profile
                         </a>
                     </li>
@@ -59,14 +59,14 @@
                             <i class="bi bi-person-circle"></i> {{ session.get('employee_username', 'Employee') }}
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{{ url_for('employee_profile') }}">
+                            <li><a class="dropdown-item" href="{{ url_for('attendance.employee_profile') }}">
                                 <i class="bi bi-person"></i> My Profile
                             </a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('employee_change_password') }}">
+                            <li><a class="dropdown-item" href="{{ url_for('auth.employee_change_password') }}">
                                 <i class="bi bi-key"></i> Change Password
                             </a></li>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="{{ url_for('logout') }}">
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">
                                 <i class="bi bi-box-arrow-right"></i> Logout
                             </a></li>
                         </ul>
@@ -82,7 +82,7 @@
                 <div class="card shadow">
                     <div class="card-body text-center">
                         {% if employee.profile_photo %}
-                            <img src="{{ url_for('serve_upload', filename=employee.profile_photo.replace('uploads/', '', 1)) }}" 
+                            <img src="{{ url_for('attendance.serve_upload', filename=employee.profile_photo.replace('uploads/', '', 1)) }}" 
                             class="rounded-circle mb-3" alt="Profile Photo" 
                             style="width: 150px; height: 150px; object-fit: cover;">
                             <p>Profile Photo: {{ employee.profile_photo }}</p>
@@ -208,7 +208,7 @@
                                 custom password below if you'd rather use one of your own choosing.
                             {% endif %}
                         </p>
-                        <form method="POST" action="{{ url_for('set_payslip_password') }}" class="row g-2 align-items-end">
+                        <form method="POST" action="{{ url_for('payroll.set_payslip_password') }}" class="row g-2 align-items-end">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <div class="col-md-8">
                                 <label for="payslip_password" class="form-label">New payslip password</label>
@@ -251,7 +251,7 @@
                         {% endif %}
                     {% endwith %}
                     
-                    <form method="POST" action="{{ url_for('employee_profile') }}" id="editProfileForm">
+                    <form method="POST" action="{{ url_for('attendance.employee_profile') }}" id="editProfileForm">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="mb-3">
                             <label for="phone" class="form-label">Phone Number</label>

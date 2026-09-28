@@ -7,7 +7,7 @@ Covers:
 - @employee_required decorator
 """
 import pytest
-from flask import Flask, session
+from flask import Flask, Blueprint, session
 from auth_decorators import login_required, admin_required, employee_required
 
 
@@ -32,17 +32,27 @@ def app():
     def employee_only(employee_id):
         return f'Employee {employee_id} content'
 
-    @app.route('/login')
+    # Registered as a blueprint named 'auth' with a 'login' view, matching
+    # the real app (auth_routes.py's auth_bp) - auth_decorators.py's
+    # redirects target the endpoint 'auth.login', not a bare 'login'.
+    auth_bp = Blueprint('auth', __name__)
+
+    @auth_bp.route('/login')
     def login():
         return 'Login page'
 
-    @app.route('/employee-login')
-    def employee_login():
-        return 'Employee login page'
+    app.register_blueprint(auth_bp)
 
-    @app.route('/employee-dashboard')
+    # Likewise registered under the 'attendance' blueprint, matching the
+    # real app (attendance_routes.py's attendance_bp) - employee_required
+    # redirects to the endpoint 'attendance.employee_dashboard'.
+    attendance_bp = Blueprint('attendance', __name__)
+
+    @attendance_bp.route('/employee-dashboard')
     def employee_dashboard():
         return 'Employee dashboard'
+
+    app.register_blueprint(attendance_bp)
 
     return app
 
@@ -117,10 +127,16 @@ def test_employee_required_with_employee_session(client):
 
 
 def test_employee_required_without_session_redirects(client):
-    """Test that employee_required redirects without session."""
+    """Test that employee_required redirects without session.
+
+    Regression test: this used to redirect to a separate 'employee_login'
+    endpoint that doesn't exist in the real app (only a single, unified
+    '/login' route is registered for both Admin and Employee). Now fixed
+    to redirect to 'login', matching the real app's routing.
+    """
     response = client.get('/employee-only/5')
     assert response.status_code == 302
-    assert '/employee-login' in response.location
+    assert '/login' in response.location
 
 
 def test_employee_required_with_mismatched_employee_id_redirects(client):

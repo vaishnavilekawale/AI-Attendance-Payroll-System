@@ -492,7 +492,7 @@ class PayrollCalculator:
             return []
 
         if employee_id:
-            employees = [Employee.query.get(employee_id)]
+            employees = [db.session.get(Employee, employee_id)]
         else:
             employees = Employee.query.filter_by(status='active').all()
 
@@ -1004,7 +1004,7 @@ class PayrollCalculator:
 #             return []
 
 #         if employee_id:
-#             employees = [Employee.query.get(employee_id)]
+#             employees = [db.session.get(Employee, employee_id)]
 #         else:
 #             employees = Employee.query.filter_by(status='active').all()
 

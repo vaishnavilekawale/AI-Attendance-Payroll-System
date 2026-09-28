@@ -64,6 +64,14 @@ if 'mediapipe' not in sys.modules:
                 process=lambda *a, **k: types.SimpleNamespace(detections=None)
             )
         ),
+        # ai_engine.py's FaceDetectionEngine reads mp.solutions.drawing_utils
+        # at init time (for annotating preview frames), independently of
+        # face_detection above - both must be present or engine construction
+        # itself raises AttributeError before any test-relevant code runs.
+        drawing_utils=types.SimpleNamespace(
+            draw_detection=_noop,
+            draw_landmarks=_noop,
+        ),
     )
     _make_stub_module('mediapipe', solutions=_mp_solutions)
 
@@ -293,3 +301,59 @@ def make_employee(app_context):
         return employee
 
     return _make
+
+
+# ---------------------------------------------------------------------
+# Deterministic "current date" fixtures.
+#
+# attendance.py intentionally blocks IN/OUT marking and excludes the day
+# entirely from calculate_attendance_with_absent() when the date in
+# question is a Sunday (the app's weekly-off business rule). Without
+# these fixtures, any test that relies on datetime.now()/date.today()
+# internally passes on six days of the week and fails on the seventh -
+# not because of an application bug, but because the test itself is not
+# deterministic. These fixtures pin "now"/"today" to a fixed, known
+# weekday (Monday) so the tests exercise the same code path every time,
+# regardless of which real-world day the suite happens to run on.
+# ---------------------------------------------------------------------
+
+@pytest.fixture
+def frozen_weekday_datetime(monkeypatch):
+    """Freeze attendance.py's view of `datetime.now()` to a fixed Monday.
+
+    Patches the `datetime` name inside the `attendance` module only (not
+    the global `datetime` module), so this has no effect outside
+    attendance.py's own date/time-dependent business logic. Returns the
+    frozen `datetime` so tests can derive `.date()` from it instead of
+    calling `date.today()`, keeping assertions consistent with what the
+    code under test actually saw.
+    """
+    import attendance
+    from datetime import datetime as real_datetime
+
+    frozen = real_datetime(2024, 1, 8, 10, 0, 0)  # a Monday, 10:00 AM
+
+    class FrozenDateTime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen
+
+    monkeypatch.setattr(attendance, 'datetime', FrozenDateTime)
+    return frozen
+
+
+@pytest.fixture
+def non_sunday_date():
+    """A target date guaranteed not to be Sunday.
+
+    Uses today's real date for realism, except on an actual Sunday, when
+    it falls back to the fixed Monday used by `frozen_weekday_datetime` -
+    so tests calling functions like `calculate_attendance_with_absent`
+    with an explicit target date don't depend on which day the suite runs.
+    """
+    from datetime import date, timedelta
+    today = date.today()
+    if today.weekday() == 6:  # Sunday
+        return date(2024, 1, 8)  # a Monday
+    return today
+

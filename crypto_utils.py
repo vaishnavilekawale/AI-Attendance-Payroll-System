@@ -45,6 +45,7 @@ is what avoids that.
 """
 import os
 import logging
+import tempfile
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -131,6 +132,8 @@ def is_encrypted(data: bytes) -> bool:
     plaintext images (captured before this feature was added) with newly
     captured encrypted ones, rather than requiring a one-shot migration.
     """
+    if not data:
+        return False
     try:
         # Fernet tokens are urlsafe-base64 and start with a fixed version
         # byte (0x80) once decoded; a real JPEG will fail this decode.
@@ -140,3 +143,36 @@ def is_encrypted(data: bytes) -> bool:
         return False
     except Exception:
         return False
+
+
+def write_encrypted_file(path: str, plaintext: bytes) -> None:
+    """
+    Encrypt `plaintext` and write it to `path` ATOMICALLY.
+
+    The ciphertext is first written to a temporary file in the same
+    directory and then moved into place with os.replace(), so a reader (or a
+    crash / disk-full error part-way through) can never observe a partially
+    written file at `path`. Plaintext is never written to disk: if
+    encryption itself fails, the exception propagates and nothing is
+    created. If any step after the temp file is created fails, the temp file
+    is removed before the exception is re-raised.
+
+    encrypt_bytes() is looked up at call time (module global), so it can be
+    patched in tests.
+    """
+    ciphertext = encrypt_bytes(plaintext)  # raises before any file exists
+
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(ciphertext)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise

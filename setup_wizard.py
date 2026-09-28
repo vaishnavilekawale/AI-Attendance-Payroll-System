@@ -33,7 +33,7 @@ def step1_admin():
     """Step 1: create the first admin account (only reachable pre-setup)."""
     if Admin.query.count() > 0:
         flash('Setup has already been completed. Please contact an existing administrator for access.', 'info')
-        return redirect(url_for('login'))
+        return redirect(url_for('auth.login'))
 
     if request.method == 'POST':
         admin = create_admin_from_request_form()

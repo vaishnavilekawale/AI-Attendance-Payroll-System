@@ -321,6 +321,44 @@ def test_reports_export_as_admin(logged_in_admin, app_context, make_settings):
     assert response.status_code in [200, 302]
 
 
+def test_admin_backup_redirect_without_login(client):
+    """Test that the backup download redirects to login when not authenticated."""
+    response = client.post('/admin/backup')
+    assert response.status_code == 302
+    assert '/login' in response.location
+
+
+def test_admin_backup_redirect_without_admin(logged_in_employee):
+    """Test that a non-admin employee cannot trigger a backup download."""
+    client, employee = logged_in_employee
+
+    response = client.post('/admin/backup')
+    assert response.status_code in [302, 403]
+
+
+def test_admin_backup_as_admin_returns_zip(logged_in_admin, app_context, make_settings):
+    """Test that an admin triggering a backup gets back a downloadable zip
+    containing the database, uploads, and dataset folders."""
+    import zipfile
+    import io
+
+    client, admin = logged_in_admin
+    make_settings()
+
+    response = client.post('/admin/backup')
+
+    assert response.status_code == 200
+    assert response.mimetype == 'application/zip'
+    assert 'attachment' in response.headers.get('Content-Disposition', '')
+    assert '.zip' in response.headers.get('Content-Disposition', '')
+
+    # The response body should be a valid, openable zip archive, even if
+    # uploads/dataset happen to be empty in this test environment.
+    zip_bytes = io.BytesIO(response.data)
+    with zipfile.ZipFile(zip_bytes) as zf:
+        assert zf.testzip() is None  # None means no corrupt entries found
+
+
 def test_employee_reports_redirect_without_login(client):
     """Test that employee reports redirects to login when not authenticated."""
     response = client.get('/employee-reports')
@@ -546,10 +584,24 @@ def test_admin_required_decorator(logged_in_employee):
 
 
 def test_employee_required_decorator(logged_in_admin, app_context, make_settings):
-    """Test that @employee_required decorator works correctly."""
-    # Skip this test as the employee_required decorator has a missing endpoint issue
-    # The decorator tries to redirect to 'employee_login' which doesn't exist
-    pytest.skip("employee_required decorator has missing endpoint issue in application code")
+    """Test that @employee_required decorator works correctly.
+
+    Regression test for a bug where the decorator (and several routes in
+    app.py) redirected to a non-existent 'employee_login' endpoint - the
+    app only registers a single, unified '/login' route for both Admin
+    and Employee. That mismatch caused a werkzeug.routing.BuildError
+    (a 500 error) instead of a graceful redirect, for any employee-only
+    route hit without an employee session. Now fixed to redirect to the
+    real 'login' endpoint.
+    """
+    client, admin = logged_in_admin
+
+    # logged_in_admin has an admin session, not an employee session, so an
+    # employee-only route should redirect (not raise) - and it should land
+    # on the real, unified login page.
+    response = client.get('/employee-dashboard')
+    assert response.status_code == 302
+    assert '/login' in response.location
 
 
 # ============================================================================

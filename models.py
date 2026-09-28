@@ -1,6 +1,45 @@
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from database import db
 from werkzeug.security import generate_password_hash, check_password_hash
+
+IST = ZoneInfo('Asia/Kolkata')
+
+
+def now_ist():
+    """
+    Return the current time in India Standard Time, as a NAIVE datetime
+    (no tzinfo attached).
+
+    This replaces the old `now_ist()` (deprecated in Python 3.12+)
+    everywhere in this codebase - both as the value used for timestamp
+    fields and as the default/onupdate callable on DateTime columns below.
+
+    Deliberately naive rather than fully timezone-aware: SQLite (this
+    app's only supported database - see config.py) has no native
+    timezone-aware datetime type. SQLAlchemy's sqlite DATETIME column
+    strips tzinfo when it writes a value to disk, so a timezone-aware
+    datetime written on INSERT comes back naive on the very next SELECT.
+    If this function returned an aware datetime, every comparison between
+    a freshly-created aware value and a value just reloaded from the
+    database (e.g. Admin.is_temporary_password_valid(), or
+    EmployeeLogin's equivalent) would raise:
+        TypeError: can't compare offset-naive and offset-aware datetimes
+
+    Returning an already-naive value sidesteps that entirely: every
+    datetime in the app - freshly generated or reloaded from the database
+    - stays naive and directly comparable, while still recording the
+    correct IST wall-clock instant (computed via ZoneInfo, then stripped
+    of tzinfo rather than left in UTC and converted at display time).
+
+    NOTE: this changes what these columns actually store, from naive UTC
+    to naive IST. See app.py's `matches_ist_date` / `matches_ist_date_range`
+    helpers, which used to shift stored naive-UTC values by +5:30 for
+    display/filtering - now that the stored value already IS IST, adding
+    that offset again would double-shift it. Those helpers were updated
+    to match.
+    """
+    return datetime.now(IST).replace(tzinfo=None)
 
 class Admin(db.Model):
     __tablename__ = 'admins'
@@ -12,7 +51,7 @@ class Admin(db.Model):
     temporary_password_created_at = db.Column(db.DateTime)
     email = db.Column(db.String(120), unique=True, nullable=False)
     force_password_change = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
     last_login = db.Column(db.DateTime)
     
     def set_password(self, password):
@@ -20,7 +59,7 @@ class Admin(db.Model):
     
     def set_temporary_password(self, password):
         self.temporary_password_hash = generate_password_hash(password)
-        self.temporary_password_created_at = datetime.utcnow()
+        self.temporary_password_created_at = now_ist()
     
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
@@ -34,7 +73,7 @@ class Admin(db.Model):
         if not self.temporary_password_hash or not self.temporary_password_created_at:
             return False
         from datetime import timedelta
-        return datetime.utcnow() < self.temporary_password_created_at + timedelta(minutes=30)
+        return now_ist() < self.temporary_password_created_at + timedelta(minutes=30)
     
     def clear_temporary_password(self):
         self.temporary_password_hash = None
@@ -84,8 +123,8 @@ class Employee(db.Model):
     tds_percentage = db.Column(db.Float, default=0.0)
     bus_charges = db.Column(db.Numeric(10, 2, asdecimal=False), default=0.0)
     other_deduction = db.Column(db.Numeric(10, 2, asdecimal=False), default=0.0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     
     # Authentication fields
     username = db.Column(db.String(80), unique=True, nullable=False)  # Same as employee_id
@@ -93,120 +132,66 @@ class Employee(db.Model):
     role = db.Column(db.String(20), default='employee')  # admin, employee, manager
     must_change_password = db.Column(db.Boolean, default=True)
     last_login = db.Column(db.DateTime)
-
-    # ------------------------------------------------------------------
-    # BIOMETRIC DATA CONSENT (DPDP Act, 2023 / privacy compliance)
-    # ------------------------------------------------------------------
-    # Face images captured for attendance recognition are "biometric data"
-    # under India's Digital Personal Data Protection Act, 2023 (and treated
-    # similarly under GDPR Art. 9 / most global privacy regimes) - a
-    # sensitive/special category of personal data that requires clear,
-    # informed, explicit, and separately recorded consent BEFORE
-    # collection, not a blanket "I agree to the terms" checkbox buried in
-    # onboarding paperwork.
-    #
-    # These columns hold the CURRENT consent state for quick checks (e.g.
-    # "can we let this employee start face capture right now?"). They are
-    # deliberately NOT the only record of consent - see BiometricConsentLog
-    # below for the append-only audit trail a regulator or the employee
-    # themself may ask to see later. Withdrawing consent must update these
-    # columns (biometric_consent_given=False, timestamp of withdrawal) AND
-    # append a new BiometricConsentLog row; it must never simply delete or
-    # overwrite prior history.
-    biometric_consent_given = db.Column(
-        db.Boolean, nullable=False, default=False,
-        doc="Current biometric (face data) collection consent status. "
-            "Must be True before /api/upload-face-image or /capture-face "
-            "will accept any image for this employee - enforced in "
-            "app.py, not just in the UI, since a UI checkbox alone is not "
-            "a real control.",
-    )
-    biometric_consent_timestamp = db.Column(
-        db.DateTime, nullable=True,
-        doc="UTC timestamp of the most recent consent decision (grant or "
-            "withdrawal) reflected in biometric_consent_given. NULL means "
-            "no consent decision has ever been recorded for this employee.",
-    )
-    biometric_consent_version = db.Column(
-        db.String(20), nullable=True,
-        doc="Version identifier of the privacy/consent notice the employee "
-            "agreed to (e.g. 'v1.0'). Bump this whenever the notice text "
-            "changes materially so previously-collected consent can be "
-            "distinguished from consent to the current wording, and so "
-            "affected employees can be prompted to re-consent.",
-    )
-    biometric_consent_ip_address = db.Column(
-        db.String(45), nullable=True,
-        doc="IP address (IPv4/IPv6) the consent decision was submitted "
-            "from, for the audit trail. Best-effort only - this is a "
-            "single desktop/LAN deployment behind Werkzeug, not a public "
-            "internet-facing service, so treat this as supporting "
-            "evidence rather than strong identity proof.",
-    )
-
+    # Whether the employee has given consent to have their face captured and
+    # stored for biometric attendance. This is a STRICT OPT-IN: it defaults
+    # to False, so no face image can be captured or uploaded for a newly
+    # created employee until consent has been explicitly recorded via
+    # record_biometric_consent(). See BiometricConsentLog for the audit trail.
+    # (The python-side default only applies to newly inserted rows; it does
+    # not change the value stored for employees that already exist.)
+    biometric_consent_given = db.Column(db.Boolean, default=False, nullable=False)
+    # Snapshot of the most recent consent decision, kept on the Employee row
+    # itself for fast reads (e.g. the face-capture gate) without a join.
+    # The full history of every decision lives in BiometricConsentLog.
+    biometric_consent_timestamp = db.Column(db.DateTime, nullable=True)
+    biometric_consent_version = db.Column(db.String(20), nullable=True)
+    biometric_consent_ip_address = db.Column(db.String(45), nullable=True)
+    
     # Relationships
     attendance_records = db.relationship('Attendance', backref='employee', lazy=True, cascade='all, delete-orphan')
     payroll_records = db.relationship('Payroll', backref='employee', lazy=True, cascade='all, delete-orphan')
     consent_logs = db.relationship('BiometricConsentLog', backref='employee', lazy=True, cascade='all, delete-orphan')
-
+    
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
     
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
-    def record_biometric_consent(self, granted, ip_address=None, policy_version='v1.0', notes=None):
-        """
-        Single entry point for changing biometric consent state. Always use
-        this instead of setting biometric_consent_given directly, so the
-        current-state columns and the append-only audit log can never drift
-        out of sync with each other.
+    def record_biometric_consent(self, granted, ip_address=None, policy_version=None, notes=None):
+        """Record a biometric consent decision (grant or withdrawal).
 
-        `granted=True`  -> employee/admin has just given consent (checkbox
-                            ticked on the consent modal before face capture).
-        `granted=False` -> consent has been withdrawn (e.g. employee asked
-                            for their biometric data collection to stop).
-                            This method does NOT delete any already-captured
-                            face images/embeddings - that is a separate,
-                            explicit "erase biometric data" action, since
-                            withdrawing consent for future collection and
-                            requesting deletion of already-collected data
-                            are two distinct data-subject rights under DPDP.
+        Updates the fast-read snapshot fields on this Employee row and
+        appends an immutable BiometricConsentLog entry so the full consent
+        history is always auditable, even after the current status changes
+        again later. Returns the created log entry.
         """
-        now = datetime.utcnow()
-        self.biometric_consent_given = bool(granted)
-        self.biometric_consent_timestamp = now
-        self.biometric_consent_version = policy_version
+        self.biometric_consent_given = granted
+        self.biometric_consent_timestamp = now_ist()
         self.biometric_consent_ip_address = ip_address
+        if policy_version is not None:
+            self.biometric_consent_version = policy_version
 
-        log_entry = BiometricConsentLog(
+        log = BiometricConsentLog(
             employee_id=self.id,
-            granted=bool(granted),
+            granted=granted,
             policy_version=policy_version,
             ip_address=ip_address,
             notes=notes,
-            created_at=now,
         )
-        db.session.add(log_entry)
-        return log_entry
-
+        db.session.add(log)
+        return log
 
 class BiometricConsentLog(db.Model):
-    """
-    Append-only audit trail of every biometric consent decision (grant or
-    withdrawal) made for an employee, across the employee's entire lifetime
-    at the company.
+    """Audit trail of biometric (face data) consent decisions for an employee.
 
-    WHY THIS EXISTS SEPARATELY FROM Employee.biometric_consent_given:
-    the columns on Employee only ever hold the CURRENT state - if an
-    employee grants consent, later withdraws it, then grants it again, the
-    Employee row shows only the most recent decision. Under DPDP (and most
-    other privacy regimes), an organization must be able to demonstrate
-    consent history on request - not just current status - so this table
-    is intentionally never updated or deleted, only appended to. Rows are
-    NOT cascaded-deleted independently; they cascade only if the parent
-    Employee row itself is deleted (see Employee.consent_logs), matching
-    how the rest of this codebase handles employee-owned child records.
+    A new row is written every time consent is granted, withdrawn, or
+    re-confirmed, rather than overwriting a single flag - this gives a
+    full history of who consented, when, under which policy version, and
+    from where, which is what an audit or a data-protection request
+    actually needs. `Employee.biometric_consent_given` remains the fast
+    "current status" flag checked by the face-capture flow; this table is
+    the record of how that flag arrived at its current value.
     """
     __tablename__ = 'biometric_consent_log'
 
@@ -214,9 +199,9 @@ class BiometricConsentLog(db.Model):
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
     granted = db.Column(db.Boolean, nullable=False)
     policy_version = db.Column(db.String(20), nullable=True)
-    ip_address = db.Column(db.String(45), nullable=True)
-    notes = db.Column(db.String(255), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    ip_address = db.Column(db.String(45), nullable=True)  # IPv6-safe length
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=now_ist)
 
 class Attendance(db.Model):
     __tablename__ = 'attendance'
@@ -248,8 +233,8 @@ class Attendance(db.Model):
     # The exact timestamp when the employee clicked "Mark Attendance" (for manual attendance)
     # This serves as proof of check-in time and is included in email notifications
     submission_timestamp = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     
     # Ensure unique employee per day
     __table_args__ = (db.UniqueConstraint('employee_id', 'date', name='unique_employee_date'),)
@@ -312,8 +297,8 @@ class Payroll(db.Model):
     payslip_generated = db.Column(db.Boolean, default=False)
     payslip_path = db.Column(db.String(255))
     email_sent = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     
     # Ensure unique employee per month
     __table_args__ = (db.UniqueConstraint('employee_id', 'month', 'year', name='unique_employee_month'),)
@@ -339,7 +324,7 @@ class Settings(db.Model):
     overtime_rate = db.Column(db.Float, default=1.5)
     face_recognition_tolerance = db.Column(db.Float, default=0.6)
     min_face_images_required = db.Column(db.Integer, default=20)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     
     @classmethod
     def get_settings(cls):
@@ -361,8 +346,8 @@ class WorkingHours(db.Model):
     is_late = db.Column(db.Boolean, default=False)
     is_early_exit = db.Column(db.Boolean, default=False)
     overtime_hours = db.Column(db.Float, default=0.0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
 
 class EmployeeLogin(db.Model):
     __tablename__ = 'employee_login'
@@ -379,8 +364,8 @@ class EmployeeLogin(db.Model):
     last_login = db.Column(db.DateTime)
     password_reset_token = db.Column(db.String(255))
     password_reset_expiry = db.Column(db.DateTime)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     
     # Relationship
     employee = db.relationship('Employee', backref='login_credentials')
@@ -390,7 +375,7 @@ class EmployeeLogin(db.Model):
     
     def set_temporary_password(self, password):
         self.temporary_password_hash = generate_password_hash(password)
-        self.temporary_password_created_at = datetime.utcnow()
+        self.temporary_password_created_at = now_ist()
     
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
@@ -404,7 +389,7 @@ class EmployeeLogin(db.Model):
         if not self.temporary_password_hash or not self.temporary_password_created_at:
             return False
         from datetime import timedelta
-        return datetime.utcnow() < self.temporary_password_created_at + timedelta(minutes=30)
+        return now_ist() < self.temporary_password_created_at + timedelta(minutes=30)
     
     def clear_temporary_password(self):
         self.temporary_password_hash = None
@@ -414,13 +399,13 @@ class EmployeeLogin(db.Model):
         import secrets
         self.password_reset_token = secrets.token_urlsafe(32)
         from datetime import timedelta
-        self.password_reset_expiry = datetime.utcnow() + timedelta(hours=1)
+        self.password_reset_expiry = now_ist() + timedelta(hours=1)
         return self.password_reset_token
     
     def is_reset_token_valid(self):
         if not self.password_reset_token or not self.password_reset_expiry:
             return False
-        return datetime.utcnow() < self.password_reset_expiry
+        return now_ist() < self.password_reset_expiry
 
 class AttendanceActivity(db.Model):
     __tablename__ = 'attendance_activities'
@@ -430,7 +415,7 @@ class AttendanceActivity(db.Model):
     attendance_date = db.Column(db.Date, nullable=False)
     activity_time = db.Column(db.Time, nullable=False)
     action = db.Column(db.String(10), nullable=False)  # IN or OUT
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
     
     # Relationship
     employee = db.relationship('Employee', backref='attendance_activities')
@@ -463,8 +448,8 @@ class PayrollSettings(db.Model):
     # PDF storage path
     payslip_storage_path = db.Column(db.String(255), default='payrolls')
     
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     
     @classmethod
     def get_settings(cls):
@@ -504,7 +489,7 @@ class LogoutApprovalRequest(db.Model):
     request_type = db.Column(db.String(50), default='auto_logout')  # auto_logout, time_edit
     status = db.Column(db.String(20), default='pending')  # pending, approved, rejected
     remarks = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
     approved_at = db.Column(db.DateTime)
     approved_by = db.Column(db.Integer, db.ForeignKey('employees.id'))
     
@@ -534,7 +519,7 @@ class AttendanceSettingsHistory(db.Model):
     working_hours_per_day = db.Column(db.Float, nullable=False)
     half_day_hours = db.Column(db.Float, nullable=True)  # Optional, defaults to half of working_hours_per_day
     grace_period_minutes = db.Column(db.Integer, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
     created_by = db.Column(db.Integer, db.ForeignKey('admins.id'), nullable=True)
     
     # Relationship
@@ -577,8 +562,8 @@ class CompanySettings(db.Model):
     company_website = db.Column(db.String(255))
     company_logo = db.Column(db.String(255))  # Path to logo file
     
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=now_ist)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     
     @classmethod
     def get_settings(cls):
