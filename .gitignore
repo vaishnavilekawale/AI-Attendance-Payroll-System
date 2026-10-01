@@ -35,7 +35,8 @@ uploads/*
 trained_model/*
 !trained_model/.gitkeep
 
-backups/*
+backups/
+
 
 
 # Log Files
