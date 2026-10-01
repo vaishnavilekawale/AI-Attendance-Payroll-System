@@ -87,7 +87,9 @@ def test_add_employee_creates_employee_and_login_creds(client, make_admin):
 
     login_creds = EmployeeLogin.query.filter_by(employee_id=employee.id).first()
     assert login_creds is not None
-    assert login_creds.check_password('9998887777')  # phone is the default password
+    # Verify that a secure temporary password was set (not the phone number)
+    assert not login_creds.check_password('9998887777')  # phone is NOT the password anymore
+    assert login_creds.force_password_change is True  # must change on first login
 
 
 def test_add_employee_rejects_duplicate_email(client, make_admin, make_employee):

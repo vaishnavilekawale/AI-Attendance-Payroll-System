@@ -107,12 +107,12 @@ def test_admin_login_without_force_flag_goes_straight_to_dashboard(client, make_
     assert '/dashboard' in response.headers['Location']
 
 
-def test_employee_login_success_first_time_uses_phone_as_default_password(client, make_employee):
+def test_employee_login_without_login_creds_redirects_to_contact_admin(client, make_employee):
     """
-    Employee portal login doesn't use Employee.password_hash at all - on
-    first login, EmployeeLogin credentials are auto-provisioned with the
-    employee's phone number as the default password (see app.py's login()
-    admin-vs-employee branch), which is what actually gets checked here.
+    Employee portal login now requires EmployeeLogin credentials to be provisioned
+    by the administrator. If no login credentials exist, the employee is directed
+    to contact their administrator instead of auto-provisioning with phone number
+    (which was a security vulnerability).
     """
     make_employee(employee_id='EMP0099', phone='9876543210')
 
@@ -122,11 +122,8 @@ def test_employee_login_success_first_time_uses_phone_as_default_password(client
         'role': 'employee',
     }, follow_redirects=False)
 
-    assert response.status_code == 302
-
-    with client.session_transaction() as sess:
-        assert sess.get('employee_id') is not None
-        assert sess.get('user_role') == 'employee'
+    assert response.status_code == 200
+    assert b'No login has been set up for this Employee ID yet' in response.data
 
 
 def test_employee_login_unknown_id_fails(client):
