@@ -39,6 +39,9 @@ _employee_embeddings_cache = {}
 # train_employee() can write to it concurrently from multiple threads.
 _embeddings_cache_lock = threading.Lock()
 
+# DeepFace's OpenCV detector and recognition model are shared across calls.
+_deepface_inference_lock = threading.Lock()
+
 # Consistent parameters across all methods
 DETECTOR_BACKEND = 'retinaface'
 MODEL_NAME = 'Facenet512'
@@ -109,6 +112,7 @@ def _save_persistent_embeddings_cache():
         logger.info(f"Saved {len(snapshot)} embeddings to disk cache")
     except Exception as e:
         logger.error(f"Could not save embeddings cache: {e}")
+        # Don't crash the server if cache save fails - training still succeeded
 
 def load_face_image_array(img_path):
     """
@@ -168,12 +172,18 @@ def get_employee_embedding_cached(employee_id, img_path):
             logger.error(f"Could not decode image for embedding: {img_path}")
             return None
 
-        embedding_obj = DeepFace.represent(
-            img_path=image_array,
-            model_name=MODEL_NAME,
-            detector_backend="opencv",
-            enforce_detection=False
-        )
+        # Validate image array before passing to DeepFace
+        if image_array.size == 0:
+            logger.error(f"Empty image array for {img_path}")
+            return None
+
+        with _deepface_inference_lock:
+            embedding_obj = DeepFace.represent(
+                img_path=image_array,
+                model_name=MODEL_NAME,
+                detector_backend="opencv",
+                enforce_detection=False
+            )
         if embedding_obj:
             embedding = embedding_obj[0]["embedding"]
             with _embeddings_cache_lock:
@@ -183,8 +193,12 @@ def get_employee_embedding_cached(employee_id, img_path):
                     'employee_id': str(employee_id),
                 }
             return embedding
+    except cv2.error as e:
+        logger.error(f"OpenCV error for {img_path}: {e}")
+        return None
     except Exception as e:
         logger.error(f"Embedding error for {img_path}: {e}")
+        return None
 
     return None
 
@@ -243,28 +257,30 @@ def preload_employee_embeddings(max_workers=8):
     encoded = 0
     errors = 0
 
-    # 4) Encode everything that still needs it, in parallel. DeepFace's
-    #    underlying TF/ONNX inference and image decoding release the GIL
-    #    for most of their work, so a thread pool gives a real wall-clock
-    #    speedup here without the cost of loading a separate model per
-    #    worker process (as a ProcessPoolExecutor would require).
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_job = {
-            executor.submit(get_employee_embedding_cached, emp_id, img_path): (emp_id, img_path)
-            for emp_id, img_path in jobs
-        }
-        for future in as_completed(future_to_job):
-            emp_id, img_path = future_to_job[future]
-            try:
-                result = future.result()
-                if result is not None:
-                    encoded += 1
-                else:
+    # 4) Use a thread pool for image loading, but serialize DeepFace inference
+    #    because its shared OpenCV detector/model are not safe for concurrent
+    #    calls on this Windows runtime.
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_job = {
+                executor.submit(get_employee_embedding_cached, emp_id, img_path): (emp_id, img_path)
+                for emp_id, img_path in jobs
+            }
+            for future in as_completed(future_to_job):
+                emp_id, img_path = future_to_job[future]
+                try:
+                    result = future.result(timeout=30)
+                    if result is not None:
+                        encoded += 1
+                    else:
+                        errors += 1
+                        logger.warning(f"No embedding produced for {img_path}")
+                except Exception as e:
                     errors += 1
-                    logger.warning(f"No embedding produced for {img_path}")
-            except Exception as e:
-                errors += 1
-                logger.error(f"Failed to preload embedding for {img_path}: {e}")
+                    logger.error(f"Failed to preload embedding for {img_path}: {e}")
+    except Exception as e:
+        logger.error(f"ThreadPoolExecutor error during preload: {e}")
+        errors += len(jobs) - encoded
 
     # 5) Persist everything to disk so the NEXT restart is instant too.
     _save_persistent_embeddings_cache()
@@ -775,12 +791,17 @@ class FaceRecognitionEngine:
                 for k in stale_keys:
                     del _employee_embeddings_cache[k]
 
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                list(executor.map(
-                    lambda p: get_employee_embedding_cached(employee_id, p),
-                    image_paths
-                ))
-            _save_persistent_embeddings_cache()
+            try:
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    futures = [executor.submit(get_employee_embedding_cached, employee_id, p) for p in image_paths]
+                    for future in futures:
+                        try:
+                            future.result(timeout=30)
+                        except Exception as e:
+                            logger.warning(f"Error warming cache for image: {e}")
+                _save_persistent_embeddings_cache()
+            except Exception as e:
+                logger.error(f"Error warming embeddings cache: {e}")
 
             logger.info(f"Registered employee {employee_name} with {valid_images} valid images")
             return valid_images
