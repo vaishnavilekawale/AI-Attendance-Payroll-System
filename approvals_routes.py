@@ -615,10 +615,10 @@ def admin_edit_attendance(attendance_id):
                 # Flush the deletion so has_rejected_approval doesn't find it during recalculation
                 db.session.flush()
 
-            # Recalculate attendance fields
+            # Recalculate attendance fields using edited times (skip AttendanceActivity)
             from attendance import AttendanceManager
             am = AttendanceManager()
-            am.calculator.recalculate_attendance(attendance, is_final_calculation=True)
+            am.calculator.recalculate_attendance(attendance, is_final_calculation=True, use_activities=False)
 
             current_app.logger.info(f"NEW STATUS: {attendance.status}")
             current_app.logger.info(f"NEW TOTAL HOURS: {attendance.total_hours}")

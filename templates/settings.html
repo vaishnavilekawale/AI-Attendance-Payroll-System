@@ -97,7 +97,8 @@
         {% endif %}
 
         <div class="row">
-            <div class="col-lg-8">
+            <!-- Left Column - Main Settings Form (larger) -->
+            <div class="col-lg-7">
                 <form method="POST" action="{{ url_for('settings.settings') }}" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <!-- Company Settings -->
@@ -248,10 +249,40 @@
                         </a>
                     </div>
                 </form>
+
+                <!-- License Activation -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-key"></i> License Activation</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-2">
+                            Activate your license by pasting the license token provided
+                            by the vendor. The license is bound to this machine's
+                            hardware fingerprint.
+                        </p>
+                        <div id="licenseInfo" class="mb-3">
+                            <span class="spinner-border spinner-border-sm" role="status"></span>
+                            Loading license info...
+                        </div>
+                        <form method="POST" action="{{ url_for('settings.activate_license') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="mb-2">
+                                <textarea class="form-control form-control-sm" name="license_token" 
+                                          rows="3" placeholder="Paste your license token here..."
+                                          id="licenseTokenInput"></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-check-circle"></i> Activate License
+                            </button>
+                        </form>
+                    </div>
+                </div>
             </div>
 
-            <!-- Sidebar -->
-            <div class="col-lg-4">
+            <!-- Right Column - Configuration & Info (smaller) -->
+            <div class="col-lg-5">
+                <!-- Email Configuration -->
                 <div class="card mb-4">
                     <div class="card-header">
                         <h5 class="card-title mb-0">Email Configuration</h5>
@@ -273,6 +304,7 @@
                     </div>
                 </div>
 
+                <!-- Database Configuration -->
                 <div class="card mb-4">
                     <div class="card-header">
                         <h5 class="card-title mb-0">Database Configuration</h5>
@@ -284,6 +316,7 @@
                     </div>
                 </div>
 
+                <!-- Data Backup -->
                 <div class="card mb-4">
                     <div class="card-header">
                         <h5 class="card-title mb-0"><i class="bi bi-shield-check"></i> Data Backup</h5>
@@ -329,6 +362,7 @@
                     </div>
                 </div>
 
+                <!-- System Info -->
                 <div class="card">
                     <div class="card-header">
                         <h5 class="card-title mb-0">System Info</h5>
@@ -353,7 +387,7 @@
                 backupForm.addEventListener('submit', function() {
                     backupBtn.disabled = true;
                     backupBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Creating backup…';
-                    
+
                     // Reset button state after 3 seconds since file download response keeps page active
                     setTimeout(function() {
                         backupBtn.disabled = false;
@@ -361,6 +395,32 @@
                     }, 3000);
                 });
             }
+
+            // Load license info on page load
+            fetch('{{ url_for("settings.license_info") }}')
+                .then(response => response.json())
+                .then(data => {
+                    var licenseInfoDiv = document.getElementById('licenseInfo');
+                    if (data.error) {
+                        licenseInfoDiv.innerHTML = '<div class="alert alert-danger small p-2">Error: ' + data.error + '</div>';
+                    } else if (data.license_valid) {
+                        var html = '<div class="alert alert-success small p-2">';
+                        html += '<strong><i class="bi bi-check-circle"></i> License Valid</strong><br>';
+                        if (data.customer_name) html += 'Customer: ' + data.customer_name + '<br>';
+                        if (data.issued_at) html += 'Issued: ' + new Date(data.issued_at).toLocaleDateString() + '<br>';
+                        if (data.expires_at) html += 'Expires: ' + new Date(data.expires_at).toLocaleDateString();
+                        else html += 'Perpetual License';
+                        html += '</div>';
+                        licenseInfoDiv.innerHTML = html;
+                    } else if (data.trial_active) {
+                        licenseInfoDiv.innerHTML = '<div class="alert alert-info small p-2"><strong>Trial Mode:</strong> ' + data.trial_days_remaining + ' day(s) remaining</div>';
+                    } else {
+                        licenseInfoDiv.innerHTML = '<div class="alert alert-warning small p-2"><strong>No License:</strong> ' + data.validation_message + '<br><small class="text-muted">Machine fingerprint: ' + data.machine_fingerprint.substring(0, 16) + '...</small></div>';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('licenseInfo').innerHTML = '<div class="alert alert-danger small p-2">Failed to load license info</div>';
+                });
         })();
     </script>
 

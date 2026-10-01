@@ -110,46 +110,6 @@ def _save_persistent_embeddings_cache():
     except Exception as e:
         logger.error(f"Could not save embeddings cache: {e}")
 
-# def get_employee_images_cached(employee_id):
-#     """
-#     Cache ONLY image paths.
-
-#     DeepFace.verify() works most reliably with image paths.
-#     We cache paths so disk scanning happens only once while
-#     preserving the original recognition behaviour.
-#     """
-
-#     global _employee_embeddings_cache
-
-#     if employee_id in _employee_embeddings_cache:
-#         return _employee_embeddings_cache[employee_id]
-
-#     employee_folder = os.path.join(
-#         Config.DATASET_FOLDER,
-#         str(employee_id)
-#     )
-
-#     if not os.path.exists(employee_folder):
-#         _employee_embeddings_cache[employee_id] = []
-#         return []
-
-#     employee_images = []
-
-#     for f in sorted(os.listdir(employee_folder)):
-#         if f.lower().endswith((".jpg", ".jpeg", ".png")):
-#             img_path = os.path.join(employee_folder, f)
-
-#             if os.path.isfile(img_path):
-#                 employee_images.append(img_path)
-
-#     _employee_embeddings_cache[employee_id] = employee_images
-
-#     logger.info(
-#         f"Cached {len(employee_images)} image paths for employee {employee_id}"
-#     )
-
-#     return employee_images
-
 def load_face_image_array(img_path):
     """
     Load a dataset face image from disk into a BGR numpy array (the format

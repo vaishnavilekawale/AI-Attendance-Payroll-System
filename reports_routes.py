@@ -324,8 +324,11 @@ def employee_reports():
             # CRITICAL: Apply same status recalculation logic as Employee Dashboard
             # This ensures past records show correct Present/Half Day/Absent status
             # matching the Dashboard exactly
+            # If both IN and OUT are set (admin edit), use database values - don't recalculate
             if att.in_time and att.date < date.today():
-                am.calculator.recalculate_attendance(att, is_final_calculation=True)
+                if not (att.in_time and att.out_time):
+                    # Only recalculate if using activities (not admin-edited)
+                    am.calculator.recalculate_attendance(att, is_final_calculation=True, use_activities=True)
 
             # Add display_out_time for UI (show "-" after new IN until next OUT)
             am._add_display_out_time(att, att.date)

@@ -1,0 +1,280 @@
+================================================================================
+END USER LICENSE AGREEMENT (EULA)
+AI ATTENDANCE & PAYROLL SYSTEM
+================================================================================
+
+IMPORTANT: PLEASE READ THIS END USER LICENSE AGREEMENT ("EULA") CAREFULLY. 
+BY INSTALLING, COPYING, OR OTHERWISE USING THE AI ATTENDANCE & PAYROLL SYSTEM 
+SOFTWARE ("SOFTWARE"), YOU AGREE TO BE BOUND BY THE TERMS OF THIS EULA. IF 
+YOU DO NOT AGREE TO THE TERMS OF THIS EULA, DO NOT INSTALL OR USE THE SOFTWARE.
+
+This EULA is a legal agreement between you ("Licensee" or "You") and the 
+software provider ("Licensor" or "We") for the AI Attendance & Payroll System.
+
+================================================================================
+1. LICENSE GRANT
+================================================================================
+
+Subject to the terms and conditions of this EULA, Licensor grants you a 
+non-exclusive, non-transferable, perpetual license to install and use the 
+Software on a single computer or workstation ("Licensed Device") for your 
+internal business operations.
+
+The license is granted based on the following conditions:
+- You have purchased a valid license key from Licensor or an authorized reseller
+- The license key is tied to a specific machine fingerprint (hardware ID)
+- The license allows up to 2 machine activations per purchased license
+- Each activation requires a separate license key or prior authorization
+
+================================================================================
+2. LICENSE TYPES
+================================================================================
+
+2.1. STUDENT LICENSE
+   - Intended for individual students for personal learning purposes
+   - Single machine activation only
+   - Not for commercial use or business operations
+   - Non-transferable
+
+2.2. SMALL BUSINESS LICENSE (1-10 Employees)
+   - Intended for small businesses with up to 10 employees
+   - Up to 2 machine activations
+   - Commercial use permitted
+   - Includes email support for 12 months
+
+2.3. MEDIUM BUSINESS LICENSE (11-50 Employees)
+   - Intended for medium-sized businesses with 11-50 employees
+   - Up to 2 machine activations
+   - Commercial use permitted
+   - Includes priority email and phone support for 12 months
+
+================================================================================
+3. PERMITTED USE
+================================================================================
+
+You may:
+- Install and use the Software on the Licensed Device
+- Use the Software for your internal business operations
+- Make one (1) backup copy of the Software for archival purposes
+- Use the Software for the duration of the license period
+
+================================================================================
+4. PROHIBITED USE
+================================================================================
+
+You may NOT:
+- Reverse engineer, decompile, disassemble, or attempt to derive the source 
+  code of the Software
+- Modify, adapt, translate, or create derivative works of the Software
+- Distribute, sell, rent, lease, sublicense, or transfer the Software to any 
+  third party
+- Remove or alter any proprietary notices, labels, or marks on the Software
+- Use the Software on more devices than authorized by your license
+- Use the Software for illegal purposes or in violation of any applicable laws
+- Circumvent any technical protection measures or licensing mechanisms
+- Share your license key with any third party
+- Use the Software to provide time-sharing, service bureau, or similar services
+
+================================================================================
+5. INTELLECTUAL PROPERTY
+================================================================================
+
+The Software and all accompanying documentation, trademarks, and other 
+intellectual property are owned by Licensor and are protected by copyright 
+laws and international treaty provisions. You acquire no rights to the 
+Software except as expressly granted in this EULA.
+
+All title, ownership rights, and intellectual property rights in and to the 
+Software shall remain with Licensor.
+
+================================================================================
+6. PRIVACY AND DATA PROTECTION
+================================================================================
+
+6.1. Data Collection
+   The Software processes employee data including but not limited to:
+   - Personal information (name, contact details, date of birth)
+   - Biometric data (facial recognition data)
+   - Attendance records
+   - Salary and payroll information
+   - You acknowledge that you are solely responsible for complying with 
+     all applicable data protection laws (e.g., GDPR, PDPA, IT Act)
+
+6.2. Data Security
+   The Software includes encryption features for biometric data and payslip 
+   PDFs. You are responsible for:
+   - Securing access to the Software and its data
+   - Implementing appropriate backup procedures
+   - Not disclosing employee data to unauthorized parties
+   - Obtaining necessary consents for biometric data collection
+
+6.3. Data Ownership
+   You retain ownership of all data you input into the Software. Licensor 
+   does not claim any ownership rights to your data.
+
+================================================================================
+7. BIOMETRIC DATA CONSENT
+================================================================================
+
+The Software uses facial recognition technology for attendance tracking. 
+By using this feature, you acknowledge and agree that:
+- You have obtained explicit consent from all employees whose biometric 
+  data is collected
+- You will inform employees about the purpose and scope of biometric data 
+  collection
+- You will allow employees to withdraw consent and have their biometric 
+  data deleted upon request
+- Biometric data is encrypted at rest and in transit
+- Licensor is not responsible for your compliance with biometric data 
+  protection laws
+
+================================================================================
+8. TRIAL PERIOD
+================================================================================
+
+The Software may include a 30-day trial period. During the trial:
+- You may use all features of the Software
+- The trial period is limited to 30 days from first installation
+- After the trial expires, you must purchase a license to continue using 
+  the Software
+- Trial data may be retained after license purchase
+- No technical support is provided during the trial period
+
+================================================================================
+9. UPDATES AND MAINTENANCE
+================================================================================
+
+9.1. Updates
+   Licensor may, at its sole discretion, provide updates, patches, or 
+   enhancements to the Software. These updates may be provided free of charge 
+   or may require additional fees.
+
+9.2. Maintenance
+   Licensor is not obligated to provide maintenance or support services 
+   unless specifically agreed upon in a separate support agreement.
+
+9.3. Discontinuation
+   Licensor reserves the right to discontinue the Software at any time 
+   with reasonable notice. In such event, no refund will be provided.
+
+================================================================================
+10. WARRANTY DISCLAIMER
+================================================================================
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+
+LICENSOR DOES NOT WARRANT THAT:
+- The Software will meet your requirements
+- The Software will be uninterrupted, timely, secure, or error-free
+- The results of using the Software will be accurate or reliable
+- Errors in the Software will be corrected
+
+No oral or written information given by Licensor shall create a warranty.
+
+================================================================================
+11. LIMITATION OF LIABILITY
+================================================================================
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL 
+LICENSOR BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL 
+DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF 
+BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR 
+OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OR INABILITY TO USE THE 
+SOFTWARE, EVEN IF LICENSOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH 
+DAMAGES.
+
+LICENSOR'S TOTAL LIABILITY SHALL NOT EXCEED THE AMOUNT YOU PAID FOR THE 
+SOFTWARE LICENSE.
+
+================================================================================
+12. INDEMNIFICATION
+================================================================================
+
+You agree to indemnify, defend, and hold harmless Licensor from and against 
+any and all claims, damages, losses, liabilities, costs, and expenses 
+(including reasonable attorneys' fees) arising out of or related to:
+- Your use of the Software
+- Your violation of this EULA
+- Your violation of any applicable law or regulation
+- Your collection, processing, or storage of biometric or personal data
+
+================================================================================
+13. TERMINATION
+================================================================================
+
+13.1. Termination by Licensor
+   Licensor may terminate this EULA and your license immediately without 
+   notice if you:
+   - Fail to comply with any term of this EULA
+   - Use the Software beyond the scope of the granted license
+   - Engage in any prohibited activity as outlined in Section 4
+
+13.2. Termination by You
+   You may terminate this EULA at any time by uninstalling the Software 
+   and destroying all copies.
+
+13.3. Effect of Termination
+   Upon termination, you must:
+   - Cease all use of the Software
+   - Uninstall the Software from all devices
+   - Destroy all copies of the Software in your possession
+   - Pay any outstanding fees
+
+================================================================================
+14. GOVERNING LAW AND DISPUTE RESOLUTION
+================================================================================
+
+This EULA shall be governed by and construed in accordance with the laws of 
+India. Any dispute arising under or relating to this EULA shall be subject 
+to the exclusive jurisdiction of the courts in [Your City], India.
+
+================================================================================
+15. GENERAL PROVISIONS
+================================================================================
+
+15.1. Entire Agreement
+   This EULA constitutes the entire agreement between you and Licensor 
+   regarding the Software and supersedes all prior agreements, 
+   communications, and understandings.
+
+15.2. Severability
+   If any provision of this EULA is found to be invalid or unenforceable, 
+   the remaining provisions shall continue in full force and effect.
+
+15.3. Waiver
+   The failure of Licensor to enforce any right or provision of this EULA 
+   shall not constitute a waiver of such right or provision.
+
+15.4. Assignment
+   You may not assign or transfer this EULA or any rights hereunder without 
+   the prior written consent of Licensor.
+
+15.5. Force Majeure
+   Licensor shall not be liable for any failure or delay in performance due 
+   to causes beyond its reasonable control.
+
+================================================================================
+16. CONTACT INFORMATION
+================================================================================
+
+For questions regarding this EULA, license purchases, or technical support:
+
+Company Name: [Your Company Name]
+Email: [support@yourcompany.com]
+Phone: [+91 XXXXX XXXXX]
+Website: [www.yourcompany.com]
+
+
+================================================================================
+ACCEPTANCE
+================================================================================
+
+BY INSTALLING, COPYING, OR USING THE SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE 
+READ THIS EULA, UNDERSTAND IT, AND AGREE TO BE BOUND BY ITS TERMS AND 
+CONDITIONS.
+
+Last Updated: September 2026
+Version: 1.0
+================================================================================

@@ -35,8 +35,20 @@ uploads/*
 trained_model/*
 !trained_model/.gitkeep
 
+backups/*
+
+
 # Log Files
 *.log
+
+# Licensing secrets - see licensing/license_manager.py and licensing/keygen.py.
+# vendor_private_key.pem can SIGN new licenses; it must never leave the
+# vendor's own machine. license.lic is a customer's own installed license
+# (machine-specific) and license_keys_log.txt is a vendor-side issuance
+# record - neither belongs in source control either.
+licensing/vendor_private_key.pem
+license.lic
+licensing/license_keys_log.txt
 
 # Vendor assets — downloaded at build time by
 # scripts/download_vendor_assets.py, never committed (keeps the app

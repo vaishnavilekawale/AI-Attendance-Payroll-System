@@ -715,32 +715,35 @@ class AttendanceManager:
             
             if attendance:
                 # Employee has a real attendance record.
-                # Always calculate status from actual IN/OUT activities.
+                # If both IN and OUT are set (admin edit), use database values - don't recalculate
+                # Otherwise, calculate from actual IN/OUT activities.
                 # This keeps Admin Attendance and Reports consistent with
                 # Employee Dashboard/Report calculations.
 
                 is_final = bool(attendance.out_time)
 
-                # Recalculate working hours from all IN-OUT pairs
-                attendance.total_hours = self.calculator.calculate_working_hours(attendance)
+                # Only recalculate if NOT admin-edited (i.e., not both IN and OUT set)
+                if not (attendance.in_time and attendance.out_time):
+                    # Recalculate working hours from all IN-OUT pairs
+                    attendance.total_hours = self.calculator.calculate_working_hours(attendance, use_activities=True)
 
-                # Recalculate status from working hours
-                # OUT exists = final calculation
-                # No OUT = temporary Present while employee is currently IN
-                attendance.status = self.calculator.calculate_status(
-                    attendance,
-                    attendance.total_hours,
-                    is_final_calculation=is_final
-                )
+                    # Recalculate status from working hours
+                    # OUT exists = final calculation
+                    # No OUT = temporary Present while employee is currently IN
+                    attendance.status = self.calculator.calculate_status(
+                        attendance,
+                        attendance.total_hours,
+                        is_final_calculation=is_final
+                    )
 
-                # Recalculate overtime
-                attendance.overtime_hours = self.calculator.calculate_overtime(
-                    attendance,
-                    attendance.total_hours
-                )
+                    # Recalculate overtime
+                    attendance.overtime_hours = self.calculator.calculate_overtime(
+                        attendance,
+                        attendance.total_hours
+                    )
 
-                # Recalculate late status
-                attendance.late_entry = self.calculator.calculate_late_status(attendance)
+                    # Recalculate late status
+                    attendance.late_entry = self.calculator.calculate_late_status(attendance)
 
                 # REJECTED logout approvals are ALWAYS treated as ABSENT -
                 # never overwrite with hours-based status.

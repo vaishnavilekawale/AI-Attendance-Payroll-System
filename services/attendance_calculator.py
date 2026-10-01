@@ -28,12 +28,39 @@ class AttendanceCalculator:
 
 
     
-    def calculate_working_hours(self, attendance):
+    def calculate_working_hours(self, attendance, use_activities=True):
         """
         Calculate total working hours from all IN-OUT pairs for a day
         with exact integer-based nanoseconds precision (no floating-point errors).
+        
+        Args:
+            attendance: Attendance object
+            use_activities: If True, use AttendanceActivity records for calculation.
+                           If False, use raw IN/OUT times directly (for admin edits).
         """
         if not attendance.in_time:
+            return 0.0
+
+        # If use_activities is False, skip activity-based calculation entirely
+        # This is used when admin manually edits attendance times
+        if not use_activities:
+            if attendance.in_time and attendance.out_time:
+                delta = attendance.out_time - attendance.in_time
+                total_seconds = delta.total_seconds()
+                
+                p_min_val = int(total_seconds // 60)
+                p_hrs = p_min_val // 60
+                p_mins = p_min_val % 60
+                p_secs = int(total_seconds % 60)
+                p_ns = delta.microseconds * 1000
+
+                in_str = attendance.in_time.strftime('%H:%M:%S') + f".{attendance.in_time.microsecond * 1000:09d}"
+                out_str = attendance.out_time.strftime('%H:%M:%S') + f".{attendance.out_time.microsecond * 1000:09d}"
+
+                print(f"  [Admin Edit - Raw Span] {in_str} -> {out_str}")
+                print(f"    -> Hours: {p_hrs} | Minutes: {p_mins} | Seconds: {p_secs} | Nanoseconds: {p_ns:09d} (Total Seconds: {total_seconds})")
+
+                return round(total_seconds / 3600, 2)
             return 0.0
 
         activities = AttendanceActivity.query.filter_by(
@@ -374,7 +401,7 @@ class AttendanceCalculator:
         
         return attendance
     
-    def recalculate_attendance(self, attendance, is_final_calculation=False):
+    def recalculate_attendance(self, attendance, is_final_calculation=False, use_activities=True):
         """
         Recalculate all attendance fields using historical settings for the attendance timestamp.
         
@@ -386,9 +413,11 @@ class AttendanceCalculator:
             attendance: Attendance object to recalculate
             is_final_calculation: True if this is final calculation (OUT or auto checkout)
                                   False if this is during IN (should never be absent)
+            use_activities: If True, use AttendanceActivity for calculation.
+                           If False, use raw IN/OUT times (for admin edits).
         """
         # Recalculate working hours from all IN-OUT pairs
-        attendance.total_hours = self.calculate_working_hours(attendance)
+        attendance.total_hours = self.calculate_working_hours(attendance, use_activities=use_activities)
         
         # Recalculate status based on working hours (uses historical settings)
         attendance.status = self.calculate_status(attendance, attendance.total_hours, is_final_calculation=is_final_calculation)

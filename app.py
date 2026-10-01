@@ -11,6 +11,7 @@ from database import db, init_db
 from ai_engine import preload_employee_embeddings
 from face_recognition_singleton import get_face_recognizer
 from scheduler_service import payroll_scheduler
+from licensing.license_manager import check_license_on_startup
 
 # ------------------------------------------------------------------
 # Deliberate re-exports (NOT used directly in this file any more).
@@ -251,6 +252,39 @@ def internal_error(error):
 
 
 if __name__ == '__main__':
+    # ============================================================
+    # LICENSE VALIDATION
+    # ============================================================
+    print("\n" + "=" * 50)
+    print("[LICENSE] Checking license status...")
+    print("=" * 50)
+
+    should_proceed, license_message = check_license_on_startup()
+
+    if not should_proceed:
+        print("\n" + "!" * 50)
+        print("[ERROR] LICENSE VALIDATION FAILED")
+        print(f"   {license_message}")
+        print("!" * 50)
+        print("\nPlease contact support to purchase a valid license.")
+        print("Support: support@yourcompany.com")
+        print("=" * 50 + "\n")
+        
+        # Log the failure
+        logger.error(f"License validation failed: {license_message}")
+        
+        # Exit gracefully - don't start the application
+        import sys
+        sys.exit(1)
+    
+    print(f"✅ License valid: {license_message}")
+    print("=" * 50 + "\n")
+    
+    logger.info(f"License validation passed: {license_message}")
+    
+    # ============================================================
+    # DIRECTORY SETUP
+    # ============================================================
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
     os.makedirs(app.config['DATASET_FOLDER'], exist_ok=True)
     os.makedirs(app.config['TRAINED_MODEL_FOLDER'], exist_ok=True)
@@ -310,4 +344,31 @@ if __name__ == '__main__':
         import webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(SERVER_URL)).start()
 
-    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=debug_mode, use_reloader=False)
+    # ============================================================
+    # WSGI SERVER
+    # ============================================================
+    # Flask's own app.run() is a development server: it is single-threaded
+    # by default (so concurrent kiosk check-ins queue up behind each other
+    # instead of being served in parallel), is explicitly documented by
+    # Flask/Werkzeug as not designed to be particularly efficient, stable,
+    # or secure, and is what previously ran here unconditionally. Waitress
+    # is a production-grade, pure-Python WSGI server with solid Windows
+    # support (no extra native build step, unlike gunicorn) - a good fit
+    # for a kiosk deployment that must handle several simultaneous
+    # check-ins without dropping or serializing requests.
+    #
+    # debug_mode (FLASK_ENV=development, opted into explicitly - see
+    # app.config.from_object above) still uses Flask's dev server, since
+    # that's what provides the interactive debugger/auto-reload a
+    # developer actually wants; every other case - including every
+    # packaged customer build - now runs on waitress.
+    if debug_mode:
+        logger.warning(
+            "FLASK_ENV=development: using Flask's development server, not waitress. "
+            "Never deploy a customer build this way."
+        )
+        app.run(host=SERVER_HOST, port=SERVER_PORT, debug=True, use_reloader=False)
+    else:
+        from waitress import serve
+        logger.info(f"Starting production WSGI server (waitress) on {SERVER_HOST}:{SERVER_PORT}")
+        serve(app, host=SERVER_HOST, port=SERVER_PORT, threads=8)

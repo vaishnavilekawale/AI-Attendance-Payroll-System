@@ -119,3 +119,13 @@ qrcode==7.4.2
 # outbound calls the app itself makes)
 # ---------------------------------------------------------------------------
 requests==2.32.3
+
+# ---------------------------------------------------------------------------
+# Production WSGI server (see app.py's __main__ block) - replaces Flask's
+# built-in development server, which is single-threaded by default and
+# explicitly not intended for production use. Waitress is pure-Python with
+# solid native Windows support, which matters for a kiosk deployment that
+# needs to handle several concurrent check-ins without an extra native
+# build step (unlike gunicorn, which doesn't support Windows at all).
+# ---------------------------------------------------------------------------
+waitress==3.0.0

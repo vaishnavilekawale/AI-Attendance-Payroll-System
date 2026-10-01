@@ -66,14 +66,15 @@ else:
 # sys.path order (a real source of subtle bugs for shared singletons
 # like extensions.py's csrf/limiter/db objects), and (c) ships plain,
 # human-readable source next to the exe that a customer never needs.
+#
+# IMPORTANT: dataset/, uploads/, and trained_model/ are RUNTIME data
+# folders that will be created by the application on the customer's
+# machine. They should NOT be bundled into the .exe - only templates/
+# and static/ (application code/assets) are bundled.
 # ---------------------------------------------------------------------
 datas = [
     (os.path.join(PROJECT_ROOT, 'templates'), 'templates'),
     (os.path.join(PROJECT_ROOT, 'static'), 'static'),
-    (os.path.join(PROJECT_ROOT, 'dataset'), 'dataset'),
-    (os.path.join(PROJECT_ROOT, 'uploads'), 'uploads'),
-    (os.path.join(PROJECT_ROOT, 'uploads', 'payrolls'), os.path.join('uploads', 'payrolls')),
-    (os.path.join(PROJECT_ROOT, 'trained_model'), 'trained_model'),
 ]
 
 # DeepFace downloads its model weight files (e.g. facenet512_weights.h5)
@@ -184,6 +185,10 @@ hiddenimports = [
     'flask_wtf',
     'wtforms',
     'flask_limiter',
+    'flask_limiter.extension',
+    'flask_limiter.util',
+    'flask_limiter.strategies',
+    'flask_limiter.wrappers',
 
     # Database & Security
     'sqlalchemy',
@@ -210,6 +215,13 @@ hiddenimports = [
     'dotenv',
     'dateutil',
     'apscheduler',
+
+    # Production WSGI server (see app.py's __main__ block) - waitress
+    # resolves its own dependency chain via plain imports, but is listed
+    # explicitly here for the same reason 'flask' etc. are: cheap
+    # insurance against PyInstaller's import trace missing something.
+    'waitress',
+    'waitress.server',
 ]
 
 # Auto-collect submodules for packages with dynamic/plugin-style internal
@@ -222,10 +234,12 @@ hiddenimports += collect_submodules('cv2')
 hiddenimports += collect_submodules('cryptography')
 hiddenimports += collect_submodules('reportlab')
 hiddenimports += collect_submodules('apscheduler')
+hiddenimports += collect_submodules('waitress')
 hiddenimports += collect_submodules('flask_wtf')
 hiddenimports += collect_submodules('flask_limiter')
 hiddenimports += collect_submodules('flask_sqlalchemy')
 hiddenimports += collect_submodules('h5py')
+hiddenimports += collect_submodules('limits')
 
 # SQLAlchemy resolves 'sqlite:///...' / 'mysql+pymysql://...' dialect
 # strings through an internal registry, not a plain top-level import -
@@ -275,10 +289,15 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,           # smaller exe; set False first if you hit false-positive AV flags (see checklist)
+    upx=False,          # UPX-packed executables are a very common false-positive trigger for
+                         # Windows Defender / other AV engines (the packing itself looks like
+                         # what malware droppers do, regardless of what's actually inside) - not
+                         # worth the smaller exe size for something you're charging customers for.
+                         # Re-enable only if you've separately verified it doesn't get flagged on
+                         # a clean VM with default Defender settings.
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,       # windowed app, no console popup - customer just sees the browser open.
+    console=True,      # windowed app, no console popup - customer just sees the browser open.
                          # Flip to True TEMPORARILY on your own machine only, if you need to see
                          # console output while debugging a build issue - never ship console=True.
     disable_windowed_traceback=False,
@@ -330,8 +349,8 @@ exe = EXE(
 # [ ] Confirm PDF payslip generation (including AES-256 encryption via
 #     pikepdf) and, if configured, email sending both work.
 
-# [ ] Check Windows Defender / other AV doesn't flag the exe - try
-#     upx=False if this happens, and consider code-signing the exe with
-#     a purchased certificate, which meaningfully reduces false
-#     positives and is close to mandatory for anything you charge for.
+# [ ] Check Windows Defender / other AV doesn't flag the exe (upx is
+#     already off above to reduce that risk) - consider code-signing the
+#     exe with a purchased certificate too, which meaningfully reduces
+#     false positives and is close to mandatory for anything you charge for.
 # ---------------------------------------------------------------------

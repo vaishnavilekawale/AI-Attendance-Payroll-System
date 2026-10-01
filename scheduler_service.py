@@ -4,14 +4,16 @@ Uses APScheduler to handle scheduled payroll generation tasks
 """
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
+import io
+import zipfile
 from models import PayrollSettings, CompanySettings, Payroll, Employee
 from payroll import PayrollCalculator, is_payroll_eligible
 from pdf_generator import PDFGenerator, generate_payslip_password
 from email_service import EmailService
 from database import db
-from config import Config
+from config import Config, BASE_DIR
 import os
 
 logger = logging.getLogger(__name__)
@@ -153,6 +155,36 @@ class PayrollScheduler:
                 
                 # Schedule payroll generation job
                 self.schedule_payroll_generation()
+
+                # Schedule automated weekly backup (every Sunday at 2 AM)
+                self.scheduler.add_job(
+                    func=self.run_automated_backup,
+                    trigger=CronTrigger(day_of_week='sun', hour=2, minute=0),
+                    id='automated_backup',
+                    name='Weekly Automated Backup',
+                    replace_existing=True
+                )
+
+                backup_job = self.scheduler.get_job("automated_backup")
+                if backup_job:
+                    logger.info("AUTOMATED BACKUP SCHEDULER REGISTERED - Every Sunday at 2:00 AM")
+                    logger.info(f"Automated Backup Job: {backup_job}")
+                    logger.info(f"Automated Backup Next Run: {backup_job.next_run_time}")
+
+                # Catch-up backup: if the PC was off at the Sunday 02:00 slot
+                # (or this is the first run), back up shortly after startup
+                # when the newest successful backup is older than
+                # BACKUP_CATCHUP_DAYS (default 7). Runs once, in the
+                # background, after a short delay so startup is not slowed.
+                self.scheduler.add_job(
+                    func=self.run_catchup_backup_if_overdue,
+                    trigger='date',
+                    run_date=datetime.now() + timedelta(seconds=60),
+                    id='catchup_backup',
+                    name='Startup Catch-up Backup Check',
+                    replace_existing=True
+                )
+                logger.info("STARTUP CATCH-UP BACKUP CHECK SCHEDULED - runs ~60 seconds after startup")
             except Exception as e:
                 logger.error(f"Failed to start scheduler: {e}")
                 # Reset flag on failure so we can retry
@@ -430,6 +462,75 @@ class PayrollScheduler:
             'July', 'August', 'September', 'October', 'November', 'December'
         ]
         return months[month - 1]
+
+    def run_automated_backup(self):
+        """
+        Run automated weekly backup of critical data.
+
+        Creates a zip file containing:
+        - instance/attendance.db (SQLite database)
+        - uploads/ (profile photos, generated payslips) - EXCLUDING the
+          backup folders, so backups never contain other backups
+        - dataset/ (captured face images)
+        - .env (configuration and encryption keys)
+
+        The zip is saved to the dedicated <install folder>/backups/ folder
+        (outside uploads/) and, when available, copied to an external
+        location (BACKUP_DIR in .env, or a second fixed drive). Only the
+        last 4 backups are kept per folder (BACKUP_KEEP).
+
+        All of the logic lives in backup_manager.py so the weekly job, the
+        startup catch-up and the admin "Backup Now" button share one
+        implementation.
+        """
+        logger.info("Starting automated backup...")
+
+        with self.app.app_context():
+            try:
+                from models import now_ist
+                import backup_manager
+
+                result = backup_manager.run_backup(
+                    now_stamp=now_ist().strftime('%Y%m%d_%H%M%S')
+                )
+                if not result.get("success"):
+                    logger.error("Automated backup did not complete: %s", result.get("error"))
+            except Exception as e:
+                logger.error(f"Error in automated backup: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+    def run_catchup_backup_if_overdue(self):
+        """
+        Startup catch-up: if the newest successful backup is older than
+        BACKUP_CATCHUP_DAYS (default 7) - or none exists - run a backup now
+        so a missed Sunday slot never leaves data unprotected.
+        """
+        import sys
+
+        # Never run real backups from the automated test suite.
+        if 'pytest' in sys.modules or (self.app is not None and self.app.config.get('TESTING')):
+            logger.info("Catch-up backup check skipped (test run)")
+            return
+        if os.environ.get('DISABLE_CATCHUP_BACKUP', '').strip().lower() in ('1', 'true', 'yes', 'on'):
+            logger.info("Catch-up backup check disabled via DISABLE_CATCHUP_BACKUP")
+            return
+
+        try:
+            import backup_manager
+
+            if not backup_manager.is_backup_overdue():
+                last = backup_manager.last_backup_time()
+                logger.info("Catch-up backup not needed - last backup: %s", last)
+                return
+
+            logger.info("Last successful backup is older than %d day(s) or missing - "
+                        "running catch-up backup now", backup_manager.catchup_days())
+            self.run_automated_backup()
+        except Exception as e:
+            logger.error(f"Error in catch-up backup check: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def shutdown(self):
         """Shutdown scheduler safely"""

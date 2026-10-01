@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pending Manual Attendance - AI Attendance System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script>
+        (function () {
+            var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : null;
+            var originalFetch = window.fetch;
+            window.fetch = function (input, init) {
+                init = init || {};
+                var method = (init.method || 'GET').toUpperCase();
+                if (csrfToken && method !== 'GET' && method !== 'HEAD') {
+                    if (init.headers instanceof Headers) {
+                        if (!init.headers.has('X-CSRFToken')) {
+                            init.headers.set('X-CSRFToken', csrfToken);
+                        }
+                    } else {
+                        init.headers = Object.assign({}, init.headers, { 'X-CSRFToken': csrfToken });
+                    }
+                }
+                return originalFetch.call(this, input, init);
+            };
+        })();
+    </script>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('attendance.dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance.dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employees.employees') }}">
+                            <i class="bi bi-people"></i> Employees
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance.attendance') }}">
+                            <i class="bi bi-calendar-check"></i> Attendance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('payroll.payroll') }}">
+                            <i class="bi bi-cash"></i> Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('reports.reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('settings.settings') }}">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('approvals.admin_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.admin_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <div class="col-12">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="{{ url_for('attendance.dashboard') }}">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a href="{{ url_for('approvals.admin_approvals') }}">Approvals</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Pending Manual Attendance</li>
+                    </ol>
+                </nav>
+                <h2><i class="bi bi-person-check"></i> Pending Manual Attendance Requests</h2>
+                <p class="text-muted">Review and approve manual attendance submissions from employees</p>
+            </div>
+        </div>
+
+        <!-- Pending Manual Attendance Requests -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-clock-history"></i> Pending Requests ({{ pending_manual_attendance|length }})</h5>
+                        <a href="{{ url_for('approvals.admin_approvals') }}" class="btn btn-sm btn-light">
+                            <i class="bi bi-arrow-left"></i> Back to All Approvals
+                        </a>
+                    </div>
+                    <div class="card-body">
+                        {% if pending_manual_attendance %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Employee</th>
+                                        <th>Employee ID</th>
+                                        <th>Department</th>
+                                        <th>Date</th>
+                                        <th>IN Time</th>
+                                        <th>Submission Timestamp</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for att in pending_manual_attendance %}
+                                    <tr>
+                                        <td>
+                                            <strong>{{ att.employee.name }}</strong>
+                                        </td>
+                                        <td>{{ att.employee.employee_id }}</td>
+                                        <td>{{ att.employee.department }}</td>
+                                        <td>{{ att.date.strftime('%Y-%m-%d') }}</td>
+                                        <td>
+                                            <span class="badge bg-primary">{{ att.in_time.strftime('%H:%M:%S') if att.in_time else '-' }}</span>
+                                        </td>
+                                        <td><small>{{ att.submission_timestamp.strftime('%Y-%m-%d %H:%M:%S') if att.submission_timestamp else '-' }}</small></td>
+                                        <td>
+                                            <div class="d-flex gap-1 flex-wrap">
+                                                <button class="btn btn-sm btn-success"
+                                                        onclick="approveManualAttendance('{{ att.id }}')">
+                                                    <i class="bi bi-check"></i> Approve
+                                                </button>
+                                                <button class="btn btn-sm btn-danger"
+                                                        onclick="rejectManualAttendance('{{ att.id }}')">
+                                                    <i class="bi bi-x"></i> Reject
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-center py-5">
+                            <i class="bi bi-check-circle text-muted" style="font-size: 4rem;"></i>
+                            <p class="text-muted mt-3">No pending manual attendance requests to review.</p>
+                            <a href="{{ url_for('approvals.admin_approvals') }}" class="btn btn-primary">
+                                <i class="bi bi-arrow-left"></i> Return to Approvals Dashboard
+                            </a>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function approveManualAttendance(attendanceId) {
+            if (!confirm('Are you sure you want to approve this manual attendance request?')) {
+                return;
+            }
+            
+            fetch(`/approvals/admin/approve_manual_attendance/${attendanceId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Manual attendance approved successfully!');
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while approving the request.');
+            });
+        }
+
+        function rejectManualAttendance(attendanceId) {
+            const remarks = prompt('Please enter rejection remarks (optional):');
+            if (remarks === null) {
+                return;
+            }
+            
+            fetch(`/approvals/admin/reject_manual_attendance/${attendanceId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ remarks: remarks || '' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Manual attendance rejected successfully!');
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while rejecting the request.');
+            });
+        }
+    </script>
+</body>
+</html>

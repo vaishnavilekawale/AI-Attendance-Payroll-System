@@ -97,19 +97,25 @@ def login():
             login_creds = EmployeeLogin.query.filter_by(employee_id=employee.id).first()
 
             if not login_creds:
-                # Create login credentials with default password (mobile number)
-                login_creds = EmployeeLogin(
-                    employee_id=employee.id,
-                    username=username,
-                    first_login=True,
-                    force_password_change=True,
-                    is_active=True
+                # No login credentials provisioned yet for this employee.
+                #
+                # This used to silently create one here, seeded with the
+                # employee's own phone number as the password - which meant
+                # anyone who knew (or guessed) a coworker's phone number
+                # could log in as them, on the very first attempt, with no
+                # prior account ever having existed. Employee accounts are
+                # now only ever created with a securely random temporary
+                # password (see employees.py / auth_helpers.generate_secure_temp_password
+                # and the migration backfill in database.py), so reaching
+                # this branch means the employee genuinely has no account
+                # yet - direct them to the administrator rather than
+                # fabricating one with a guessable password at login time.
+                flash(
+                    'No login has been set up for this Employee ID yet. '
+                    'Please contact your administrator.',
+                    'danger'
                 )
-                # Use employee's phone number as default password
-                default_password = employee.phone if employee.phone else username
-                login_creds.set_password(default_password)
-                db.session.add(login_creds)
-                db.session.commit()
+                return render_template('login.html')
 
             # Check if account is active
             if not login_creds.is_active:

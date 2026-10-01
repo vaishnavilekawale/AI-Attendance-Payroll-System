@@ -36,6 +36,7 @@ from models import (
     LogoutApprovalRequest, AttendanceActivity,
 )
 from auth_decorators import login_required, admin_required
+from auth_helpers import generate_secure_temp_password
 from face_recognition_singleton import get_face_recognizer
 from file_helpers import allowed_file
 from email_service import EmailService
@@ -155,6 +156,12 @@ def add_employee():
             flash('This Email ID already exists.', 'danger')
             return redirect(url_for('employees.employees'))
 
+        # Secure random temporary password for the new employee's first
+        # login - NOT their phone number (see auth_helpers.generate_secure_temp_password
+        # for why that was a vulnerability). It is emailed to them below and
+        # must be changed on first login (must_change_password / force_password_change).
+        temp_password = generate_secure_temp_password()
+
         profile_photo = None
         if 'profile_photo' in request.files:
             file = request.files['profile_photo']
@@ -167,7 +174,7 @@ def add_employee():
         employee = Employee(
             employee_id=new_id,
             username=new_id,
-            password_hash=generate_password_hash(phone),
+            password_hash=generate_password_hash(temp_password),
             name=name,
             department=department,
             designation=designation,
@@ -212,8 +219,8 @@ def add_employee():
                 force_password_change=True,
                 is_active=True
             )
-            login_creds.set_password(phone)
-            employee.password_hash = generate_password_hash(phone)
+            login_creds.set_password(temp_password)
+            employee.password_hash = generate_password_hash(temp_password)
             employee.username = new_id
             employee.role = 'employee'
             db.session.add(login_creds)
@@ -222,7 +229,7 @@ def add_employee():
 
         try:
             email_service = EmailService()
-            email_service.send_welcome_email(email, name, new_id, phone)
+            email_service.send_welcome_email(email, name, new_id, temp_password)
         except Exception:
             pass
 

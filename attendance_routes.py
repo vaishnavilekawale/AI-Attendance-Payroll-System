@@ -449,8 +449,11 @@ def employee_dashboard():
         # logger.info(f"  OUT Time: {att.out_time}")
         # CRITICAL: Recalculate status for past records using the calculator
         # This ensures past records show correct Present/Half Day/Absent status
+        # If both IN and OUT are set (admin edit), use database values - don't recalculate
         if att.in_time and att.date < today:
-            am.calculator.recalculate_attendance(att, is_final_calculation=True)
+            if not (att.in_time and att.out_time):
+                # Only recalculate if using activities (not admin-edited)
+                am.calculator.recalculate_attendance(att, is_final_calculation=True, use_activities=True)
         # Add display_out_time for UI (show "-" after new IN until next OUT)
         am._add_display_out_time(att, att.date)
         # logger.info(f"  Display OUT Time after _add_display_out_time: {att.display_out_time if hasattr(att, 'display_out_time') else 'N/A'}")
@@ -730,8 +733,11 @@ def attendance_history():
         # which for any record computed before the calculator fix (or
         # edited directly) can be the old gross first-IN-to-last-OUT
         # figure instead of the correct net active time.
+        # If both IN and OUT are set (admin edit), use database values - don't recalculate
         if att.in_time and att.date < today:
-            am.calculator.recalculate_attendance(att, is_final_calculation=True)
+            if not (att.in_time and att.out_time):
+                # Only recalculate if using activities (not admin-edited)
+                am.calculator.recalculate_attendance(att, is_final_calculation=True, use_activities=True)
         # Add display_out_time for UI (show "-" after new IN until next OUT)
         am._add_display_out_time(att, att.date)
     
@@ -829,9 +835,12 @@ def employee_attendance():
         # logger.info(f"  OUT Time: {att.out_time}")
         # CRITICAL: Recalculate status for past records using the calculator
         # This ensures past records show correct Present/Half Day/Absent status
+        # If both IN and OUT are set (admin edit), use database values - don't recalculate
         if att.in_time and att.date < today:
-            am.calculator.recalculate_attendance(att, is_final_calculation=True)
-            # logger.info(f"  Status recalculated: {att.status}, Hours: {att.total_hours}")
+            if not (att.in_time and att.out_time):
+                # Only recalculate if using activities (not admin-edited)
+                am.calculator.recalculate_attendance(att, is_final_calculation=True, use_activities=True)
+                # logger.info(f"  Status recalculated: {att.status}, Hours: {att.total_hours}")
         # Add display_out_time for UI (show "-" after new IN until next OUT)
         am._add_display_out_time(att, att.date)
         # logger.info(f"  Display OUT Time after _add_display_out_time: {att.display_out_time if hasattr(att, 'display_out_time') else 'N/A'}")
@@ -1179,7 +1188,7 @@ def auto_scan_attendance_api():
     if frame is None:
         return jsonify({'success': False, 'message': 'Invalid image', 'faces': []})
 
-    # Periodic housekeeping - cheap, and keeps the tracker's memory bounded.
+    # Periodic housekeeping - cheap, and keeps the trackers' memory bounded.
     presence_tracker.sweep()
 
     recognizer = get_face_recognizer()
