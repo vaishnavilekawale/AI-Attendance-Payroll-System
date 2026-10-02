@@ -227,19 +227,26 @@ def preload_employee_embeddings(max_workers=8):
 
     # 2) Discover every (employee_id, image_path) pair on disk.
     jobs = []
+    employee_image_counts = {}
     if os.path.exists(Config.DATASET_FOLDER):
         for employee_folder in sorted(os.listdir(Config.DATASET_FOLDER)):
             employee_path = os.path.join(Config.DATASET_FOLDER, employee_folder)
             if not os.path.isdir(employee_path):
                 continue
+            image_count = 0
             for fname in sorted(os.listdir(employee_path)):
                 if fname.lower().endswith(('.jpg', '.jpeg', '.png')):
                     jobs.append((employee_folder, os.path.join(employee_path, fname)))
+                    image_count += 1
+            employee_image_counts[employee_folder] = image_count
+            logger.debug(f"Found {image_count} images for employee {employee_folder}")
 
     total = len(jobs)
     if total == 0:
         logger.info("No employee images found to preload.")
         return {'total': 0, 'already_cached': 0, 'encoded': 0, 'errors': 0, 'seconds': 0.0}
+
+    logger.info(f"Preloading embeddings for {len(employee_image_counts)} employees with {total} total images")
 
     # 3) Figure out how many are already fresh, purely for reporting.
     already_cached = 0
@@ -256,6 +263,7 @@ def preload_employee_embeddings(max_workers=8):
 
     encoded = 0
     errors = 0
+    employee_errors = {}
 
     # 4) Use a thread pool for image loading, but serialize DeepFace inference
     #    because its shared OpenCV detector/model are not safe for concurrent
@@ -275,9 +283,11 @@ def preload_employee_embeddings(max_workers=8):
                     else:
                         errors += 1
                         logger.warning(f"No embedding produced for {img_path}")
+                        employee_errors[emp_id] = employee_errors.get(emp_id, 0) + 1
                 except Exception as e:
                     errors += 1
                     logger.error(f"Failed to preload embedding for {img_path}: {e}")
+                    employee_errors[emp_id] = employee_errors.get(emp_id, 0) + 1
     except Exception as e:
         logger.error(f"ThreadPoolExecutor error during preload: {e}")
         errors += len(jobs) - encoded
@@ -286,6 +296,11 @@ def preload_employee_embeddings(max_workers=8):
     _save_persistent_embeddings_cache()
 
     elapsed = time.time() - start
+
+    # Log per-employee error summary if any errors occurred
+    if employee_errors:
+        logger.warning(f"Embedding preload errors by employee: {employee_errors}")
+
     logger.info(
         f"Embeddings preload complete: {total} images "
         f"({already_cached} already cached, {encoded} newly encoded, "
@@ -638,17 +653,22 @@ class FaceRecognitionEngine:
         Safe to call with an empty/missing dataset folder (no-op, no crash).
         """
         trained_count = 0
+        skipped_count = 0
+        failed_count = 0
 
         if DeepFace is None or cv2 is None:
+            logger.warning("DeepFace or OpenCV not available - skipping employee rescan")
             return trained_count
 
         if not os.path.exists(Config.DATASET_FOLDER):
+            logger.warning(f"Dataset folder does not exist: {Config.DATASET_FOLDER}")
             return trained_count
 
         min_images = getattr(Config, 'MIN_FACE_IMAGES_REQUIRED', 1)
 
         try:
             employee_folders = sorted(os.listdir(Config.DATASET_FOLDER))
+            logger.info(f"Rescan found {len(employee_folders)} folders in dataset")
         except OSError as e:
             logger.warning(f"Could not list dataset folder during rescan: {e}")
             return trained_count
@@ -656,10 +676,13 @@ class FaceRecognitionEngine:
         for employee_folder in employee_folders:
             employee_path = os.path.join(Config.DATASET_FOLDER, employee_folder)
             if not os.path.isdir(employee_path):
+                logger.debug(f"Skipping non-directory: {employee_folder}")
                 continue
 
             employee_id = employee_folder
             if employee_id in self.known_face_ids:
+                logger.debug(f"Employee {employee_id} already trained - skipping")
+                skipped_count += 1
                 continue  # already trained/known - nothing to do
 
             try:
@@ -667,10 +690,14 @@ class FaceRecognitionEngine:
                     os.path.join(employee_path, f) for f in os.listdir(employee_path)
                     if f.lower().endswith(('.jpg', '.jpeg', '.png'))
                 ]
-            except OSError:
+            except OSError as e:
+                logger.warning(f"Could not list images for employee {employee_id}: {e}")
+                failed_count += 1
                 continue
 
             if len(image_paths) < min_images:
+                logger.info(f"Employee {employee_id} has only {len(image_paths)} images (min: {min_images}) - skipping")
+                skipped_count += 1
                 continue
 
             employee_name = employee_id
@@ -679,19 +706,33 @@ class FaceRecognitionEngine:
                 employee = Employee.query.filter_by(id=int(employee_id)).first()
                 if employee:
                     employee_name = employee.name
-            except Exception:
+                    logger.debug(f"Found employee {employee_id} in DB: {employee_name}")
+                else:
+                    logger.warning(f"Employee {employee_id} not found in database - using folder name")
+            except Exception as e:
                 # No app/DB context available from this background thread,
                 # or employee record not found - fall back to using the
                 # folder name as the display name rather than failing.
+                logger.debug(f"Could not fetch employee name from DB for {employee_id}: {e}")
                 pass
 
             try:
+                logger.info(f"Training employee {employee_id} ({employee_name}) with {len(image_paths)} images...")
                 valid = self.train_employee(employee_id, employee_name, image_paths)
                 if valid > 0:
                     trained_count += 1
+                    logger.info(f"Successfully trained employee {employee_id}")
+                else:
+                    logger.warning(f"Failed to train employee {employee_id} - no valid images")
+                    failed_count += 1
             except Exception as e:
                 logger.error(f"Auto-reload: failed to train employee {employee_id}: {e}")
+                failed_count += 1
 
+        logger.info(
+            f"Rescan complete: {trained_count} trained, {skipped_count} skipped, "
+            f"{failed_count} failed out of {len(employee_folders)} folders"
+        )
         return trained_count
 
     def load_model(self):
@@ -702,7 +743,20 @@ class FaceRecognitionEngine:
                     data = pickle.load(f)
                     self.known_face_ids = data.get('ids', [])
                     self.known_face_names = data.get('names', [])
-                logger.info(f"Loaded face recognition data with {len(self.known_face_ids)} employees")
+
+                # Validate data integrity
+                if len(self.known_face_ids) != len(self.known_face_names):
+                    logger.warning(
+                        f"Model data integrity check failed: {len(self.known_face_ids)} IDs "
+                        f"vs {len(self.known_face_names)} names - resetting"
+                    )
+                    self.known_face_ids = []
+                    self.known_face_names = []
+                else:
+                    logger.info(
+                        f"Loaded face recognition data with {len(self.known_face_ids)} employees: "
+                        f"{self.known_face_ids}"
+                    )
             except Exception as e:
                 logger.error(f"Error loading model: {e}")
                 logger.info("Deleting corrupted model file and starting fresh")
@@ -712,6 +766,10 @@ class FaceRecognitionEngine:
                     pass
                 self.known_face_ids = []
                 self.known_face_names = []
+        else:
+            logger.info(f"No trained model file found at {self.model_path} - starting fresh")
+            self.known_face_ids = []
+            self.known_face_names = []
 
     def save_model(self):
         """Save trained face recognition data"""
@@ -732,12 +790,15 @@ class FaceRecognitionEngine:
             return 0
 
         valid_images = 0
+        failed_images = 0
+        error_details = []
 
         for img_path in image_paths:
             try:
                 # Check image exists
                 if not os.path.exists(img_path):
                     logger.warning(f"Image not found: {img_path}")
+                    failed_images += 1
                     continue
 
                 # Read image (transparently decrypting if it was saved
@@ -746,6 +807,7 @@ class FaceRecognitionEngine:
 
                 if image is None:
                     logger.warning(f"Could not read image: {img_path}")
+                    failed_images += 1
                     continue
 
                 # Detect face - pass the decoded array rather than img_path
@@ -762,6 +824,7 @@ class FaceRecognitionEngine:
                     logger.debug(f"Valid face detected in {img_path}")
                 else:
                     logger.warning(f"No face detected in {img_path}")
+                    failed_images += 1
 
             except Exception as e:
                 # WARNING, not DEBUG: a decrypt/decode failure here (most
@@ -773,6 +836,17 @@ class FaceRecognitionEngine:
                 # with 0 valid images, recognition always says Unknown"
                 # silently unexplainable. Log it loudly instead.
                 logger.warning(f"Error processing {img_path}: {e}")
+                failed_images += 1
+                error_details.append(f"{os.path.basename(img_path)}: {str(e)}")
+
+        # Log summary for this employee training attempt
+        logger.info(
+            f"Employee {employee_id} ({employee_name}) training summary: "
+            f"{valid_images} valid, {failed_images} failed out of {len(image_paths)} total images"
+        )
+
+        if error_details:
+            logger.warning(f"Employee {employee_id} had {len(error_details)} image errors: {error_details[:3]}")
 
         if valid_images > 0:
             if employee_id not in self.known_face_ids:
@@ -806,7 +880,8 @@ class FaceRecognitionEngine:
             logger.info(f"Registered employee {employee_name} with {valid_images} valid images")
             return valid_images
 
-        logger.warning("No valid images found for training.")
+        logger.warning(f"No valid images found for employee {employee_id} ({employee_name}). "
+                      f"Check image quality, encryption key, or face detection settings.")
         return 0
 
 
@@ -1107,16 +1182,53 @@ def train_all_employees():
         logger.warning("Dataset folder does not exist")
         return
 
-    for employee_folder in os.listdir(Config.DATASET_FOLDER):
-        employee_path = os.path.join(Config.DATASET_FOLDER, employee_folder)
-        if os.path.isdir(employee_path):
-            employee_id = employee_folder
-            image_paths = [os.path.join(employee_path, f) for f in os.listdir(employee_path)
-                           if f.endswith(('.jpg', '.jpeg', '.png'))]
+    trained_count = 0
+    failed_count = 0
+    skipped_count = 0
+    min_images = getattr(Config, 'MIN_FACE_IMAGES_REQUIRED', 1)
 
-            if len(image_paths) >= getattr(Config, 'MIN_FACE_IMAGES_REQUIRED', 1):
-                from models import Employee
-                employee = Employee.query.filter_by(id=int(employee_id)).first()
-                if employee:
-                    recognizer.train_employee(employee_id, employee.name, image_paths)
-                    logger.info(f"Trained employee {employee.name} with {len(image_paths)} images")
+    employee_folders = sorted(os.listdir(Config.DATASET_FOLDER))
+    logger.info(f"train_all_employees: Found {len(employee_folders)} folders in dataset")
+
+    for employee_folder in employee_folders:
+        employee_path = os.path.join(Config.DATASET_FOLDER, employee_folder)
+        if not os.path.isdir(employee_path):
+            continue
+
+        employee_id = employee_folder
+        image_paths = [os.path.join(employee_path, f) for f in os.listdir(employee_path)
+                       if f.endswith(('.jpg', '.jpeg', '.png'))]
+
+        if len(image_paths) < min_images:
+            logger.info(f"Employee {employee_id} has only {len(image_paths)} images (min: {min_images}) - skipping")
+            skipped_count += 1
+            continue
+
+        employee_name = employee_id
+        try:
+            from models import Employee
+            employee = Employee.query.filter_by(id=int(employee_id)).first()
+            if employee:
+                employee_name = employee.name
+                logger.debug(f"Found employee {employee_id} in DB: {employee_name}")
+            else:
+                logger.warning(f"Employee {employee_id} not found in database - using folder name")
+        except Exception as e:
+            logger.warning(f"Could not fetch employee name from DB for {employee_id}: {e}")
+
+        try:
+            valid_images = recognizer.train_employee(employee_id, employee_name, image_paths)
+            if valid_images > 0:
+                trained_count += 1
+                logger.info(f"Trained employee {employee_name} ({employee_id}) with {valid_images} valid images")
+            else:
+                failed_count += 1
+                logger.warning(f"Failed to train employee {employee_name} ({employee_id}) - no valid images")
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"Error training employee {employee_id}: {e}")
+
+    logger.info(
+        f"train_all_employees complete: {trained_count} trained, "
+        f"{skipped_count} skipped, {failed_count} failed out of {len(employee_folders)} folders"
+    )

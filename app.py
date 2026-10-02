@@ -256,14 +256,14 @@ if __name__ == '__main__':
     # LICENSE VALIDATION
     # ============================================================
     print("\n" + "=" * 50)
-    print("[LICENSE] Checking license status...")
+    print("🔐 Checking license status...")
     print("=" * 50)
-
+    
     should_proceed, license_message = check_license_on_startup()
-
+    
     if not should_proceed:
         print("\n" + "!" * 50)
-        print("[ERROR] LICENSE VALIDATION FAILED")
+        print(f"❌ LICENSE VALIDATION FAILED")
         print(f"   {license_message}")
         print("!" * 50)
         print("\nPlease contact support to purchase a valid license.")
