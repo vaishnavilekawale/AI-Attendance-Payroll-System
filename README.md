@@ -1,50 +1,44 @@
-<div align="center">
-
 # 🧠 AI Attendance & Payroll System
 
 **Face-recognition attendance, automated payroll, encrypted payslips and signed licensing — shipped as a one-click Windows desktop app.**
 
-[![Python](https://img.shields.io/badge/Python-3.10.x-3776AB?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-31011/)
-[![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
-[![TensorFlow](https://img.shields.io/badge/TensorFlow-2.15-FF6F00?logo=tensorflow&logoColor=white)](https://www.tensorflow.org/)
-[![DeepFace](https://img.shields.io/badge/DeepFace-FaceNet512-8A2BE2)](https://github.com/serengil/deepface)
-[![Security](https://img.shields.io/badge/Security-AES--256%20%7C%20Ed25519-success)]()
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20(64--bit)-0078D6?logo=windows&logoColor=white)]()
-[![Tests](https://img.shields.io/badge/tests-pytest-brightgreen?logo=pytest&logoColor=white)]()
-[![Status](https://img.shields.io/badge/status-internal--production-orange)]()
+![Python](https://img.shields.io/badge/Python-3.10.x-3776AB?logo=python&logoColor=white)
+![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)
+![TensorFlow](https://img.shields.io/badge/TensorFlow-2.15-FF6F00?logo=tensorflow&logoColor=white)
+![DeepFace](https://img.shields.io/badge/DeepFace-FaceNet512-8A2BE2)
+![Security](https://img.shields.io/badge/Security-AES--256%20%7C%20Ed25519-success)
+![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20(64--bit)-0078D6?logo=windows&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-pytest-brightgreen?logo=pytest&logoColor=white)
+![Status](https://img.shields.io/badge/status-internal--production-orange)
 
-[Features](#-features) •
-[Quick Start](#-quick-start) •
-[Installation](#-installation--setup-a-to-z) •
-[Build the .exe](#-building--packaging-for-developers) •
-[Licensing](#-license--backup-management) •
-[Troubleshooting](#-troubleshooting--faqs)
+[Features](#2--features) • [Quick Start](#6--quick-start) • [Installation](#7--installation--setup-a-to-z) • [Build the .exe](#11--building--packaging-for-developers) • [Licensing](#12--license--backup-management) • [Troubleshooting](#14--troubleshooting--faqs)
 
-</div>
+> 👋 **New here?** Read [section 5](#5--prerequisites) (what you need), then jump to [section 7, Option A](#option-a-recommended-one-click-with-setupbat). Follow the steps **in order** and you will have the app running.
 
 ---
 
 ## 📖 Table of Contents
 
-1. [Project Overview](#-project-overview)
-2. [Features](#-features)
-3. [Tech Stack](#-tech-stack)
-4. [Architecture](#-architecture)
-5. [Prerequisites](#-prerequisites)
-6. [Quick Start](#-quick-start)
-7. [Installation & Setup (A to Z)](#-installation--setup-a-to-z)
-8. [Running the Application](#-running-the-application)
-9. [Automated Testing](#-automated-testing)
-10. [Building & Packaging (For Developers)](#-building--packaging-for-developers)
-11. [License & Backup Management](#-license--backup-management)
-12. [Deploying to a Client Machine](#-deploying-to-a-client-machine)
-13. [Troubleshooting & FAQs](#-troubleshooting--faqs)
-14. [Project Structure](#-project-structure)
-15. [Contributing & Support](#-contributing--support)
+1. [Project Overview](#1--project-overview)
+2. [Features](#2--features)
+3. [Tech Stack](#3--tech-stack)
+4. [Architecture](#4--architecture)
+5. [Prerequisites](#5--prerequisites)
+6. [Quick Start](#6--quick-start)
+7. [Installation & Setup (A to Z)](#7--installation--setup-a-to-z)
+8. [Running the Application](#8--running-the-application)
+9. [Check That Everything Works](#9--check-that-everything-works)
+10. [Automated Testing](#10--automated-testing)
+11. [Building & Packaging (For Developers)](#11--building--packaging-for-developers)
+12. [License & Backup Management](#12--license--backup-management)
+13. [Deploying to a Client Machine](#13--deploying-to-a-client-machine)
+14. [Troubleshooting & FAQs](#14--troubleshooting--faqs)
+15. [Project Structure](#15--project-structure)
+16. [Contributing & Support](#16--contributing--support)
 
 ---
 
-## 🎯 Project Overview
+## 1. 🎯 Project Overview
 
 The **AI Attendance & Payroll System** is a full-stack Flask application that:
 
@@ -58,13 +52,21 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 
 > 💡 Under the hood it is a local Flask web app served on `127.0.0.1:5000`. The launcher opens the user's default browser automatically, so it *feels* like a native desktop app.
 
+**Two ways people use this project:**
+
+| You are… | You do… |
+| --- | --- |
+| 👩‍💻 A **developer / vendor** | Follow sections 5 to 12: set up Python, run from source, test, build the `.exe` and issue licenses. |
+| 🏢 A **customer / client** | Follow section 13: install the `Setup.exe` you were given and open the app from the Start Menu. |
+
 ---
 
-## ✨ Features
+## 2. ✨ Features
 
 ### 🎥 Attendance
+
 | Feature | Details |
-|---|---|
+| --- | --- |
 | **Face-recognition kiosk** | Public scanning page, DeepFace (FaceNet512) with strict cosine-distance matching |
 | **No guessing on look-alikes** | Configurable confidence margin — ambiguous faces are rejected |
 | **Single punch per appearance** | Frame-presence locking prevents duplicate punches |
@@ -74,6 +76,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 | **Versioned settings** | Past attendance is always evaluated against the rules in force *on that date* |
 
 ### 💰 Payroll & Reports
+
 - Configurable **allowances** (HRA, DA, Medical, Travel, Special, Other) and **deductions** (PF, ESIC, TDS, Professional Tax, LOP, Late, Transport)
 - **Automated monthly payroll** via APScheduler, with a startup **reconciliation pass** that backfills any period missed while the PC was off
 - **AES-256 password-protected PDF payslips** (ReportLab + pikepdf) with automated email delivery
@@ -81,6 +84,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 - A single shared aggregation service, so numbers never disagree between screens
 
 ### 🔐 Security
+
 - **Face photos encrypted at rest** (Fernet / AES) — opt-in biometric consent
 - **AES-256** password-protected payslips
 - **Ed25519 licensing** — customers only hold the *public* key, so they cannot forge a license
@@ -89,6 +93,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 - Werkzeug password hashing
 
 ### 💾 Operations
+
 - **Automated weekly backups** every Sunday at 02:00 (last 4 kept)
 - One-click **manual backup download** from Admin → Settings
 - **Role-based access:** Admin, Manager, Employee
@@ -98,17 +103,17 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 ### 👥 Roles
 
 | Role | Access |
-|---|---|
+| --- | --- |
 | **Admin** | Full control — employees, payroll, settings, licensing, backups, reports, approvals |
 | **Manager** | An employee flagged as manager; approves manual-attendance and logout-regularization requests in their scope |
 | **Employee** | Self-service — own attendance, payslips, profile, password |
 
 ---
 
-## 🛠 Tech Stack
+## 3. 🛠 Tech Stack
 
 | Layer | Technology |
-|---|---|
+| --- | --- |
 | **Backend** | Python 3.10, Flask 3.0, SQLAlchemy 2.0, Flask-Migrate / Alembic, Flask-WTF, Flask-Limiter |
 | **AI / Computer Vision** | DeepFace (FaceNet512), TensorFlow 2.15 + tf-keras, OpenCV-Contrib, MediaPipe |
 | **Frontend** | Bootstrap 5, Bootstrap Icons, vanilla JavaScript (`fetch`), Chart.js |
@@ -121,9 +126,9 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 
 ---
 
-## 🏗 Architecture
+## 4. 🏗 Architecture
 
-```text
+```
 ┌───────────────────────────────────────────────────────────────┐
 │  Windows Client Machine                                        │
 │                                                                │
@@ -149,110 +154,191 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 └───────────────────────────────────────────────────────────────┘
 ```
 
+**In plain words:** when you start the app it (1) checks the license, (2) loads the face-recognition model, (3) opens your browser, and (4) keeps running in the background and serves the web pages. Everything is stored in plain folders next to the app.
+
 ---
 
-## 📋 Prerequisites
+## 5. 📋 Prerequisites
 
 | Requirement | Version | Notes |
-|---|---|---|
-| 🐍 **Python** | **3.10.x** (3.10.11 recommended) | TensorFlow 2.15 / MediaPipe wheels are most reliable on 3.10. **Avoid 3.12+.** |
+| --- | --- | --- |
+| 🐍 **Python** | **3.10.x** (3.10.11 recommended) | TensorFlow 2.15 / MediaPipe wheels are most reliable on 3.10. **Avoid 3.11, 3.12 and newer.** |
 | 🔧 **Git** | Any recent version | To clone the repository |
 | 📷 **Webcam** | Any USB / built-in | Needed for face registration and recognition |
 | 🪟 **Windows** | 10 / 11, 64-bit | Build and ship for 64-bit only |
 | 💽 **Disk / RAM** | ~5 GB free, 8 GB RAM recommended | TensorFlow + DeepFace are large |
-| 🌐 **Internet** | Needed once | To install packages and download face-model weights |
+| 🌐 **Internet** | Needed during setup | To install packages, to download the UI files, and to download face-model weights on first use |
 | 🗄 **MySQL 8.x** | *Optional* | Only if you don't want the default SQLite |
 
-**Only for building the installer** (developers/build machine):
+**Only for building the installer** (developers / build machine):
 
 | Tool | Purpose |
-|---|---|
+| --- | --- |
 | **PyInstaller** (installed via `requirements-packaging.txt`) | Freezes the app into an `.exe` |
 | **[Inno Setup 6](https://jrsoftware.org/isinfo.php)** | Compiles the final `Setup.exe` installer |
 
 > ⚠️ **Why Python 3.10?** DeepFace, TensorFlow 2.15, `tf-keras` and `mediapipe==0.10.21` all publish official Windows wheels for 3.9–3.11, and 3.10 is the safest overlap. Also, `numpy` is pinned to `1.26.4` (below 2.0) on purpose — NumPy 2.x breaks TensorFlow/MediaPipe.
 
+### How to install Python 3.10 correctly
+
+1. Download **Python 3.10.11** from [python.org](https://www.python.org/downloads/release/python-31011/).
+2. Run the installer. On the **first screen tick "Add Python to PATH"** (this is the most common thing people forget).
+3. Open **Command Prompt** and check:
+
+```
+python --version     # must print Python 3.10.x
+git --version
+```
+
+If `python --version` prints a different version, another Python comes first in your PATH. You can still check that 3.10 is installed with `py -3.10 --version`. `setup.bat` finds Python 3.10 by itself using this `py -3.10` launcher.
+
 ---
 
-## ⚡ Quick Start
+## 6. ⚡ Quick Start
 
-```bash
+Fastest path for people who already have Python 3.10 and Git:
+
+```
 git clone https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System AI_APS
 cd AI_APS
+setup.bat
+```
 
+`setup.bat` installs everything, checks it, downloads the UI files and then shows a menu. Choose **1** (run the app). Open **<http://127.0.0.1:5000>** — on first run you'll be taken to the **Setup Wizard**. 🎉
+
+Prefer typing the commands yourself?
+
+```
 python -m venv venv
 venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
+pip uninstall -y opencv-python opencv-python-headless
+pip install --force-reinstall --no-deps opencv-contrib-python==4.8.1.78
+
+python scripts\download_vendor_assets.py
 copy .env.example .env
 set FLASK_ENV=development
 python app.py
 ```
 
-Open **http://127.0.0.1:5000** — on first run you'll be taken to the **Setup Wizard**. 🎉
-
-> ⏱ First install downloads several GB (TensorFlow, OpenCV, MediaPipe) — expect several minutes.
+> ⏱ First install downloads several GB (TensorFlow, OpenCV, MediaPipe) — expect several minutes (10 to 30 on a slow connection).
 
 ---
 
-## 🧭 Installation & Setup (A to Z)
+## 7. 🧭 Installation & Setup (A to Z)
 
-### Step 1️⃣ — Install the prerequisites
+Read [section 5](#5--prerequisites) first. Then choose **one** option:
+
+- **Option A:** run `setup.bat` (easiest, recommended)
+- **Option B:** type the commands yourself (Steps 1 to 8)
+
+### Option A (recommended): one click with `setup.bat`
+
+1. Install **Python 3.10.11** and **Git** (see section 5).
+2. Download the project:
+
+```
+git clone https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System AI_APS
+cd AI_APS
+```
+
+   (Or click **Code → Download ZIP** on GitHub and extract it.)
+
+3. **Double-click `setup.bat`** inside the project folder.
+
+It does these steps for you and **stops at the first error** (it never prints a fake "success"):
+
+| Step | What happens |
+| --- | --- |
+| 1 | Finds **Python 3.10** (stops with a clear message if it is missing) |
+| 2 | Creates the `venv` folder |
+| 3 | Upgrades `pip` and installs everything in `requirements.txt` |
+| 4 | Removes the conflicting plain `opencv-python`, then checks that `cv2`, TensorFlow, MediaPipe and DeepFace import correctly |
+| 5 | Creates `.env` from `.env.example` and creates the folders the app needs |
+| 6 | Downloads the UI files (Bootstrap, icons, Chart.js, fonts) into `static\vendor` |
+
+Then a menu appears:
+
+```
+1 - Run the app now (development mode)
+2 - Build the .exe (PyInstaller, slow)
+3 - Exit
+```
+
+**Recommended:** press **1** (run the app) and follow [section 9](#9--check-that-everything-works). Press **2** only when you really want to build the `.exe` (see section 11).
+
+> 📝 During install you will see a list of **about 112 packages**. That is normal. Your `requirements.txt` has about 35 direct packages, but TensorFlow, DeepFace and MediaPipe bring many more of their own.
+
+> ⚠️ **OpenCV conflict:** DeepFace installs plain `opencv-python` as a dependency, which clashes with `opencv-contrib-python` (both provide `cv2`). If you see `cv2` errors after setup, run the fix in [Step 4](#step-4️⃣--install-dependencies) below.
+
+### Option B: manual setup, step by step
+
+#### Step 1️⃣ — Install the prerequisites
 
 1. Install **Python 3.10.11** from [python.org](https://www.python.org/downloads/release/python-31011/).
    ✔ Tick **"Add Python to PATH"** in the installer.
 2. Install **Git** from [git-scm.com](https://git-scm.com/downloads).
 3. Confirm both work — open **Command Prompt** and run:
 
-```bash
+```
 python --version    # should print Python 3.10.x
 git --version
 ```
 
-### Step 2️⃣ — Clone the repository
+#### Step 2️⃣ — Clone the repository
 
-```bash
+```
 git clone https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System AI_APS
 cd AI_APS
 ```
 
-### Step 3️⃣ — Create and activate a virtual environment
+#### Step 3️⃣ — Create and activate a virtual environment
 
-```bash
+```
 python -m venv venv
 venv\Scripts\activate
 ```
 
-Your prompt should now start with `(venv)`.
+Your prompt should now start with `(venv)`. A *virtual environment* is a private folder for this project's packages, so it does not mix with other Python projects.
 
 > macOS/Linux is fine for development only: `source venv/bin/activate`. Production builds are Windows-only.
 
-### Step 4️⃣ — Install dependencies
+#### Step 4️⃣ — Install dependencies
 
-```bash
+```
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Verify the heavy ML stack imported correctly **before** doing anything else:
+Now fix the OpenCV conflict (DeepFace installs plain `opencv-python`):
 
-```bash
-python -c "import cv2, tensorflow, mediapipe, deepface; print('OK')"
+```
+pip uninstall -y opencv-python opencv-python-headless
+pip install --force-reinstall --no-deps opencv-contrib-python==4.8.1.78
 ```
 
-> ⚠️ Use a **clean** venv. Never have plain `opencv-python` installed next to `opencv-contrib-python` — both provide `cv2` and will conflict. If in doubt:
-> `pip uninstall -y opencv-python opencv-contrib-python` then `pip install -r requirements.txt`.
+Verify the heavy ML stack imported correctly **before** doing anything else:
 
-### Step 5️⃣ — Configure the environment file (`.env`)
+```
+python -c "import cv2, tensorflow, mediapipe, deepface; print('OK')"
+pip check
+```
 
-```bash
+You want to see `OK` and `No broken requirements found`.
+
+> ⚠️ Use a **clean** venv. Never have plain `opencv-python` installed next to `opencv-contrib-python` — both provide `cv2` and will conflict. If in doubt: delete the `venv` folder and start again from Step 3.
+
+#### Step 5️⃣ — Configure the environment file (`.env`)
+
+```
 copy .env.example .env
 ```
 
 The `.env` file must sit **next to `app.py`** (development) or **next to the `.exe`** (packaged build). Open it and review:
 
-```ini
+```
 # ── Flask core ─────────────────────────────────────────────
 SECRET_KEY=                   # leave blank on a NEW install — auto-generated on first run
 FLASK_ENV=production          # use "development" only on your own dev machine
@@ -286,56 +372,54 @@ MIN_FACE_IMAGES_REQUIRED=20
 ```
 
 | Key | Required? | What to know |
-|---|---|---|
+| --- | --- | --- |
 | `SECRET_KEY` | Auto | Blank → a secure random key is generated and saved on first run. When **restoring** an install, reuse its original value. |
 | `FLASK_ENV` | Yes | `development` enables Flask's debugger (unsafe for customers). `production` uses Waitress. |
-| `MAIL_*` | Only for email | Without valid SMTP credentials payslip/reset emails fail and log an error; everything else still works. |
+| `MAIL_*` | Only for email | Without valid SMTP credentials payslip/reset emails fail and log an error; everything else still works. For Gmail use an **App Password**. |
 | `DATABASE_URL` | No | Default is SQLite — right for a single-site install. |
 | `FACE_DATA_ENCRYPTION_KEY` | Auto | Managed by `crypto_utils.py`. **Back it up.** |
-| `LICENSE_TOKEN` / `LICENSE_PUBLIC_KEY_HEX` | No | Optional overrides for the licensing system (see [License Management](#-license--backup-management)). |
+| `LICENSE_TOKEN` / `LICENSE_PUBLIC_KEY_HEX` | No | Optional overrides for the licensing system (see [License Management](#12--license--backup-management)). |
 
 > 🔒 **Never commit `.env`** and never copy your own `.env` into a customer deliverable. Every install gets its own.
 
-### Step 6️⃣ — Download the offline UI assets (one time)
+#### Step 6️⃣ — Download the offline UI assets (one time)
 
-```bash
+```
 pip install requests
-python scripts/download_vendor_assets.py
+python scripts\download_vendor_assets.py
 ```
 
-This saves Bootstrap, Bootstrap Icons, Chart.js and fonts into `static/vendor/` so the UI renders without internet. Required before building the installer; recommended for development too.
+This saves Bootstrap, Bootstrap Icons, Chart.js and fonts into `static\vendor\` so the UI renders without internet. Required before building the installer; **also required for development**, because these files are **not stored in GitHub** (they are git-ignored). If you skip this step the pages open **without any styling**.
 
-### Step 7️⃣ — Download the face-model weights (one time)
+#### Step 7️⃣ — Download the face-model weights (one time)
 
 DeepFace downloads FaceNet512 + RetinaFace weights to `%USERPROFILE%\.deepface\weights` the **first time it runs a face operation** — not at install time. Trigger it once on your machine:
 
-1. Run `python app.py` (see below) and finish the Setup Wizard.
+1. Run `python app.py` (see section 8) and finish the Setup Wizard.
 2. Add a test employee and capture **at least one photo** in Face Registration.
 3. Stop the app (`Ctrl+C`) and confirm the files exist:
 
-```bash
+```
 dir %USERPROFILE%\.deepface\weights
 ```
 
 You should see `facenet512_weights.h5` and RetinaFace weights (~100–300 MB total). The PyInstaller build bundles these so client PCs work **offline**.
 
-### Step 8️⃣ — (Optional) Windows one-click helper
+#### Step 8️⃣ — Create the runtime folders (only if they are missing)
 
-`setup.bat` automates steps 3–5 **and** runs a full PyInstaller build:
+The app creates `instance/`, `dataset/`, `uploads/`, `trained_model/` and `logs/` by itself on first run. `setup.bat` also creates them. If you ever need to do it by hand:
 
-```bat
-setup.bat
 ```
-
-It creates the venv, installs runtime + packaging dependencies, copies `.env.example` → `.env`, creates the runtime folders, and runs `pyinstaller attendance_app.spec --clean`. Because it always builds the `.exe`, use the manual steps above when you just want to iterate on code.
+mkdir dataset instance uploads trained_model logs
+```
 
 ---
 
-## ▶ Running the Application
+## 8. ▶ Running the Application
 
 ### 🧪 Development mode
 
-```bash
+```
 # Windows (cmd)
 set FLASK_ENV=development
 python app.py
@@ -345,9 +429,11 @@ $env:FLASK_ENV="development"
 python app.py
 ```
 
+Always run it from inside the activated venv (`venv\Scripts\activate`). Or just choose **1** in the `setup.bat` menu.
+
 Expected console output:
 
-```text
+```
 ==================================================
 [LICENSE] Checking license status...
 ==================================================
@@ -361,18 +447,21 @@ Expected console output:
 ==================================================
 ```
 
+Stop the app any time with **Ctrl + C**.
+
 ### 🌐 Open in the browser
 
-**➡ http://127.0.0.1:5000/** (opens automatically; set `SKIP_BROWSER_AUTOLAUNCH=true` to disable)
+**➡ <http://127.0.0.1:5000/>** (opens automatically; set `SKIP_BROWSER_AUTOLAUNCH=true` to disable)
 
 | URL | Purpose |
-|---|---|
+| --- | --- |
 | `/` | Public kiosk attendance screen |
 | Admin / Employee login | One click away from the kiosk page |
 | Setup Wizard | Shown automatically until the first Admin exists |
 
 ### 🧙 First-run Setup Wizard
-1. Create the first **Admin** account.
+
+1. Create the first **Admin** account (remember this password — write it down).
 2. Enter **Company** details (name, address, logo, contact).
 3. Set default **office timing / working hours** (editable later in Settings).
 
@@ -382,9 +471,29 @@ On first run the app creates `instance/attendance.db`, `dataset/`, `uploads/` an
 
 ---
 
-## 🧪 Automated Testing
+## 9. ✅ Check That Everything Works
 
-```bash
+Do this once after setup (and again on a clean PC before delivering to a client). If a step fails, see [section 14](#14--troubleshooting--faqs).
+
+- [ ] The console shows **License valid: Trial mode** and **Face recognition loaded**
+- [ ] The page opens **with styling** (colours, buttons) — if it looks like plain text, run `python scripts\download_vendor_assets.py`
+- [ ] The Setup Wizard finishes and you can **log in as Admin**
+- [ ] You can **add an employee**
+- [ ] **Face registration** works: the camera opens and photos are captured (the first time it downloads the model files, so keep the internet on)
+- [ ] On the kiosk page (`/`) the registered face **marks attendance**
+- [ ] Manual attendance goes to a manager/admin for **approval**
+- [ ] You can run **payroll** for a month
+- [ ] You can **download a payslip PDF** (it asks for a password)
+- [ ] You can download an **admin or employee report PDF**
+- [ ] A **manual backup** downloads from Admin → Settings → Data Backup
+
+> 💡 Automated tests (section 10) use fake camera and AI parts. They do **not** prove that your real camera and real face recognition work. Only the checklist above does.
+
+---
+
+## 10. 🧪 Automated Testing
+
+```
 pip install pytest
 pytest                    # full suite
 pytest -v                 # verbose
@@ -397,9 +506,11 @@ The suite (470+ tests) covers authentication, attendance rules, payroll math, PD
 
 `conftest.py` stubs `cv2`, `mediapipe`, `deepface` and TensorFlow, so tests run **fast, offline, with no GPU or camera**.
 
+**How to read the result:** at the end pytest prints a line such as `470 passed`. If you see `failed`, scroll up to read which test failed and why, and send that text when asking for help.
+
 Optional coverage:
 
-```bash
+```
 pip install pytest-cov
 pytest --cov=. --cov-report=term-missing
 ```
@@ -408,7 +519,7 @@ pytest --cov=. --cov-report=term-missing
 
 ---
 
-## 📦 Building & Packaging (For Developers)
+## 11. 📦 Building & Packaging (For Developers)
 
 Two stages: **PyInstaller** makes the app folder → **Inno Setup** wraps it into a single installer.
 
@@ -418,39 +529,41 @@ Two stages: **PyInstaller** makes the app folder → **Inno Setup** wraps it int
 - [ ] `python scripts/download_vendor_assets.py` has been run
 - [ ] DeepFace weights exist in `%USERPROFILE%\.deepface\weights` (Step 7)
 - [ ] `pytest` passes
-- [ ] Your **own** Ed25519 public key is set in `licensing/license_manager.py` (or via `LICENSE_PUBLIC_KEY_HEX`) — see [License Management](#-license--backup-management)
+- [ ] Your **own** Ed25519 public key is set in `licensing/license_manager.py` (or via `LICENSE_PUBLIC_KEY_HEX`) — see [License Management](#12--license--backup-management)
 - [ ] `console=False` in `attendance_app.spec` for client builds (`True` is only for debugging a build on your own machine)
 - [ ] `upx=False` stays as is (UPX triggers antivirus false-positives)
 - [ ] `installer\app_icon.ico` exists (or comment out the `SetupIconFile` line in the `.iss`)
 
 ### 1️⃣ Install build tools
 
-```bash
+```
 pip install -r requirements-packaging.txt      # PyInstaller + hooks-contrib
 ```
 
 ### 2️⃣ Build the `.exe` with PyInstaller
 
-```bash
+```
 pyinstaller attendance_app.spec --clean
 ```
 
+(Or choose **2** in the `setup.bat` menu — it installs the build tools, tries to pre-download the face weights and builds.)
+
 Look for this line in the build output:
 
-```text
+```
 [spec] Bundling DeepFace weights from: C:\Users\you\.deepface\weights
 ```
 
 If you see `WARNING: DeepFace weights folder not found`, **stop** — the build will try to download weights on the client PC. If weights live elsewhere:
 
-```bash
+```
 set DEEPFACE_WEIGHTS_DIR=C:\path\to\.deepface\weights
 pyinstaller attendance_app.spec --clean
 ```
 
 Output (a **onedir** build — ship the whole folder, not just the exe):
 
-```text
+```
 dist/
 └── AttendancePayrollSystem/
     ├── AttendancePayrollSystem.exe
@@ -458,13 +571,15 @@ dist/
     └── deepface_weights/ + bundled Python runtime & DLLs
 ```
 
+> ℹ️ The spec file itself states that it has not yet been verified end-to-end on a real build. Treat the checklist at the bottom of `attendance_app.spec` as mandatory, and test the result on another PC (next step).
+
 ### 3️⃣ Verify the build away from your dev PC
 
-Copy `dist\AttendancePayrollSystem\` to a different folder or (ideally) a clean VM with **no Python**, then run through the checklist at the bottom of `attendance_app.spec`: first-run DB creation, Setup Wizard, scheduler, face capture, PDF/email, antivirus behaviour.
+Copy `dist\AttendancePayrollSystem\` to a different folder or (ideally) a clean VM with **no Python**, then run through the checklist at the bottom of `attendance_app.spec` and [section 9](#9--check-that-everything-works): first-run DB creation, Setup Wizard, scheduler, face capture, PDF/email, antivirus behaviour.
 
 **Also confirm your private licensing key was not bundled:**
 
-```bash
+```
 dir /s /b dist\*.pem
 ```
 
@@ -477,16 +592,19 @@ This must print nothing.
 3. Compile — either:
    - **GUI:** open `installer\AttendancePayrollSystem.iss` → **Build ▸ Compile**, or
    - **Command line:**
-     ```bat
-     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AttendancePayrollSystem.iss
-     ```
+
+```
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AttendancePayrollSystem.iss
+```
+
 4. Your installer appears at:
 
-```text
+```
 installer\Output\AttendancePayrollSystem-Setup-1.0.0.exe
 ```
 
 **What the installer does:**
+
 - Installs per-user to `%LOCALAPPDATA%\AttendancePayrollSystem` — **no admin rights / UAC prompt**, and the app can write its database and photos there.
 - Adds a Start Menu group, an optional Desktop shortcut, and an "Add or Remove Programs" entry.
 - **Uninstall keeps customer data** (database, uploads, dataset, `.env`, logs) on purpose, so a reinstall never wipes payroll history.
@@ -497,7 +615,7 @@ To bump the version, edit `MyAppVersion` in the `.iss` file.
 
 ---
 
-## 🔑 License & Backup Management
+## 12. 🔑 License & Backup Management
 
 ### 🔐 How licensing works
 
@@ -507,7 +625,7 @@ Each license token is bound to the customer's **machine fingerprint** (a SHA-256
 
 **On every start, the app decides in this order:**
 
-```text
+```
 Valid signed license found?  ──yes──►  Start normally
         │ no
         ▼
@@ -523,17 +641,25 @@ The license token is read from the `LICENSE_TOKEN` environment variable, or from
 
 **One-time setup — create your keypair:**
 
-```bash
+```
 python licensing/keygen.py init-keys
 ```
 
-This writes `licensing/vendor_private_key.pem` and prints a **public-key hex**. Paste that hex into `LICENSE_PUBLIC_KEY_HEX` in `licensing/license_manager.py` (or set it as an environment variable) **before building any customer release**.
+Then create the vendor portal settings file (`setup.bat` already does this for you; manually it is):
+
+```
+copy licensing\.env.vendor.example licensing\.env.vendor
+```
+
+Fill in your Razorpay keys, email settings and `VENDOR_ADMIN_PASSWORD` in `licensing\.env.vendor` **only on your vendor server**. This file is git-ignored and is never bundled into customer builds. For local testing without Razorpay set `VENDOR_DEV_MODE=true` and run `python -m licensing.vendor_app`.
+
+Back to the keys: the command above writes `licensing/vendor_private_key.pem` and prints a **public-key hex**. Paste that hex into `LICENSE_PUBLIC_KEY_HEX` in `licensing/license_manager.py` (or set it as an environment variable) **before building any customer release**.
 
 > 🚨 **Never ship, email or commit `vendor_private_key.pem`.** Anyone holding it can issue unlimited licenses. Keep an offline backup. Regenerating it invalidates every license already issued. It is already listed in `.gitignore`, together with `license.lic` and `license_keys_log.txt`.
 
 **Issuing a license for a customer:**
 
-```bash
+```
 python licensing/keygen.py issue <MACHINE_FINGERPRINT> "Customer Name" --days 365 --edition pro
 ```
 
@@ -555,7 +681,7 @@ The `licensing/` folder also contains a vendor-side customer database, email dis
 ### 💾 Backups
 
 | Type | When | Where |
-|---|---|---|
+| --- | --- | --- |
 | ⏰ **Automated weekly backup** | Every **Sunday at 02:00** while the app is running | `uploads/backups/automated_backup_<YYYYMMDD_HHMMSS>.zip` |
 | 🖱 **Manual backup** | Any time: **Admin → Settings → Data Backup → Backup Now** | Downloaded through the browser as `attendance_backup_<timestamp>.zip` |
 
@@ -569,7 +695,7 @@ The `licensing/` folder also contains a vendor-side customer database, email dis
 
 ---
 
-## 🚚 Deploying to a Client Machine
+## 13. 🚚 Deploying to a Client Machine
 
 1. Give the client `AttendancePayrollSystem-Setup-<version>.exe` (built above).
 2. They run it (no admin rights needed) and launch the app from the Start Menu.
@@ -579,7 +705,7 @@ The `licensing/` folder also contains a vendor-side customer database, email dis
 
 ### Where things live on the client
 
-```text
+```
 %LOCALAPPDATA%\AttendancePayrollSystem\
 ├── AttendancePayrollSystem.exe
 ├── .env                     ← secrets, SMTP, encryption key  (back up!)
@@ -595,95 +721,110 @@ The `licensing/` folder also contains a vendor-side customer database, email dis
 
 ---
 
-## 🩺 Troubleshooting & FAQs
+## 14. 🩺 Troubleshooting & FAQs
 
-<details>
-<summary><b>🔑 The app closes immediately with "LICENSE VALIDATION FAILED"</b></summary>
+### Setup problems
+
+**🐍 `setup.bat` says "Python 3.10 was not found"**
+
+Install Python 3.10.11 from python.org and tick **"Add Python to PATH"**. Python 3.11, 3.12 and 3.13 will **not** work with TensorFlow 2.15. Check with `py -3.10 --version`.
+
+**📦 `pip install -r requirements.txt` fails (especially on tensorflow)**
+
+You are probably not on Python 3.10 or not on 64-bit Windows. Delete the `venv` folder and run `setup.bat` again. Also make sure you have enough free disk space (about 5 GB) and a stable internet connection.
+
+**🚫 `python -c "import cv2, tensorflow, ..."` fails**
+
+Check `python --version` is 3.10.x, use a fresh venv, and make sure `numpy` is 1.26.4 (not 2.x) and only `opencv-contrib-python` is installed:
+
+```
+pip uninstall -y opencv-python opencv-python-headless
+pip install --force-reinstall --no-deps opencv-contrib-python==4.8.1.78
+```
+
+Fix this before attempting any PyInstaller build.
+
+**📝 The install shows "112 packages" but my `requirements.txt` is much shorter**
+
+Normal. TensorFlow, DeepFace and MediaPipe depend on many other packages, and pip lists all of them.
+
+**🎨 The pages look plain / unstyled**
+
+The UI files in `static\vendor\` are not stored in GitHub. Run `python scripts\download_vendor_assets.py` (it needs internet). `setup.bat` does this for you.
+
+### Licensing
+
+**🔑 The app closes immediately with "LICENSE VALIDATION FAILED"**
 
 The trial has ended (or the license is invalid/expired) and no valid license was found. Note the **machine fingerprint** printed in the message, send it to the vendor, and place the returned token in `license.lic` next to the exe (or set `LICENSE_TOKEN`). A token issued for a different PC, or signed by a different key than the one built into the app, will not verify.
-</details>
 
-<details>
-<summary><b>🔑 "License activation failed" when pasting a token</b></summary>
+**🔑 "License activation failed" when pasting a token**
 
 - Paste the **entire** token (`xxxx.yyyy`, no spaces or line breaks).
 - The token must be issued for **this machine's** fingerprint.
 - The app's public key must match the vendor private key used to sign it (`LICENSE_PUBLIC_KEY_HEX`).
 - Check whether the license has expired.
-</details>
 
-<details>
-<summary><b>🔒 <code>unable to open database file</code> / photos or payslips not saving</b></summary>
+### Files, camera and face recognition
+
+**🔒 `unable to open database file` / photos or payslips not saving**
 
 The app is installed in a write-protected folder (e.g. `Program Files`). Reinstall to `%LOCALAPPDATA%\AttendancePayrollSystem\` (the installer's default). Running as Administrator is a last resort only.
-</details>
 
-<details>
-<summary><b>📷 Camera doesn't open / black preview</b></summary>
+**📷 Camera doesn't open / black preview**
 
 1. **Settings ▸ Privacy & security ▸ Camera** → enable **"Let desktop apps access your camera"**.
 2. Close Zoom / Teams / the Windows Camera app — only one program can use the camera.
 3. On PCs with multiple cameras, the wrong device index may be used (`cv2.VideoCapture(0)` vs `1`); adjust `FaceCapture.start_capture()` in `ai_engine.py`.
 4. If the Windows Camera app also fails, it's a driver problem.
-</details>
 
-<details>
-<summary><b>🐌 First face registration hangs or fails on an offline PC</b></summary>
+**🐌 First face registration is slow, hangs or fails**
 
-The build didn't include DeepFace weights. Rebuild after populating `%USERPROFILE%\.deepface\weights` (Step 7) and confirm the `[spec] Bundling DeepFace weights` line appears.
-</details>
+On a normal PC it is downloading the model files (about 100 to 300 MB). Keep the internet on and wait. On an **offline PC** the build didn't include DeepFace weights: rebuild after populating `%USERPROFILE%\.deepface\weights` (Step 7) and confirm the `[spec] Bundling DeepFace weights` line appears.
 
-<details>
-<summary><b>⏰ Payroll / auto-logout / backups didn't run</b></summary>
+### Scheduler and operations
+
+**⏰ Payroll / auto-logout / backups didn't run**
 
 1. Check the logs for `Payroll scheduler started`, `DAILY APPROVAL SCHEDULER REGISTERED - 23:59`, and `AUTOMATED BACKUP SCHEDULER REGISTERED`. If missing, look for `Failed to start scheduler:`.
 2. The scheduler only runs **while the exe is running** — there is no background service. Closing the browser tab does *not* stop the app; closing the exe does.
 3. If the PC was **off or asleep** at the scheduled time the job is skipped. Payroll and approvals are backfilled on next start (`PAYROLL RECONCILIATION CHECK` in the log); **backups are not backfilled**, so use **Backup Now** if a Sunday was missed.
 4. In a custom PyInstaller spec, keep `copy_metadata('APScheduler')` — removing it makes the scheduler fail silently.
-</details>
 
-<details>
-<summary><b>🛡 Windows Defender / SmartScreen blocks the exe</b></summary>
+**✉️ Payslip emails are not sent**
 
-Very common for PyInstaller apps bundling TensorFlow/OpenCV. In order of effectiveness: **code-sign** the exe/installer; keep `upx=False`; submit the file to [Microsoft for analysis](https://www.microsoft.com/en-us/wdsi/filesubmission); as a stopgap, have IT add an exclusion for the install folder.
-</details>
+Fill in the `MAIL_*` settings in `.env`. For Gmail use an **App Password**, not your normal password. Everything else works without email.
 
-<details>
-<summary><b>💥 <code>ModuleNotFoundError</code> / <code>DLL load failed</code> only in the built exe</b></summary>
-
-A hidden import or data file wasn't bundled. Ensure `pyinstaller-hooks-contrib` is installed, add the missing module to `hiddenimports` in `attendance_app.spec`, rebuild with `--clean`, and temporarily set `console=True` **on your own machine** to see the traceback.
-</details>
-
-<details>
-<summary><b>🚫 <code>python -c "import cv2, tensorflow, ..."</code> fails</b></summary>
-
-Check `python --version` is 3.10.x, use a fresh venv, and make sure `numpy` is 1.26.4 (not 2.x) and only `opencv-contrib-python` is installed. Fix this before attempting any PyInstaller build.
-</details>
-
-<details>
-<summary><b>❓ The exe keeps running after I close the browser tab</b></summary>
+**❓ The exe keeps running after I close the browser tab**
 
 Expected — the Flask server and scheduler run inside the exe. End the `AttendancePayrollSystem.exe` process (Task Manager) to fully quit.
-</details>
 
-<details>
-<summary><b>❓ Can I use MySQL instead of SQLite?</b></summary>
+### Packaging
+
+**🛡 Windows Defender / SmartScreen blocks the exe**
+
+Very common for PyInstaller apps bundling TensorFlow/OpenCV. In order of effectiveness: **code-sign** the exe/installer; keep `upx=False`; submit the file to [Microsoft for analysis](https://www.microsoft.com/en-us/wdsi/filesubmission); as a stopgap, have IT add an exclusion for the install folder.
+
+**💥 `ModuleNotFoundError` / `DLL load failed` only in the built exe**
+
+A hidden import or data file wasn't bundled. Ensure `pyinstaller-hooks-contrib` is installed, add the missing module to `hiddenimports` in `attendance_app.spec`, rebuild with `--clean`, and temporarily set `console=True` **on your own machine** to see the traceback.
+
+### Other questions
+
+**❓ Can I use MySQL instead of SQLite?**
 
 Yes. Set `DATABASE_URL=mysql+pymysql://user:password@host/dbname` in `.env`. Note that the built-in backup zips only include the SQLite file, so back up a MySQL database with your own tooling.
-</details>
 
-<details>
-<summary><b>❓ Can I change the port (5000)?</b></summary>
+**❓ Can I change the port (5000)?**
 
 The host/port are set in the `__main__` block of `app.py` (`SERVER_HOST`, `SERVER_PORT`).
-</details>
 
 ---
 
-## 🗂 Project Structure
+## 15. 🗂 Project Structure
 
 | Path | Purpose |
-|---|---|
+| --- | --- |
 | `app.py` | Flask app factory, blueprint registration, startup block (license check → face model → server) |
 | `launcher.py` | PyInstaller entry point that runs `app.py` |
 | `config.py` | Environment-aware config, frozen-safe `BASE_DIR`, logging |
@@ -695,32 +836,30 @@ The host/port are set in the `__main__` block of `app.py` (`SERVER_HOST`, `SERVE
 | `crypto_utils.py` | Encryption for face photos and payslip passwords |
 | `pdf_generator.py` · `email_service.py` | PDF payslips/reports (AES-256), SMTP delivery |
 | `scheduler_service.py` | APScheduler: payroll, auto-logout, weekly backup, reconciliation |
+| `backup_manager.py` | Backup creation and cleanup |
 | `services/` | Admin reports, approvals, attendance calculator & stats |
 | `licensing/` | Ed25519 license verification, **vendor-only** `keygen.py`, customer DB and guides |
 | `installer/` | Inno Setup script (`.iss`), icon and instructions |
 | `scripts/download_vendor_assets.py` | Downloads offline UI assets |
 | `attendance_app.spec` | PyInstaller build specification |
-| `setup.bat` | One-click environment setup + `.exe` build |
-| `templates/` · `static/` | Jinja2 views and CSS/JS/images |
+| `setup.bat` | One-click environment setup with a menu: run the app or build the `.exe` |
+| `templates/` · `static/` | Jinja2 views and CSS/JS/images (`static/vendor/` is filled by the download script) |
 | `tests/` · `conftest.py` | pytest suite with stubbed ML layer |
 | `instance/` · `dataset/` · `uploads/` · `trained_model/` · `logs/` | Runtime data (git-ignored) |
 | `requirements.txt` · `requirements-packaging.txt` | Runtime vs build-only dependencies |
+| `.env.example` | Template for your `.env` settings file |
 
 ---
 
-## 🤝 Contributing & Support
+## 16. 🤝 Contributing & Support
 
 1. ✅ Confirm `pytest` passes on a clean checkout before you start.
 2. 🔁 Run the relevant test module often while developing (`pytest tests/test_<area>.py -v`).
 3. 🧪 Run the full suite before opening a PR; if you touched packaging, walk the [pre-build checklist](#-pre-build-checklist) and make a test build.
-4. 🐞 When reporting an issue include: exact console output/log lines, whether it happens in `python app.py` or **only** in the packaged exe, and what you already tried from [Troubleshooting](#-troubleshooting--faqs).
+4. 🐞 When reporting an issue include: exact console output/log lines, whether it happens in `python app.py` or **only** in the packaged exe, and what you already tried from [Troubleshooting](#14--troubleshooting--faqs).
 
 **Author:** Vaishnavi Maruti Lekawale · **Repository:** [AI-Attendance-Payroll-System](https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System)
 
 ---
 
-<div align="center">
-
 **AI Attendance & Payroll System** — built with ❤️ using Flask, DeepFace and Python.
-
-</div>
