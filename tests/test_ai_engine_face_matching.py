@@ -425,7 +425,10 @@ class TestRecognizeFace:
         assert len(results) == 1
         assert results[0]['name'] == 'Unknown'
 
-    def test_target_employee_id_filters_to_single_candidate(self, engine, monkeypatch, dataset_and_model_dirs):
+    def test_target_employee_id_still_compares_against_everyone(self, engine, monkeypatch, dataset_and_model_dirs):
+        # Employee-login check: the result is only ever employee '1' (or Unknown),
+        # but employee 2's photo MUST also be compared, so a face that is closer to
+        # somebody else can no longer pass as the logged-in employee.
         dataset_dir, _ = dataset_and_model_dirs
         _make_employee_photo(dataset_dir, '1', 'a.jpg')
         _make_employee_photo(dataset_dir, '2', 'a.jpg')
@@ -436,7 +439,8 @@ class TestRecognizeFace:
         fake_deepface = MagicMock()
         fake_deepface.represent.side_effect = [
             [{'embedding': [1.0, 0.0], 'facial_area': {'x': 0, 'y': 0, 'w': 100, 'h': 100}}],
-            [{'embedding': [1.0, 0.0]}],  # only employee '1' should ever be checked
+            [{'embedding': [1.0, 0.0]}],   # employee 1's photo
+            [{'embedding': [0.0, 1.0]}],   # employee 2's photo (far away)
         ]
         monkeypatch.setattr(ai_engine, 'DeepFace', fake_deepface)
 
@@ -444,9 +448,8 @@ class TestRecognizeFace:
 
         assert len(results) == 1
         assert results[0]['employee_id'] == '1'
-        # represent() called exactly twice: once for the frame, once for
-        # employee 1's single stored photo - employee 2 was never touched.
-        assert fake_deepface.represent.call_count == 2
+        # frame + one stored photo per enrolled employee
+        assert fake_deepface.represent.call_count == 3
 
     def test_explicit_tolerance_argument_is_capped_at_strict_max(self, engine, monkeypatch, dataset_and_model_dirs):
         dataset_dir, _ = dataset_and_model_dirs

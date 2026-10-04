@@ -1,55 +1,57 @@
 """
 Licensing Package
 
-This package contains all licensing and customer management modules for the
-AI Attendance & Payroll System.
+Two halves live here, and they run in DIFFERENT places:
 
-Modules:
-- license_manager: Machine fingerprinting and license validation
-- keygen: License key generation tool (vendor use)
-- customer_models: Customer database schema (vendor-side only)
-- customer_service: Customer CRUD operations (vendor-side only)
-- license_email_service: License key email dispatch (vendor-side only)
-- customer_routes: Vendor API endpoints (vendor-side only)
+CUSTOMER side (ships inside the packaged attendance application)
+    license_manager   machine fingerprint, Ed25519 token verification,
+                      tamper-resistant 30-day trial, clock-rollback detection
+    client_security   the startup gate + "License Activation" lock screen
+                      that blocks the whole app once the trial has ended
 
-NOTE: Customer management modules (customer_models, customer_service, 
-license_email_service, customer_routes) are for the VENDOR PORTAL only.
-They should NOT be imported in the main attendance application.
-The customer database is initialized separately in the vendor portal.
+VENDOR side (runs on YOUR server only - exclude from customer builds)
+    keygen                 Ed25519 private-key signing tool
+    plans                  Monthly / Yearly / Lifetime prices and expiry rules
+    payment_gateway        Razorpay adapter (orders + signature checks)
+    customer_models        customers.db (customers + orders)
+    customer_service       purchase -> webhook -> licence -> email logic
+    license_email_service  licence delivery by email
+    customer_routes        password-protected admin API
+    vendor_app             the public purchase portal + payment webhook
+
+Importing this package deliberately imports NOTHING heavy. In particular the
+customer application must never import (or even contain) the vendor-side
+modules, and the vendor server must not drag in the attendance app's config.
+The names below are loaded lazily on first access.
 """
 
-from .license_manager import LicenseManager, get_license_manager, check_license_on_startup
+_LAZY = {
+    # customer side
+    'LicenseManager': ('.license_manager', 'LicenseManager'),
+    'get_license_manager': ('.license_manager', 'get_license_manager'),
+    'check_license_on_startup': ('.license_manager', 'check_license_on_startup'),
+    'init_license_gate': ('.client_security', 'init_license_gate'),
+    # vendor side
+    'Customer': ('.customer_models', 'Customer'),
+    'Order': ('.customer_models', 'Order'),
+    'init_customer_db': ('.customer_models', 'init_customer_db'),
+    'get_customer_session': ('.customer_models', 'get_customer_session'),
+    'CustomerService': ('.customer_service', 'CustomerService'),
+    'get_customer_service': ('.customer_service', 'get_customer_service'),
+    'LicenseEmailService': ('.license_email_service', 'LicenseEmailService'),
+    'get_license_email_service': ('.license_email_service', 'get_license_email_service'),
+    'vendor_bp': ('.customer_routes', 'vendor_bp'),
+}
 
-# Customer management modules are vendor-side only
-# Import them conditionally to avoid database initialization issues in frozen builds
-try:
-    from .customer_models import Customer, init_customer_db, get_customer_session
-    from .customer_service import CustomerService, get_customer_service
-    from .license_email_service import LicenseEmailService, get_license_email_service
-    from .customer_routes import vendor_bp
-    
-    _customer_modules_available = True
-except Exception as e:
-    # Customer modules failed to load (likely database path issue in frozen build)
-    # This is expected in the main attendance application
-    _customer_modules_available = False
-    print(f"[licensing] Customer modules not loaded (expected in main app): {e}")
+__all__ = sorted(_LAZY)
 
-__all__ = [
-    'LicenseManager',
-    'get_license_manager',
-    'check_license_on_startup',
-]
 
-# Only export customer modules if they loaded successfully
-if _customer_modules_available:
-    __all__.extend([
-        'Customer',
-        'init_customer_db',
-        'get_customer_session',
-        'CustomerService',
-        'get_customer_service',
-        'LicenseEmailService',
-        'get_license_email_service',
-        'vendor_bp',
-    ])
+def __getattr__(name):
+    try:
+        module_name, attr = _LAZY[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    import importlib
+    value = getattr(importlib.import_module(module_name, __name__), attr)
+    globals()[name] = value
+    return value

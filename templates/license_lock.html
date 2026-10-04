@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>License Activation - AI Attendance System</title>
+{# Fully self-contained on purpose: no CDN, no app CSS - this screen must render offline and while the app is locked. #}
+<style>
+  :root {
+    --ink:#0f172a; --muted:#64748b; --faint:#94a3b8; --border:#e2e8f0; --border-strong:#cbd5e1;
+    --accent:#4f46e5; --accent-hover:#4338ca; --accent-soft:#eef2ff;
+    --ok:#0f9d58; --ok-soft:#e7f6ee; --err:#c62828; --err-soft:#fdecec; --warn:#b26a00; --warn-soft:#fff4e0;
+    --card:#ffffff; --bg1:#f1f5f9; --bg2:#e2e8f0; --code-bg:#f8fafc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink:#eceef7; --muted:#9aa3bd; --faint:#6e7794; --border:#2b3047; --border-strong:#3a4163;
+            --accent:#7c83ff; --accent-hover:#9aa0ff; --accent-soft:#23274a; --card:#1a1d2b; --bg1:#11131c; --bg2:#171a27;
+            --code-bg:#12141f; --err-soft:#3a1c1f; --ok-soft:#14301f; --warn-soft:#3a2b10; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
+         background:linear-gradient(135deg,var(--bg1),var(--bg2)); color:var(--ink);
+         font-family:'Inter','Segoe UI',system-ui,-apple-system,Roboto,sans-serif; line-height:1.5; }
+  .card { width:100%; max-width:560px; background:var(--card); border:1px solid var(--border); border-radius:16px;
+          box-shadow:0 20px 35px -10px rgba(0,0,0,.14),0 10px 15px -5px rgba(0,0,0,.07); padding:34px 34px 28px;
+          animation:rise .35s cubic-bezier(.16,1,.3,1); }
+  @keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+  @media (max-width:520px) { .card { padding:24px 18px; } }
+  .lock { width:56px; height:56px; border-radius:16px; display:grid; place-items:center; margin:0 0 16px;
+          background:var(--accent-soft); color:var(--accent); }
+  .lock.ok { background:var(--ok-soft); color:var(--ok); }
+  .lock svg { width:28px; height:28px; }
+  h1 { font-size:24px; margin:0 0 6px; letter-spacing:-.01em; }
+  .reason { color:var(--muted); margin:0 0 4px; }
+  .banner { border-radius:10px; padding:10px 14px; font-size:14px; margin:14px 0 0; }
+  .banner.warn { background:var(--warn-soft); color:var(--warn); }
+  .banner.ok { background:var(--ok-soft); color:var(--ok); }
+
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.07em; color:var(--faint); margin:26px 0 8px; font-weight:700; }
+  .fp-row { display:flex; gap:8px; align-items:stretch; }
+  .fp { flex:1; min-width:0; font-family:ui-monospace,'Cascadia Mono',Consolas,monospace; font-size:12.5px; word-break:break-all;
+        background:var(--code-bg); border:1px solid var(--border); border-radius:10px; padding:10px 12px; user-select:all; }
+  button, .btn { font:inherit; cursor:pointer; }
+  .copy { flex:none; padding:0 16px; border-radius:10px; border:1px solid var(--border-strong); background:var(--card); color:var(--ink); font-weight:600; font-size:14px;
+          transition:background .15s,border-color .15s; }
+  .copy:hover { border-color:var(--accent); color:var(--accent); }
+  .copy.done { background:var(--ok-soft); border-color:var(--ok); color:var(--ok); }
+  .help { font-size:13px; color:var(--muted); margin:8px 0 0; }
+
+  .buy { display:block; text-align:center; margin-top:14px; text-decoration:none; padding:12px; border-radius:10px; font-weight:700;
+         background:var(--accent-soft); color:var(--accent); border:1px solid transparent; transition:border-color .15s; }
+  .buy:hover { border-color:var(--accent); }
+
+  textarea { width:100%; min-height:96px; resize:vertical; font-family:ui-monospace,'Cascadia Mono',Consolas,monospace; font-size:12.5px;
+             background:var(--code-bg); color:var(--ink); border:1px solid var(--border-strong); border-radius:10px; padding:10px 12px; word-break:break-all; }
+  textarea:focus, button:focus-visible, .buy:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  .activate { width:100%; margin-top:12px; padding:14px; border:0; border-radius:10px; background:var(--accent); color:#fff; font-weight:700; font-size:16px;
+              transition:background .15s; }
+  .activate:hover { background:var(--accent-hover); }
+  .activate:disabled { opacity:.65; cursor:wait; }
+  .result { display:none; margin-top:12px; padding:11px 14px; border-radius:10px; font-size:14px; }
+  .result.show { display:block; }
+  .result.err { background:var(--err-soft); color:var(--err); }
+  .result.ok { background:var(--ok-soft); color:var(--ok); }
+  .foot { margin-top:22px; padding-top:16px; border-top:1px solid var(--border); font-size:13px; color:var(--muted); text-align:center; }
+  .foot a { color:var(--accent); }
+  .skip { display:inline-block; margin-top:10px; }
+</style>
+</head>
+<body>
+<main class="card">
+  {% set locked = (state.mode == 'locked') %}
+  <div class="lock {{ '' if locked else 'ok' }}" aria-hidden="true">
+    {% if locked %}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+    {% else %}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>
+    {% endif %}
+  </div>
+
+  {% if locked %}
+    <h1>{{ state.lock_title or 'License Activation required' }}</h1>
+    <p class="reason">{{ state.lock_reason }}</p>
+  {% elif state.mode == 'licensed' %}
+    <h1>License active</h1>
+    <p class="reason">
+      {% if state.customer_name %}Licensed to <strong>{{ state.customer_name }}</strong>.{% endif %}
+      {% if state.expires_at %}Valid until <strong>{{ state.expires_at[:10] }}</strong>{% if state.days_remaining is not none %} ({{ state.days_remaining }} day{{ '' if state.days_remaining == 1 else 's' }} left){% endif %}.
+      {% else %}This is a lifetime license.{% endif %}
+    </p>
+  {% else %}
+    <h1>Free trial</h1>
+    <p class="reason">You are using the full-featured trial. Activate a license any time to keep using the application after it ends.</p>
+    <div class="banner warn">{{ state.days_remaining }} day{{ '' if state.days_remaining == 1 else 's' }} of your trial remaining.</div>
+  {% endif %}
+
+  <h2>Your Machine Fingerprint</h2>
+  <div class="fp-row">
+    <div class="fp" id="fp" aria-label="Machine fingerprint">{{ fingerprint }}</div>
+    <button type="button" class="copy" id="copy-btn">Copy</button>
+  </div>
+  <p class="help">This code identifies this computer. Your license key is created for this code and will only work here.</p>
+
+  {% if purchase_url %}
+    <a class="buy" href="{{ purchase_url }}" target="_blank" rel="noopener">Buy a license &rarr;</a>
+  {% endif %}
+
+  <h2>Activate your license</h2>
+  <form id="activate-form" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="license_key" style="display:none">License key</label>
+    <textarea id="license_key" name="license_key" spellcheck="false" placeholder="Paste your license key here" required></textarea>
+    <button type="submit" class="activate" id="activate-btn">Activate</button>
+    <div id="result" class="result" role="alert"></div>
+  </form>
+  <p class="help">Already have a <code>{{ license_file_name }}</code> file? Put it in the application's folder (next to the .exe) and refresh this page.</p>
+
+  <div class="foot">
+    {% if support_email %}Need help? <a href="mailto:{{ support_email }}">{{ support_email }}</a>{% else %}Need help? Contact your software vendor.{% endif %}
+    {% if not locked %}<br><a class="skip" href="/">&larr; Back to the application</a>{% endif %}
+  </div>
+</main>
+
+<script>
+(function () {
+  var fpText = document.getElementById('fp').textContent.trim();
+  var copyBtn = document.getElementById('copy-btn');
+  var form = document.getElementById('activate-form');
+  var box = document.getElementById('license_key');
+  var btn = document.getElementById('activate-btn');
+  var result = document.getElementById('result');
+
+  function flashCopied(ok) {
+    copyBtn.textContent = ok ? 'Copied ✓' : 'Press Ctrl+C';
+    copyBtn.className = 'copy' + (ok ? ' done' : '');
+    setTimeout(function () { copyBtn.textContent = 'Copy'; copyBtn.className = 'copy'; }, 2000);
+  }
+  function fallbackCopy() {
+    var ta = document.createElement('textarea');
+    ta.value = fpText; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+    if (!ok) { var r = document.createRange(); r.selectNodeContents(document.getElementById('fp'));
+               var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+    flashCopied(ok);
+  }
+  copyBtn.addEventListener('click', function () {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(fpText).then(function () { flashCopied(true); }, fallbackCopy);
+    } else { fallbackCopy(); }
+  });
+
+  function show(kind, text) { result.className = 'result show ' + kind; result.textContent = text; }
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var key = box.value.replace(/\s+/g, '');
+    if (!key) { show('err', 'Please paste your license key first.'); return; }
+    btn.disabled = true; btn.textContent = 'Checking…'; result.className = 'result';
+
+    fetch('/license/activate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRFToken': form.csrf_token.value, 'Accept': 'application/json'},
+      body: JSON.stringify({license_key: key}),
+      credentials: 'same-origin'
+    })
+    .then(function (r) { return r.json().catch(function () { return {success: false, message: 'Unexpected response (' + r.status + ').'}; }); })
+    .then(function (data) {
+      if (data.success) {
+        show('ok', (data.message || 'License activated.') + ' Opening the application…');
+        btn.textContent = 'Activated ✓';
+        setTimeout(function () { window.location.href = data.redirect || '/'; }, 1200);
+      } else {
+        show('err', data.message || 'That license key could not be activated.');
+        btn.disabled = false; btn.textContent = 'Activate';
+      }
+    })
+    .catch(function () { show('err', 'Could not reach the application. Is it still running?'); btn.disabled = false; btn.textContent = 'Activate'; });
+  });
+})();
+</script>
+</body>
+</html>

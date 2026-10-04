@@ -692,7 +692,11 @@ def attendance():
 
 @attendance_bp.route('/attendance/mark', methods=['POST'])
 @login_required
+@admin_required
 def mark_attendance():
+    # Admin-only: this endpoint trusts the employee_id/confidence it is sent, so it
+    # must never be callable by an employee session (they could mark a colleague
+    # present without any face check). Employees use /api/employee-attendance.
     employee_id = int(request.form.get('employee_id'))
     confidence = float(request.form.get('confidence', 0.0)) if request.form.get('confidence') else None
     

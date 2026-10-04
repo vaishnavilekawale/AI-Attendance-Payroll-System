@@ -210,30 +210,26 @@ def step3_license():
     machine_fingerprint = license_manager.machine_fingerprint
     
     if request.method == 'POST':
-        license_key = request.form.get('license_key', '').strip().upper()
-        
+        # Signed Ed25519 license token (long, case-sensitive) - whitespace from
+        # an email copy/paste is stripped, the case is NOT touched.
+        license_key = ''.join(request.form.get('license_key', '').split()).strip('"\'')
+
         if not license_key:
             # Skip license activation, continue with trial
             flash('Continuing with 30-day trial period.', 'info')
             return redirect(url_for('setup.step4_done'))
-        
-        # Validate license key format
-        if len(license_key) != 16 or not license_key.isalnum():
-            flash('License key must be exactly 16 alphanumeric characters.', 'danger')
-            return render_template('setup_wizard.html', step=3, machine_fingerprint=machine_fingerprint)
-        
-        # Validate license key
-        is_valid, message = license_manager.validate_license_key(license_key)
-        
+
+        is_valid, message = license_manager.activate_license_from_string(license_key)
+
         if is_valid:
-            # Store license key
-            license_manager.store_license_key(license_key)
+            from licensing.client_security import invalidate_access_state
+            invalidate_access_state()
             flash('License activated successfully!', 'success')
             return redirect(url_for('setup.step4_done'))
         else:
             flash(f'License validation failed: {message}', 'danger')
             return render_template('setup_wizard.html', step=3, machine_fingerprint=machine_fingerprint)
-    
+
     return render_template('setup_wizard.html', step=3, machine_fingerprint=machine_fingerprint)
 
 

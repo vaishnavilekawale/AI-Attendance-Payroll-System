@@ -63,8 +63,10 @@ MODEL_NAME = 'Facenet512'
 STRICT_MAX_TOLERANCE = 0.30
 MIN_MATCH_MARGIN = 0.05
 
-# Distance below which we treat a single image comparison as a "certain"
-# match and can stop scanning further images for that employee.
+# Kept only for backwards compatibility (tests / callers import it). It no
+# longer short-circuits matching: stopping at the first employee under this
+# distance made the result depend on list order and skipped the ambiguity
+# margin, which let a second employee be marked for someone else's face.
 EARLY_EXIT_DISTANCE = 0.18
 
 
@@ -885,6 +887,63 @@ class FaceRecognitionEngine:
         return 0
 
 
+    @staticmethod
+    def _suppress_overlapping_faces(face_objs, overlap_threshold=0.5):
+        """
+        Drop duplicate detections of the same face: when two boxes overlap by
+        more than `overlap_threshold` of the SMALLER box, keep the larger one.
+        """
+        def box(obj):
+            fa = obj.get("facial_area", {}) or {}
+            return (fa.get("x", 0), fa.get("y", 0), fa.get("w", 0), fa.get("h", 0))
+
+        ordered = sorted(face_objs, key=lambda o: box(o)[2] * box(o)[3], reverse=True)
+        kept = []
+        for obj in ordered:
+            x, y, w, h = box(obj)
+            area = w * h
+            duplicate = False
+            if area > 0:
+                for other in kept:
+                    ox, oy, ow, oh = box(other)
+                    if ow * oh <= 0:
+                        continue
+                    ix = max(0, min(x + w, ox + ow) - max(x, ox))
+                    iy = max(0, min(y + h, oy + oh) - max(y, oy))
+                    if (ix * iy) / float(min(area, ow * oh)) > overlap_threshold:
+                        duplicate = True
+                        break
+            if not duplicate:
+                kept.append(obj)
+        return kept
+
+    def _load_gallery(self, employee_ids):
+        """
+        Build {employee_id: matrix of L2-normalised embeddings (one row per
+        stored photo)} for the given employees. Employees without usable
+        photos are left out.
+        """
+        gallery = {}
+        for emp_id in employee_ids:
+            emp_folder = os.path.join(Config.DATASET_FOLDER, str(emp_id))
+            if not os.path.exists(emp_folder):
+                continue
+            rows = []
+            for f in sorted(os.listdir(emp_folder)):
+                if not f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    continue
+                emb = get_employee_embedding_cached(emp_id, os.path.join(emp_folder, f))
+                if emb is None:
+                    continue
+                vec = np.array(emb, dtype=float)
+                norm = np.linalg.norm(vec)
+                if norm == 0:
+                    continue
+                rows.append(vec / norm)
+            if rows:
+                gallery[emp_id] = np.stack(rows)
+        return gallery
+
     def recognize_face(self, frame, tolerance=None, target_employee_id=None):
         """
         Recognize every face present in the frame (multi-person aware).
@@ -943,17 +1002,30 @@ class FaceRecognitionEngine:
         if not target_objs:
             return []
 
-        if target_employee_id:
-            if target_employee_id in self.known_face_ids:
-                employees_to_check = [target_employee_id]
-            else:
-                logger.warning(f"Employee not found in list: {target_employee_id}")
-                return []
-        else:
-            employees_to_check = self.known_face_ids
+        if target_employee_id and target_employee_id not in self.known_face_ids:
+            logger.warning(f"Employee not found in list: {target_employee_id}")
+            return []
+
+        # IMPORTANT (wrong-person fix): the live face is ALWAYS compared with
+        # EVERY enrolled employee - also when target_employee_id is given.
+        # Previously a targeted (employee-login) check looked only at the
+        # logged-in employee's photos, so ANY face closer than the tolerance
+        # to those photos was accepted, even if it was obviously someone
+        # else's face; and the untargeted scan stopped at the FIRST employee
+        # (in list order) that came in under EARLY_EXIT_DISTANCE, so a
+        # second, even closer employee was never looked at and the
+        # ambiguity margin was never applied.
+        employees_to_check = list(self.known_face_ids)
+        gallery = self._load_gallery(employees_to_check)
+
+        # One real face must never become two detections (e.g. a Haar false
+        # positive on the same head) - that is how one person got two
+        # different employees marked in the same frame.
+        target_objs = self._suppress_overlapping_faces(target_objs)
 
         frame_area = 640 * 480
         results = []
+        match_distances = []  # parallel to results; distance of a matched face, else None
 
         for face_obj in target_objs:
             facial_area = face_obj.get("facial_area", {})
@@ -968,57 +1040,20 @@ class FaceRecognitionEngine:
                 # area) - not a real face, skip this candidate silently.
                 continue
 
-            target_embedding = np.array(face_obj["embedding"])
+            target_embedding = np.array(face_obj["embedding"], dtype=float)
+            target_norm = np.linalg.norm(target_embedding)
+            if target_norm == 0:
+                continue
+            target_embedding = target_embedding / target_norm
 
-            best_match_id = None
-            min_distance = float("inf")
-            second_min_distance = float("inf")
-            stop_scanning = False
+            # Best (smallest) cosine distance per employee, over ALL photos.
+            per_employee = {}
+            for emp_id, matrix in gallery.items():
+                per_employee[emp_id] = float(1.0 - np.max(matrix @ target_embedding))
+            ranked = sorted(per_employee.items(), key=lambda item: item[1])
 
-            for emp_id in employees_to_check:
-                emp_folder = os.path.join(Config.DATASET_FOLDER, str(emp_id))
-                if not os.path.exists(emp_folder):
-                    continue
-
-                emp_best_distance = float("inf")
-                for f in os.listdir(emp_folder):
-                    if not f.lower().endswith(('.jpg', '.jpeg', '.png')):
-                        continue
-
-                    img_path = os.path.join(emp_folder, f)
-                    cached_emb = get_employee_embedding_cached(emp_id, img_path)
-                    if cached_emb is None:
-                        continue
-
-                    cached_emb = np.array(cached_emb)
-                    distance = 1.0 - (
-                        np.dot(target_embedding, cached_emb) /
-                        (np.linalg.norm(target_embedding) * np.linalg.norm(cached_emb))
-                    )
-
-                    if distance < emp_best_distance:
-                        emp_best_distance = distance
-
-                    if distance < EARLY_EXIT_DISTANCE:
-                        # Certain match against this employee's photo -
-                        # no need to compare the rest of their images.
-                        break
-
-                if emp_best_distance < min_distance:
-                    second_min_distance = min_distance
-                    min_distance = emp_best_distance
-                    best_match_id = emp_id
-                elif emp_best_distance < second_min_distance:
-                    second_min_distance = emp_best_distance
-
-                if min_distance < EARLY_EXIT_DISTANCE:
-                    # Overwhelmingly confident match - safe to stop
-                    # checking the remaining employees for this face.
-                    stop_scanning = True
-                    break
-
-                if stop_scanning:
-                    break
+            best_match_id, min_distance = ranked[0] if ranked else (None, float("inf"))
+            second_min_distance = ranked[1][1] if len(ranked) > 1 else float("inf")
 
             name = "Unknown"
             matched_employee_id = None
@@ -1028,20 +1063,28 @@ class FaceRecognitionEngine:
                 second_min_distance == float("inf")
                 or (second_min_distance - min_distance) >= MIN_MATCH_MARGIN
             )
+            # Employee-login check: the person in front of the camera must be
+            # the logged-in employee AND nobody else may look as similar.
+            is_requested_employee = (
+                not target_employee_id or best_match_id == target_employee_id
+            )
 
-            if best_match_id is not None and min_distance < tolerance and has_clear_margin:
+            if (best_match_id is not None and min_distance < tolerance
+                    and has_clear_margin and is_requested_employee):
                 idx = self.known_face_ids.index(best_match_id)
                 name = self.known_face_names[idx]
                 matched_employee_id = best_match_id
                 confidence = max(0.0, min(1.0, 1.0 - min_distance))
                 logger.info(
                     f"Face recognized: {name} (ID: {matched_employee_id}), "
-                    f"confidence: {confidence:.2f}, distance: {min_distance:.3f}"
+                    f"confidence: {confidence:.2f}, distance: {min_distance:.3f}, "
+                    f"runner-up distance: {second_min_distance:.3f}"
                 )
             else:
                 logger.info(
                     f"Face recognition: no confident/unambiguous match "
-                    f"(best distance: {min_distance:.3f}, margin ok: {has_clear_margin})"
+                    f"(best distance: {min_distance:.3f}, margin ok: {has_clear_margin}, "
+                    f"requested employee is best: {is_requested_employee})"
                 )
 
             results.append({
@@ -1050,6 +1093,20 @@ class FaceRecognitionEngine:
                 "confidence": round(confidence, 2),
                 "bbox": bbox
             })
+            match_distances.append(min_distance if matched_employee_id is not None else None)
+
+        # One person can only be in one place: if two faces in the same frame
+        # resolve to the SAME employee, keep the closer one, drop the other.
+        best_for_employee = {}
+        for i, result in enumerate(results):
+            emp = result["employee_id"]
+            if emp is not None and (emp not in best_for_employee
+                                    or match_distances[i] < match_distances[best_for_employee[emp]]):
+                best_for_employee[emp] = i
+        for i, result in enumerate(results):
+            emp = result["employee_id"]
+            if emp is not None and best_for_employee[emp] != i:
+                result.update({"name": "Unknown", "employee_id": None, "confidence": 0.0})
 
         logger.debug(
             f"recognize_face processed {len(results)} face(s) in "

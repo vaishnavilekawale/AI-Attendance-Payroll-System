@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Payment received - License on its way</title>
+<style>
+  :root { --bg:#f5f6fb; --card:#fff; --ink:#1e2235; --muted:#64708a; --line:#e2e6f0; --accent:#4f46e5; --ok:#0f9d58; --warn:#b26a00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#11131c; --card:#1a1d2b; --ink:#eceef7; --muted:#9aa3bd; --line:#2b3047; --accent:#7c83ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--ink);
+         font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif; line-height:1.55; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:34px 28px; max-width:520px; width:100%; text-align:center; }
+  .icon { width:64px; height:64px; border-radius:50%; margin:0 auto 16px; display:grid; place-items:center; font-size:30px; color:#fff; background:var(--accent); }
+  .icon.done { background:var(--ok); }
+  .icon.warn { background:var(--warn); }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  h1 { font-size:24px; margin:0 0 8px; }
+  p { color:var(--muted); margin:6px 0; }
+  .steps { text-align:left; background:var(--bg); border-radius:12px; padding:14px 18px 14px 36px; margin:20px 0 0; color:var(--ink); font-size:14.5px; display:none; }
+  .steps.show { display:block; }
+  .ref { margin-top:22px; font-size:12px; color:var(--muted); word-break:break-all; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<main class="card" aria-live="polite">
+  <div id="icon" class="icon"><span class="spin">&#9696;</span></div>
+  <h1 id="title">Confirming your payment&hellip;</h1>
+  <p id="msg">This usually takes a few seconds. Please keep this page open.</p>
+  <ol id="steps" class="steps">
+    <li>Open the AI Attendance &amp; Payroll System.</li>
+    <li>On the <b>License Activation</b> screen, paste the key from the email into the box.</li>
+    <li>Click <b>Activate</b> - the application unlocks immediately.</li>
+  </ol>
+  <p class="ref">Order reference: {{ order_id }}</p>
+  <p class="ref">Need help? <a href="mailto:{{ support_email }}">{{ support_email }}</a></p>
+</main>
+
+<script>
+(function () {
+  var orderId = {{ order_id|tojson }};
+  var icon = document.getElementById('icon'), title = document.getElementById('title'),
+      msg = document.getElementById('msg'), steps = document.getElementById('steps');
+  var tries = 0, MAX_TRIES = 60;   // ~3 minutes at 3 s
+
+  function paid(s) {
+    icon.className = 'icon done'; icon.textContent = '✓';
+    steps.className = 'steps show';
+    if (s.email_sent) {
+      title.textContent = 'Payment received - check your email';
+      msg.textContent = 'Your license key has been sent to ' + s.email + '. It can take a minute to arrive; check your spam folder too.';
+    } else {
+      title.textContent = 'Payment received';
+      msg.textContent = 'Your license has been issued, but the email is delayed. It will be sent to ' + s.email +
+        ' shortly - if it does not arrive within a few minutes, contact support with the order reference below.';
+    }
+  }
+  function slow() {
+    icon.className = 'icon warn'; icon.textContent = '!';
+    title.textContent = 'Still waiting for the bank';
+    msg.textContent = 'If you were charged, do not pay again - your license will be emailed automatically as soon as the payment is confirmed. Contact support with the reference below if nothing arrives within an hour.';
+  }
+  function poll() {
+    tries++;
+    fetch('/api/order-status/' + encodeURIComponent(orderId))
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.success && s.status === 'paid') { paid(s); return; }
+        if (s.success && s.status === 'failed') {
+          icon.className = 'icon warn'; icon.textContent = '!';
+          title.textContent = 'We could not complete this order';
+          msg.textContent = 'Please contact support with the reference below.'; return;
+        }
+        if (tries >= MAX_TRIES) { slow(); return; }
+        setTimeout(poll, 3000);
+      })
+      .catch(function () { if (tries >= MAX_TRIES) { slow(); } else { setTimeout(poll, 4000); } });
+  }
+  poll();
+})();
+</script>
+</body>
+</html>

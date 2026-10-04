@@ -269,6 +269,13 @@ a = Analysis(
     excludes=[
         # Trim build size/time - these are dev-only, never needed at runtime.
         'pytest', 'pytest_flask',
+        # VENDOR-ONLY licensing modules. They hold or use the Ed25519 PRIVATE
+        # key / payment secrets / customer database and must never ship inside
+        # a customer's .exe. (The app doesn't import them; this is a safety net.)
+        'licensing.keygen', 'licensing.vendor_app', 'licensing.vendor_paths',
+        'licensing.customer_models', 'licensing.customer_service',
+        'licensing.customer_routes', 'licensing.license_email_service',
+        'licensing.payment_gateway', 'licensing.plans',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

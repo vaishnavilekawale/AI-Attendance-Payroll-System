@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buy a License - AI Attendance &amp; Payroll System</title>
+<style>
+  :root {
+    --bg: #f5f6fb; --card: #ffffff; --ink: #1e2235; --muted: #64708a; --line: #e2e6f0;
+    --accent: #4f46e5; --accent-dark: #4338ca; --accent-soft: #eef0ff;
+    --ok: #0f9d58; --err: #c62828; --err-soft: #fdecec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11131c; --card: #1a1d2b; --ink: #eceef7; --muted: #9aa3bd; --line: #2b3047;
+            --accent: #7c83ff; --accent-dark: #9aa0ff; --accent-soft: #23274a; --err-soft: #3a1c1f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; line-height: 1.5; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 16px 56px; }
+  header { padding: 36px 0 8px; }
+  header .brand { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-size: clamp(26px, 4vw, 38px); margin: 6px 0 8px; line-height: 1.15; }
+  header p { color: var(--muted); margin: 0; max-width: 620px; }
+
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 26px 0; padding: 0; list-style: none; counter-reset: s; }
+  .steps li { counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+              padding: 12px 14px; font-size: 14px; color: var(--muted); }
+  .steps li::before { content: counter(s); display: inline-grid; place-items: center; width: 22px; height: 22px;
+                      border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; margin-right: 8px; }
+  .steps b { color: var(--ink); }
+
+  h2 { font-size: 18px; margin: 30px 0 12px; }
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .plan { position: relative; display: block; }
+  .plan input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+  .plan .box { display: block; background: var(--card); border: 2px solid var(--line); border-radius: 16px; padding: 22px 20px; height: 100%;
+               transition: border-color .15s, box-shadow .15s, transform .15s; }
+  .plan:hover .box { border-color: var(--accent); }
+  .plan input:focus-visible + .box { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .plan input:checked + .box { border-color: var(--accent); box-shadow: 0 6px 22px rgba(79,70,229,.18); background: var(--accent-soft); }
+  .plan .name { font-weight: 700; font-size: 16px; }
+  .plan .price { font-size: 34px; font-weight: 800; margin: 8px 0 0; letter-spacing: -.02em; }
+  .plan .per { color: var(--muted); font-size: 13px; }
+  .plan .tag { color: var(--muted); font-size: 13.5px; margin-top: 10px; }
+  .badge { position: absolute; top: -11px; right: 16px; background: var(--ok); color: #fff; font-size: 11px; font-weight: 700;
+           padding: 3px 10px; border-radius: 999px; letter-spacing: .03em; z-index: 1; }
+
+  form.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px; margin-top: 8px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+  @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+  .full { grid-column: 1 / -1; }
+  label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 5px; }
+  input[type=text], input[type=email], input[type=tel], textarea {
+    width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; font: inherit;
+    background: var(--bg); color: var(--ink); }
+  input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  textarea { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; resize: vertical; min-height: 66px; word-break: break-all; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 5px; }
+  .fp-count { float: right; font-variant-numeric: tabular-nums; }
+  .fp-count.ok { color: var(--ok); font-weight: 600; }
+
+  .error { display: none; background: var(--err-soft); color: var(--err); border-radius: 10px; padding: 11px 14px; margin-top: 16px; font-size: 14px; }
+  .error.show { display: block; }
+  button.pay { margin-top: 18px; width: 100%; padding: 15px; border: 0; border-radius: 12px; background: var(--accent); color: #fff;
+               font: inherit; font-weight: 700; font-size: 17px; cursor: pointer; transition: background .15s; }
+  button.pay:hover { background: var(--accent-dark); }
+  button.pay:disabled { opacity: .6; cursor: wait; }
+  .secure { text-align: center; color: var(--muted); font-size: 13px; margin-top: 12px; }
+  .devbar { background: #fff4d6; color: #5c4400; border: 1px solid #f0d27a; border-radius: 10px; padding: 10px 14px; margin: 16px 0 0; font-size: 13.5px; }
+  .unavail { background: var(--err-soft); color: var(--err); border-radius: 10px; padding: 12px 14px; margin-top: 16px; }
+  footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 34px; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">{{ company_name }}</div>
+    <h1>Unlock your AI Attendance &amp; Payroll System</h1>
+    <p>Your 30-day trial includes every feature. Choose a plan, pay securely, and your license key is emailed to you within moments - no waiting for manual approval.</p>
+  </header>
+
+  <ol class="steps">
+    <li><b>Copy your Machine Fingerprint</b> from the application's License Activation screen</li>
+    <li><b>Choose a plan</b> and fill in your details below</li>
+    <li><b>Pay securely</b> - your key arrives by email automatically</li>
+  </ol>
+
+  <form id="buy-form" class="card-wrap" novalidate>
+    <h2>1. Choose your plan</h2>
+    <div class="plans" role="radiogroup" aria-label="Plan">
+      {% for plan in plans %}
+      <label class="plan">
+        {% if plan.code == 'yearly' %}<span class="badge">BEST VALUE</span>{% endif %}
+        <input type="radio" name="plan" value="{{ plan.code }}" data-price="{{ plan.display_price }}" data-name="{{ plan.name }}"
+               {% if plan.code == 'yearly' %}checked{% endif %}>
+        <span class="box">
+          <span class="name">{{ plan.name }}</span><br>
+          <span class="price">{{ plan.display_price }}</span>
+          <span class="per">{{ plan.duration_label }}</span>
+          <div class="tag">{{ plan.tagline }}</div>
+        </span>
+      </label>
+      {% endfor %}
+    </div>
+
+    <h2>2. Your details</h2>
+    <div class="card" style="background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px;">
+      <div class="grid">
+        <div>
+          <label for="name">Full name / company</label>
+          <input id="name" name="name" type="text" autocomplete="name" maxlength="120" required>
+        </div>
+        <div>
+          <label for="email">Email address</label>
+          <input id="email" name="email" type="email" autocomplete="email" maxlength="254" required>
+          <div class="hint">Your license key is sent here.</div>
+        </div>
+        <div>
+          <label for="phone">Phone number</label>
+          <input id="phone" name="phone" type="tel" autocomplete="tel" maxlength="24" placeholder="+91 98765 43210" required>
+        </div>
+        <div class="full">
+          <label for="fingerprint">Machine Fingerprint <span id="fp-count" class="fp-count">0 / 64</span></label>
+          <textarea id="fingerprint" name="machine_fingerprint" spellcheck="false" autocomplete="off"
+                    placeholder="Paste the 64-character code from the application's License Activation screen" required>{{ preset_fingerprint }}</textarea>
+          <div class="hint">Open the application &rarr; the License Activation screen shows this code with a <b>Copy</b> button. The license only works on that computer.</div>
+        </div>
+      </div>
+
+      <div id="error" class="error" role="alert"></div>
+      {% if not gateway_ready %}
+        <div class="unavail">Online payment is not available right now. Please contact {{ support_email }}.</div>
+      {% else %}
+        {% if dev_mode %}<div class="devbar"><b>Developer mode:</b> no real payment is taken. "Pay" simulates a successful payment and runs the real license + email flow.</div>{% endif %}
+        <button id="pay" class="pay" type="submit">Pay securely</button>
+        <div class="secure">Payments are processed by Razorpay. We never see your card details.</div>
+      {% endif %}
+    </div>
+  </form>
+
+  <footer>Questions? <a href="mailto:{{ support_email }}">{{ support_email }}</a></footer>
+</div>
+
+{% if gateway_ready and not dev_mode %}<script src="https://checkout.razorpay.com/v1/checkout.js"></script>{% endif %}
+<script>
+(function () {
+  var form = document.getElementById('buy-form');
+  if (!form) return;
+  var fp = document.getElementById('fingerprint');
+  var count = document.getElementById('fp-count');
+  var errorBox = document.getElementById('error');
+  var payBtn = document.getElementById('pay');
+  var DEV = {{ 'true' if dev_mode else 'false' }};
+
+  function selectedPlan() { return form.querySelector('input[name=plan]:checked'); }
+  function refreshButton() {
+    if (!payBtn) return;
+    var p = selectedPlan();
+    payBtn.textContent = p ? 'Pay ' + p.dataset.price + ' securely' : 'Pay securely';
+  }
+  function cleanFingerprint() { return fp.value.replace(/[^0-9a-fA-F]/g, '').toLowerCase(); }
+  function refreshCount() {
+    var n = cleanFingerprint().length;
+    count.textContent = n + ' / 64';
+    count.className = 'fp-count' + (n === 64 ? ' ok' : '');
+  }
+  function showError(msg) { errorBox.textContent = msg; errorBox.className = 'error show'; errorBox.scrollIntoView({block: 'nearest'}); }
+  function clearError() { errorBox.className = 'error'; }
+
+  form.addEventListener('change', refreshButton);
+  fp.addEventListener('input', refreshCount);
+  fp.addEventListener('blur', function () { var c = cleanFingerprint(); if (c.length === 64) fp.value = c; });
+  refreshButton(); refreshCount();
+
+  function goToThankYou(orderId) { window.location.href = '/thank-you?order_id=' + encodeURIComponent(orderId); }
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    if (!payBtn) return;
+    clearError();
+
+    var payload = {
+      plan: selectedPlan() ? selectedPlan().value : '',
+      name: form.name.value, email: form.email.value, phone: form.phone.value,
+      machine_fingerprint: cleanFingerprint()
+    };
+    if (!payload.name.trim() || !payload.email.trim() || !payload.phone.trim()) { showError('Please fill in your name, email and phone number.'); return; }
+    if (payload.machine_fingerprint.length !== 64) { showError('The Machine Fingerprint must be exactly 64 characters. Use the Copy button in the application and paste it here.'); return; }
+
+    payBtn.disabled = true;
+    var original = payBtn.textContent;
+    payBtn.textContent = 'Please wait...';
+    function reset() { payBtn.disabled = false; payBtn.textContent = original; }
+
+    fetch('/api/create-order', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().then(function (j) { return {ok: r.ok, body: j}; }); })
+    .then(function (res) {
+      if (!res.ok || !res.body.success) { showError(res.body.error || 'Could not start the payment.'); reset(); return; }
+      var o = res.body.order;
+
+      if (DEV || o.dev_mode) {
+        fetch('/dev/simulate-payment/' + encodeURIComponent(o.order_id), {method: 'POST'})
+          .then(function () { goToThankYou(o.order_id); });
+        return;
+      }
+      if (typeof Razorpay === 'undefined') { showError('The payment window could not load. Check your connection and try again.'); reset(); return; }
+
+      var rzp = new Razorpay({
+        key: o.key_id, amount: o.amount, currency: o.currency, order_id: o.order_id,
+        name: {{ company_name|tojson }}, description: o.plan_name,
+        prefill: {name: o.name, email: o.email, contact: o.phone},
+        theme: {color: '#4f46e5'},
+        handler: function (resp) { goToThankYou(resp.razorpay_order_id || o.order_id); },
+        modal: {ondismiss: reset}
+      });
+      rzp.on('payment.failed', function (resp) {
+        showError((resp.error && resp.error.description) || 'The payment failed. You have not been charged - please try again.');
+        reset();
+      });
+      rzp.open();
+    })
+    .catch(function () { showError('Network problem - please try again.'); reset(); });
+  });
+})();
+</script>
+</body>
+</html>

@@ -89,3 +89,12 @@ installer/Output/
 # OS junk files
 .DS_Store
 Thumbs.db
+
+# ── Licensing: VENDOR secrets - never commit, never ship ─────────────────
+licensing/vendor_private_key.pem
+*.pem
+licensing/license_keys_log.txt
+licensing/.env.vendor
+!licensing/.env.vendor.example
+licensing/customers.db
+license.lic

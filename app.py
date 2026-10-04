@@ -11,7 +11,7 @@ from database import db, init_db
 from ai_engine import preload_employee_embeddings
 from face_recognition_singleton import get_face_recognizer
 from scheduler_service import payroll_scheduler
-from licensing.license_manager import check_license_on_startup
+from licensing.client_security import init_license_gate, get_access_state, MODE_LOCKED
 
 # ------------------------------------------------------------------
 # Deliberate re-exports (NOT used directly in this file any more).
@@ -132,6 +132,12 @@ csrf.init_app(app)
 # RATELIMIT_STORAGE_URI at Redis for a multi-worker/production deployment.
 app.config.setdefault('RATELIMIT_STORAGE_URI', os.environ.get('RATELIMIT_STORAGE_URI', 'memory://'))
 limiter.init_app(app)
+
+# License gate + "License Activation" lock screen. Registered BEFORE any
+# blueprint so its before_request hook runs ahead of everything else: once
+# the 30-day trial has ended without a valid licence, every page except the
+# lock screen (/license) is blocked. See licensing/client_security.py.
+init_license_gate(app)
 
 dataset_folder = Config.DATASET_FOLDER
 
@@ -256,31 +262,28 @@ if __name__ == '__main__':
     # LICENSE VALIDATION
     # ============================================================
     print("\n" + "=" * 50)
-    print("🔐 Checking license status...")
+    print("[LICENSE] Checking license status...")
     print("=" * 50)
-    
-    should_proceed, license_message = check_license_on_startup()
-    
-    if not should_proceed:
+
+    # The app no longer exits when the licence is missing/expired: it starts
+    # normally and the license gate (init_license_gate above) shows the
+    # "License Activation" lock screen in the browser instead, where the user
+    # can copy their Machine Fingerprint, buy a licence and paste the key.
+    # force=True also starts the trial clock on the very first launch.
+    access = get_access_state(force=True)
+
+    if access.mode == MODE_LOCKED:
         print("\n" + "!" * 50)
-        print(f"❌ LICENSE VALIDATION FAILED")
-        print(f"   {license_message}")
-        print("!" * 50)
-        print("\nPlease contact support to purchase a valid license.")
-        print("Support: support@yourcompany.com")
+        print("[LOCKED] Trial ended / no valid license")
+        print(f"   {access.lock_reason or access.message}")
+        print(f"   Machine fingerprint: {access.machine_fingerprint}")
+        print("   The application will open on the License Activation screen.")
+        print("!" * 50 + "\n")
+        logger.warning(f"Application starting LOCKED: {access.message}")
+    else:
+        print(f"✅ License check passed: {access.message}")
         print("=" * 50 + "\n")
-        
-        # Log the failure
-        logger.error(f"License validation failed: {license_message}")
-        
-        # Exit gracefully - don't start the application
-        import sys
-        sys.exit(1)
-    
-    print(f"✅ License valid: {license_message}")
-    print("=" * 50 + "\n")
-    
-    logger.info(f"License validation passed: {license_message}")
+        logger.info(f"License check passed ({access.mode}): {access.message}")
     
     # ============================================================
     # DIRECTORY SETUP

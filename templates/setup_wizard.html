@@ -163,7 +163,7 @@
                 {% elif step == 3 %}
                     <h5 class="mb-3">Step 3 of 4 &middot; License Activation</h5>
                     <p class="text-muted small">
-                        You have a 30-day trial period. To activate your license, enter your 16-character license key below.
+                        You have a 30-day trial period. To activate your license, paste your license key below.
                         <a href="#" data-bs-toggle="modal" data-bs-target="#licenseHelpModal">Learn more about licensing</a>.
                     </p>
                     
@@ -183,10 +183,9 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="mb-3">
                             <label for="license_key" class="form-label">License Key (Optional)</label>
-                            <input type="text" class="form-control font-monospace text-uppercase" 
-                                   id="license_key" name="license_key" 
-                                   placeholder="Enter 16-character license key" maxlength="16"
-                                   pattern="[A-Z0-9]{16}">
+                            <input type="text" class="form-control font-monospace" 
+                                   id="license_key" name="license_key" autocomplete="off" spellcheck="false"
+                                   placeholder="Paste your license key here">
                             <small class="text-muted">Leave blank to continue with 30-day trial.</small>
                         </div>
                         <button type="submit" class="btn btn-primary w-100">Continue</button>
@@ -228,11 +227,11 @@
                     <li>Visit <a href="https://yourcompany.com" target="_blank">https://yourcompany.com</a></li>
                     <li>Select your license tier and complete payment</li>
                     <li>Provide your machine fingerprint during purchase</li>
-                    <li>Receive your 16-character license key via email</li>
+                    <li>Receive your license key via email</li>
                 </ol>
                 
                 <h6>Activating Your License</h6>
-                <p>Enter the 16-character license key in the field above and click "Continue". The system will validate your key and activate your license.</p>
+                <p>Paste the license key in the field above and click "Continue". The system will validate your key and activate your license.</p>
                 
                 <h6>License Tiers</h6>
                 <ul>
