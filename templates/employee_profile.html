@@ -59,9 +59,6 @@
                             <i class="bi bi-person-circle"></i> {{ session.get('employee_username', 'Employee') }}
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end">
-                            <li><a class="dropdown-item" href="{{ url_for('attendance.employee_profile') }}">
-                                <i class="bi bi-person"></i> My Profile
-                            </a></li>
                             <li><a class="dropdown-item" href="{{ url_for('auth.employee_change_password') }}">
                                 <i class="bi bi-key"></i> Change Password
                             </a></li>
