@@ -340,6 +340,22 @@ class CustomerService:
 
     def _send_and_record(self, order_pk, customer_id, name, email, token, fingerprint,
                          plan_code, expires_at) -> bool:
+        # Atomically claim the right to send, so two concurrent workers (or a
+        # webhook retry racing the original delivery) never email the same
+        # license twice. 'S' = a worker is sending right now.
+        now = _utcnow_naive()
+        with session_scope() as session:
+            claimed = session.execute(
+                update(Order)
+                .where(Order.id == order_pk)
+                .where((Order.email_sent_yn == "N") |
+                       ((Order.email_sent_yn == "S") & (Order.updated_at < now - _STALE_CLAIM)))
+                .values(email_sent_yn="S", updated_at=now)
+            ).rowcount
+        if claimed != 1:
+            logger.info("License email for order %s is already sent or being sent - skipping", order_pk)
+            return False
+
         plan = get_plan(plan_code)
         try:
             sent = bool(self.email_service.send_license_key_email(
@@ -363,6 +379,13 @@ class CustomerService:
                 logger.error("Could not record email delivery for order %s: %s", order_pk, e)
         else:
             logger.warning("License email for customer %s NOT sent - resend via the admin API", customer_id)
+            try:  # release the claim so a retry / admin resend can deliver it
+                with session_scope() as session:
+                    session.execute(
+                        update(Order).where(Order.id == order_pk).where(Order.email_sent_yn == "S")
+                        .values(email_sent_yn="N", updated_at=_utcnow_naive()))
+            except Exception as e:  # pragma: no cover
+                logger.error("Could not release email claim on order %s: %s", order_pk, e)
         return sent
 
     # ------------------------------------------------------------------
