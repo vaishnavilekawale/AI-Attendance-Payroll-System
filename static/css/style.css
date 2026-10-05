@@ -4,7 +4,7 @@
    and strict adherence to the Linear/Vercel/shadcn UI aesthetic.
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('../vendor/fonts/google-fonts.css');
 
 :root {
   /* ---- Palette ---- */
