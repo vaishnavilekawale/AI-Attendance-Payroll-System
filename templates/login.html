@@ -7,30 +7,13 @@
     <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
     <style>
-        :root {
-            --ink: #0f172a;
-            --ink-muted: #64748b;
-            --ink-faint: #94a3b8;
-            --accent: #4f46e5;
-            --accent-hover: #4338ca;
-            --accent-active: #3730a3;
-            --accent-soft: #eef2ff;
-            --border: #e2e8f0;
-            --border-strong: #cbd5e1;
-            --radius-sm: 8px;
-            --radius-md: 12px;
-            --radius-lg: 16px;
-            --radius-pill: 999px;
-            --shadow-lg: 0 20px 35px -10px rgba(0, 0, 0, 0.12), 0 10px 15px -5px rgba(0, 0, 0, 0.07);
-            --transition: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
         body {
-            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            background: var(--au-bg);
             min-height: 100vh;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            color: var(--ink);
+            font-family: var(--au-font-body);
+            color: var(--au-ink);
             overflow-x: hidden;
             display: flex;
             align-items: center;
@@ -46,10 +29,10 @@
         }
 
         .login-card {
-            background: #ffffff;
-            border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            box-shadow: var(--shadow-lg);
+            background: var(--au-surface);
+            border: 1px solid var(--au-border);
+            border-radius: var(--au-radius-lg);
+            box-shadow: var(--au-shadow-lg);
             width: 100%;
             max-width: 440px;
             padding: 40px;
@@ -70,8 +53,8 @@
         .company-logo {
             width: 56px;
             height: 56px;
-            border-radius: var(--radius-md);
-            background: linear-gradient(135deg, var(--accent), #7c74f0);
+            border-radius: var(--au-radius-md);
+            background: linear-gradient(135deg, var(--au-accent), var(--au-accent-alt));
             display: flex;
             align-items: center;
             justify-content: center;
@@ -86,7 +69,7 @@
 
         .login-title {
             font-family: 'Inter', sans-serif;
-            color: var(--ink);
+            color: var(--au-ink);
             font-weight: 700;
             font-size: 1.35rem;
             letter-spacing: -0.02em;
@@ -94,7 +77,7 @@
         }
 
         .login-subtitle {
-            color: var(--ink-muted);
+            color: var(--au-ink-muted);
             font-size: 0.85rem;
             margin-bottom: 1.75rem;
         }
@@ -104,7 +87,7 @@
         }
 
         .role-selector label {
-            color: var(--ink-muted);
+            color: var(--au-ink-muted);
             font-weight: 600;
             font-size: 0.75rem;
             text-transform: uppercase;
@@ -119,110 +102,110 @@
         }
 
         .btn-role {
-            border: 1px solid var(--border-strong);
-            color: var(--ink-muted);
+            border: 1px solid var(--au-border-strong);
+            color: var(--au-ink-muted);
             font-weight: 600;
             font-size: 0.83rem;
             padding: 9px 16px;
-            transition: var(--transition);
+            transition: var(--au-transition);
             flex: 1;
-            background: #f8fafc;
-            border-radius: var(--radius-sm) !important;
+            background: var(--au-surface-sunk);
+            border-radius: var(--au-radius-sm) !important;
         }
 
         .btn-role:hover {
-            background: #f1f5f9;
-            color: var(--ink);
-            border-color: var(--ink-faint);
+            background: var(--au-surface-sunk);
+            color: var(--au-ink);
+            border-color: var(--au-ink-faint);
         }
 
         .btn-role.active {
-            background: var(--accent) !important;
-            border-color: var(--accent) !important;
+            background: var(--au-accent) !important;
+            border-color: var(--au-accent) !important;
             color: white !important;
             box-shadow: 0 2px 8px rgba(79, 70, 229, 0.25);
         }
 
         .form-label {
-            color: var(--ink);
+            color: var(--au-ink);
             font-weight: 600;
             font-size: 0.82rem;
             margin-bottom: 0.35rem;
         }
 
         .input-group {
-            border-radius: var(--radius-sm);
+            border-radius: var(--au-radius-sm);
             overflow: hidden;
         }
 
         .input-group-text {
-            background: #f8fafc;
-            border: 1px solid var(--border-strong);
+            background: var(--au-surface-sunk);
+            border: 1px solid var(--au-border-strong);
             border-right: none;
-            color: var(--ink-muted);
+            color: var(--au-ink-muted);
         }
 
         .form-control {
-            border: 1px solid var(--border-strong);
+            border: 1px solid var(--au-border-strong);
             padding: 0.55rem 0.8rem;
             font-size: 0.87rem;
-            background: #ffffff;
-            color: var(--ink);
-            transition: border-color var(--transition), box-shadow var(--transition);
+            background: var(--au-surface);
+            color: var(--au-ink);
+            transition: border-color var(--au-transition), box-shadow var(--au-transition);
         }
 
         .form-control:focus {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px var(--accent-soft);
-            background: #ffffff;
+            border-color: var(--au-accent);
+            box-shadow: 0 0 0 3px var(--au-accent-soft);
+            background: var(--au-surface);
         }
 
         .btn-outline-secondary {
-            border: 1px solid var(--border-strong);
+            border: 1px solid var(--au-border-strong);
             border-left: none;
-            background: #f8fafc;
-            color: var(--ink-muted);
+            background: var(--au-surface-sunk);
+            color: var(--au-ink-muted);
         }
 
         .btn-outline-secondary:hover {
-            background: #f1f5f9;
-            color: var(--ink);
-            border-color: var(--border-strong);
+            background: var(--au-surface-sunk);
+            color: var(--au-ink);
+            border-color: var(--au-border-strong);
         }
 
         .btn-primary {
-            background: var(--accent);
-            border-color: var(--accent);
+            background: var(--au-accent);
+            border-color: var(--au-accent);
             padding: 0.6rem 1rem;
             font-weight: 600;
             font-size: 0.87rem;
-            border-radius: var(--radius-sm);
-            transition: var(--transition);
+            border-radius: var(--au-radius-sm);
+            transition: var(--au-transition);
             box-shadow: 0 1px 2px rgba(79, 70, 229, 0.25);
             width: 100%;
         }
 
         .btn-primary:hover {
-            background: var(--accent-hover);
-            border-color: var(--accent-hover);
+            background: var(--au-accent-hover);
+            border-color: var(--au-accent-hover);
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(79, 70, 229, 0.28);
         }
 
         .form-check-input:checked {
-            background-color: var(--accent);
-            border-color: var(--accent);
+            background-color: var(--au-accent);
+            border-color: var(--au-accent);
         }
 
         .text-decoration-none {
-            color: var(--accent);
+            color: var(--au-accent);
             font-weight: 600;
             font-size: 0.83rem;
-            transition: var(--transition);
+            transition: var(--au-transition);
         }
 
         .text-decoration-none:hover {
-            color: var(--accent-hover);
+            color: var(--au-accent-hover);
         }
 
         .loading-overlay {
@@ -243,7 +226,7 @@
             width: 40px;
             height: 40px;
             border: 3px solid rgba(255, 255, 255, 0.3);
-            border-top: 3px solid var(--accent);
+            border-top: 3px solid var(--au-accent);
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
@@ -254,7 +237,7 @@
         }
 
         .alert {
-            border-radius: var(--radius-sm);
+            border-radius: var(--au-radius-sm);
             font-size: 0.83rem;
             padding: 0.75rem 1rem;
         }

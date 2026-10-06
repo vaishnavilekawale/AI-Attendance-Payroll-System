@@ -7,20 +7,21 @@
     <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
     <style>
         :root {
-            --enterprise-navy: #0f1f3d;
-            --enterprise-navy-light: #16294f;
-            --enterprise-accent: #2f6fed;
-            --enterprise-border: #e3e7ee;
-            --enterprise-bg: #f4f6fa;
+            --enterprise-navy: var(--au-nav);
+            --enterprise-navy-light: var(--au-nav-light);
+            --enterprise-accent: var(--au-accent);
+            --enterprise-border: var(--au-border);
+            --enterprise-bg: var(--au-bg);
         }
         * { box-sizing: border-box; }
         body {
             background: var(--enterprise-bg);
             min-height: 100vh;
-            font-family: 'Segoe UI', 'Inter', Roboto, Tahoma, Geneva, Verdana, sans-serif;
-            color: #1c2333;
+            font-family: var(--au-font-body);
+            color: var(--au-ink);
         }
 
         /* ---------- Enterprise top bar ---------- */
@@ -109,7 +110,7 @@
             margin-bottom: 4px;
         }
         .kiosk-hero p {
-            color: #6b7280;
+            color: var(--au-ink-muted);
             font-size: 0.95rem;
             margin: 0;
         }
@@ -166,7 +167,7 @@
             padding: 10px 0;
             border-bottom: 1px solid var(--enterprise-border);
             font-size: 0.87rem;
-            color: #3c4457;
+            color: var(--au-ink);
         }
         .info-panel-item:last-child { border-bottom: none; }
         .info-panel-item i {
@@ -230,11 +231,11 @@
 
         .kiosk-footer {
             text-align: center;
-            color: #9aa2b1;
+            color: var(--au-ink-faint);
             font-size: 0.8rem;
             padding: 24px 0 10px;
         }
-        .kiosk-footer a { color: #6b7994; }
+        .kiosk-footer a { color: var(--au-ink-muted); }
 
         /* ---------- Mobile Responsive Fix for Topbar ---------- */
         @media (max-width: 768px) {
