@@ -304,7 +304,7 @@ exe = EXE(
                          # a clean VM with default Defender settings.
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,     # windowed app, no console popup - customer just sees the browser open.
+    console=True,     # windowed app, no console popup - customer just sees the browser open.
                          # Flip to True TEMPORARILY on your own machine only, if you need to see
                          # console output while debugging a build issue - never ship console=True.
     disable_windowed_traceback=False,
