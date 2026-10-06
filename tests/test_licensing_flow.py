@@ -139,7 +139,7 @@ class TestPlans:
 
     def test_server_side_prices_and_env_override(self, vendor_env, monkeypatch):
         assert get_plan("yearly").amount == 999900
-        monkeypatch.setenv("PLAN_PRICE_YEARLY", "123400")
+        monkeypatch.setenv("PLAN_PRICE_YEARLY", "1234")
         assert get_plan("yearly").amount == 123400
 
     def test_unknown_plan(self, vendor_env):

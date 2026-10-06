@@ -59,7 +59,23 @@ from .vendor_paths import get_vendor_data_dir
 from .plans import get_plans
 
 _env_file = os.environ.get("VENDOR_ENV_FILE") or os.path.join(get_vendor_data_dir(), ".env.vendor")
-load_dotenv(_env_file)
+load_dotenv(_env_file, override=True)  # the file wins over stale OS-level variables
+_env_mtime = os.path.getmtime(_env_file) if os.path.isfile(_env_file) else None
+
+
+def _reload_env_if_changed():
+    """Re-read .env.vendor when it is saved, so price / text / SMTP edits apply
+    without restarting the portal."""
+    global _env_mtime
+    try:
+        mtime = os.path.getmtime(_env_file) if os.path.isfile(_env_file) else None
+    except OSError:
+        return
+    if mtime != _env_mtime:
+        _env_mtime = mtime
+        if mtime is not None:
+            load_dotenv(_env_file, override=True)
+            logging.getLogger("vendor_app").info("Reloaded %s (file changed)", _env_file)
 
 from .customer_models import init_customer_db  # noqa: E402
 from .customer_routes import vendor_bp  # noqa: E402  (after load_dotenv: reads env at call time anyway)
@@ -143,6 +159,10 @@ def create_vendor_app() -> Flask:
 
     init_customer_db()
     app.register_blueprint(vendor_bp)
+
+    @app.before_request
+    def _live_reload_settings():
+        _reload_env_if_changed()
 
     @app.after_request
     def _security_headers(response):

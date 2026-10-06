@@ -7,13 +7,13 @@ sends a plan *code* ("monthly" / "yearly" / "lifetime"), never an amount,
 so a customer cannot buy a lifetime license for the price of a month by
 editing the page.
 
-Prices are in the smallest currency unit (paise for INR) because that is
-what Razorpay expects. Override them without touching code via environment
-variables on the vendor server, e.g.:
+Prices are written in .env.vendor in NORMAL currency units (rupees for INR),
+e.g. 499 or 499.50. They are converted to the smallest unit (paise) here,
+because that is what Razorpay expects. Override them without touching code:
 
-    PLAN_PRICE_MONTHLY=99900      # Rs 999.00
-    PLAN_PRICE_YEARLY=999900      # Rs 9,999.00
-    PLAN_PRICE_LIFETIME=2499900   # Rs 24,999.00
+    PLAN_PRICE_MONTHLY=999        # Rs 999
+    PLAN_PRICE_YEARLY=9999        # Rs 9,999
+    PLAN_PRICE_LIFETIME=24999     # Rs 24,999
     PLAN_CURRENCY=INR
 
 Expiry rules (see compute_expiry):
@@ -25,8 +25,10 @@ A renewal of a still-running plan extends from the CURRENT expiry rather
 than from today, so paying early never wastes the days already paid for.
 """
 import calendar
+import logging
 import os
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
@@ -69,15 +71,25 @@ class Plan:
         return f"per {self.months} months"
 
 
-def _env_int(name: str, default: int) -> int:
-    raw = (os.environ.get(name) or "").strip()
+def _env_price(name: str, default_minor: int) -> int:
+    """
+    Read a price written in normal currency units (e.g. 499 or 499.50) and
+    return it in the smallest unit (paise), which is what Razorpay expects.
+    Invalid / empty / non-positive values fall back to the default (with a warning).
+    """
+    raw = (os.environ.get(name) or "").strip().replace(",", "")
     if not raw:
-        return default
+        return default_minor
     try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
+        minor = int((Decimal(raw) * 100).to_integral_value(rounding=ROUND_HALF_UP))
+    except (InvalidOperation, ValueError):
+        minor = 0
+    if minor <= 0:
+        logging.getLogger("vendor_app").warning(
+            "%s=%r is not a valid price (write it in rupees, e.g. 499 or 499.50, no symbols "
+            "or comments) - using default %s", name, raw, default_minor / 100)
+        return default_minor
+    return minor
 
 
 def get_plans() -> Dict[str, Plan]:
@@ -86,17 +98,17 @@ def get_plans() -> Dict[str, Plan]:
     return {
         PLAN_MONTHLY: Plan(
             code=PLAN_MONTHLY, name="Monthly Plan",
-            amount=_env_int("PLAN_PRICE_MONTHLY", 99900), currency=currency,
+            amount=_env_price("PLAN_PRICE_MONTHLY", 99900), currency=currency,
             months=1, tagline="Flexible - cancel any time by simply not renewing.",
         ),
         PLAN_YEARLY: Plan(
             code=PLAN_YEARLY, name="Yearly Plan",
-            amount=_env_int("PLAN_PRICE_YEARLY", 999900), currency=currency,
+            amount=_env_price("PLAN_PRICE_YEARLY", 999900), currency=currency,
             months=12, tagline="Best value for ongoing use - two months free.",
         ),
         PLAN_LIFETIME: Plan(
             code=PLAN_LIFETIME, name="Lifetime Plan",
-            amount=_env_int("PLAN_PRICE_LIFETIME", 2499900), currency=currency,
+            amount=_env_price("PLAN_PRICE_LIFETIME", 2499900), currency=currency,
             months=None, tagline="Pay once, use forever on one machine.",
         ),
     }
