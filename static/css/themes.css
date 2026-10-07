@@ -1,0 +1,220 @@
+/* ==========================================================================
+   themes.css — ready-made colour themes for the AI Attendance System
+
+   HOW TO USE (takes 10 seconds):
+   1. Pick ONE theme block below.
+   2. Copy it (the whole  :root { ... }  part).
+   3. Paste it at the very END of static/css/style.css  (it uses :root:root so it ALWAYS beats the default colours).
+   4. Save, then hard-refresh the browser (Ctrl+F5) so the old cached CSS is not used.
+   To switch theme later, just replace the pasted block with another one.
+
+   Every colour in the project (navbar, buttons, cards, login, kiosk, camera
+   frame, glows...) is driven by these variables, so ONE block = whole project.
+   ========================================================================== */
+
+/* ===== THEME: Aurora - multicolour: violet + cyan + pink (default) ===== */
+:root:root {
+  --ink: #16143a;  --ink-muted: #5b5f86;  --ink-faint: #9094b5;
+  --bg: #f4f3ff;  --surface: #ffffff;  --surface-sunk: #f1f0fc;
+  --border: #e4e2f6;  --border-strong: #d3d0ec;
+
+  --accent: #6c4cf5;  --accent-hover: #5b3de6;  --accent-active: #4b2fcc;
+  --accent-soft: #efebff;  --accent-soft-border: #d6ccff;
+  --accent-mid: #8f5bff;  --accent-pale: #b9a6ff;
+  --accent-2: #00b8d9;  --accent-3: #ff5d8f;  --accent-4: #ffb020;
+  --neon: #7ef0ff;
+
+  --accent-rgb: 108, 76, 245;
+  --accent-mid-rgb: 143, 91, 255;
+  --accent-2-rgb: 0, 184, 217;
+  --accent-3-rgb: 255, 93, 143;
+  --accent-4-rgb: 255, 176, 32;
+  --neon-rgb: 126, 240, 255;
+
+  --nav-1: #120d33;  --nav-2: #2b1573;  --nav-3: #08405f;  --nav-rgb: 18, 13, 51;
+  --aurora-1: #0d0a2b;  --aurora-2: #2a1275;  --aurora-3: #0a3d62;  --aurora-4: #1b0f4f;  --deep-rgb: 13, 10, 43;
+}
+
+/* ===== THEME: PINK - pure pink everywhere ===== */
+:root:root {
+  --ink: #2b0f1e;  --ink-muted: #7a4a62;  --ink-faint: #b08fa2;
+  --bg: #fff5fa;  --surface: #ffffff;  --surface-sunk: #fdebf3;
+  --border: #f8dbe8;  --border-strong: #f0c3d8;
+
+  --accent: #db2777;  --accent-hover: #be185d;  --accent-active: #9d174d;
+  --accent-soft: #fde7f1;  --accent-soft-border: #fbc4dc;
+  --accent-mid: #ec4899;  --accent-pale: #f9a8d4;
+  --accent-2: #f472b6;  --accent-3: #e11d48;  --accent-4: #fb7185;
+  --neon: #ffb3d9;
+
+  --accent-rgb: 219, 39, 119;
+  --accent-mid-rgb: 236, 72, 153;
+  --accent-2-rgb: 244, 114, 182;
+  --accent-3-rgb: 225, 29, 72;
+  --accent-4-rgb: 251, 113, 133;
+  --neon-rgb: 255, 179, 217;
+
+  --nav-1: #2b0a1c;  --nav-2: #6b1240;  --nav-3: #8a1a4f;  --nav-rgb: 43, 10, 28;
+  --aurora-1: #1f0614;  --aurora-2: #6b1240;  --aurora-3: #9d2160;  --aurora-4: #3a0a24;  --deep-rgb: 31, 6, 20;
+}
+
+/* ===== THEME: GREEN - pure green everywhere ===== */
+:root:root {
+  --ink: #0d2a18;  --ink-muted: #4a6a56;  --ink-faint: #8aa595;
+  --bg: #f2faf5;  --surface: #ffffff;  --surface-sunk: #e8f5ed;
+  --border: #d6ebdd;  --border-strong: #bfdcc9;
+
+  --accent: #16a34a;  --accent-hover: #15803d;  --accent-active: #166534;
+  --accent-soft: #e3f8ea;  --accent-soft-border: #b7ebc9;
+  --accent-mid: #22c55e;  --accent-pale: #86efac;
+  --accent-2: #4ade80;  --accent-3: #15803d;  --accent-4: #84cc16;
+  --neon: #9af5b8;
+
+  --accent-rgb: 22, 163, 74;
+  --accent-mid-rgb: 34, 197, 94;
+  --accent-2-rgb: 74, 222, 128;
+  --accent-3-rgb: 21, 128, 61;
+  --accent-4-rgb: 132, 204, 22;
+  --neon-rgb: 154, 245, 184;
+
+  --nav-1: #052e16;  --nav-2: #14532d;  --nav-3: #166534;  --nav-rgb: 5, 46, 22;
+  --aurora-1: #03200f;  --aurora-2: #14532d;  --aurora-3: #17703a;  --aurora-4: #052e16;  --deep-rgb: 3, 32, 15;
+}
+
+/* ===== THEME: BLUE - pure ocean blue ===== */
+:root:root {
+  --ink: #0c1a3a;  --ink-muted: #4a5a80;  --ink-faint: #8795b5;
+  --bg: #f2f6ff;  --surface: #ffffff;  --surface-sunk: #eaf0fc;
+  --border: #dce5f7;  --border-strong: #c6d3ee;
+
+  --accent: #2563eb;  --accent-hover: #1d4ed8;  --accent-active: #1e40af;
+  --accent-soft: #e8f0ff;  --accent-soft-border: #c3d6ff;
+  --accent-mid: #3b82f6;  --accent-pale: #a5c4ff;
+  --accent-2: #60a5fa;  --accent-3: #1d4ed8;  --accent-4: #38bdf8;
+  --neon: #93c5fd;
+
+  --accent-rgb: 37, 99, 235;
+  --accent-mid-rgb: 59, 130, 246;
+  --accent-2-rgb: 96, 165, 250;
+  --accent-3-rgb: 29, 78, 216;
+  --accent-4-rgb: 56, 189, 248;
+  --neon-rgb: 147, 197, 253;
+
+  --nav-1: #06122e;  --nav-2: #0b2a6b;  --nav-3: #123a8a;  --nav-rgb: 6, 18, 46;
+  --aurora-1: #040b22;  --aurora-2: #0b2a7a;  --aurora-3: #1245a8;  --aurora-4: #0a1a4d;  --deep-rgb: 4, 11, 34;
+}
+
+/* ===== THEME: PURPLE - pure royal purple ===== */
+:root:root {
+  --ink: #1c0f3a;  --ink-muted: #5f4f86;  --ink-faint: #9a8fb8;
+  --bg: #f7f3ff;  --surface: #ffffff;  --surface-sunk: #f0e9fc;
+  --border: #e6dcf7;  --border-strong: #d5c6ee;
+
+  --accent: #7c3aed;  --accent-hover: #6d28d9;  --accent-active: #5b21b6;
+  --accent-soft: #f1eaff;  --accent-soft-border: #d9c7ff;
+  --accent-mid: #8b5cf6;  --accent-pale: #c4b5fd;
+  --accent-2: #a78bfa;  --accent-3: #6d28d9;  --accent-4: #c084fc;
+  --neon: #d8c6ff;
+
+  --accent-rgb: 124, 58, 237;
+  --accent-mid-rgb: 139, 92, 246;
+  --accent-2-rgb: 167, 139, 250;
+  --accent-3-rgb: 109, 40, 217;
+  --accent-4-rgb: 192, 132, 252;
+  --neon-rgb: 216, 198, 255;
+
+  --nav-1: #1b0a3d;  --nav-2: #3b1380;  --nav-3: #4c1d95;  --nav-rgb: 27, 10, 61;
+  --aurora-1: #13062e;  --aurora-2: #3b1380;  --aurora-3: #5b2bb5;  --aurora-4: #1f0b4a;  --deep-rgb: 19, 6, 46;
+}
+
+/* ===== THEME: ORANGE - pure sunset orange ===== */
+:root:root {
+  --ink: #2b1405;  --ink-muted: #7a5238;  --ink-faint: #b39580;
+  --bg: #fff8f2;  --surface: #ffffff;  --surface-sunk: #ffefe2;
+  --border: #f8e1cf;  --border-strong: #efcdb0;
+
+  --accent: #ea580c;  --accent-hover: #c2410c;  --accent-active: #9a3412;
+  --accent-soft: #ffeedd;  --accent-soft-border: #fdd0a8;
+  --accent-mid: #f97316;  --accent-pale: #fdba74;
+  --accent-2: #fb923c;  --accent-3: #c2410c;  --accent-4: #fbbf24;
+  --neon: #ffd29a;
+
+  --accent-rgb: 234, 88, 12;
+  --accent-mid-rgb: 249, 115, 22;
+  --accent-2-rgb: 251, 146, 60;
+  --accent-3-rgb: 194, 65, 12;
+  --accent-4-rgb: 251, 191, 36;
+  --neon-rgb: 255, 210, 154;
+
+  --nav-1: #2b1005;  --nav-2: #6b2a0c;  --nav-3: #8a3a0b;  --nav-rgb: 43, 16, 5;
+  --aurora-1: #1f0b03;  --aurora-2: #6b2a0c;  --aurora-3: #9a4a10;  --aurora-4: #3a1707;  --deep-rgb: 31, 11, 3;
+}
+
+/* ===== THEME: RED - pure crimson red ===== */
+:root:root {
+  --ink: #2a0b0b;  --ink-muted: #7a4848;  --ink-faint: #b08c8c;
+  --bg: #fff6f6;  --surface: #ffffff;  --surface-sunk: #ffeded;
+  --border: #f8dcdc;  --border-strong: #efc4c4;
+
+  --accent: #dc2626;  --accent-hover: #b91c1c;  --accent-active: #991b1b;
+  --accent-soft: #ffe9e9;  --accent-soft-border: #fdc3c3;
+  --accent-mid: #ef4444;  --accent-pale: #fca5a5;
+  --accent-2: #f87171;  --accent-3: #b91c1c;  --accent-4: #fb7185;
+  --neon: #ffb4b4;
+
+  --accent-rgb: 220, 38, 38;
+  --accent-mid-rgb: 239, 68, 68;
+  --accent-2-rgb: 248, 113, 113;
+  --accent-3-rgb: 185, 28, 28;
+  --accent-4-rgb: 251, 113, 133;
+  --neon-rgb: 255, 180, 180;
+
+  --nav-1: #2a0808;  --nav-2: #6b1212;  --nav-3: #8a1a1a;  --nav-rgb: 42, 8, 8;
+  --aurora-1: #1f0505;  --aurora-2: #6b1212;  --aurora-3: #992020;  --aurora-4: #380a0a;  --deep-rgb: 31, 5, 5;
+}
+
+/* ===== THEME: TEAL - pure teal / cyan ===== */
+:root:root {
+  --ink: #082a2a;  --ink-muted: #44696a;  --ink-faint: #86a5a6;
+  --bg: #f1faf9;  --surface: #ffffff;  --surface-sunk: #e6f5f3;
+  --border: #d3ebe8;  --border-strong: #bcdcd8;
+
+  --accent: #0d9488;  --accent-hover: #0f766e;  --accent-active: #115e59;
+  --accent-soft: #dff7f4;  --accent-soft-border: #abe6df;
+  --accent-mid: #14b8a6;  --accent-pale: #7fe6da;
+  --accent-2: #2dd4bf;  --accent-3: #0f766e;  --accent-4: #5eead4;
+  --neon: #8ff3e6;
+
+  --accent-rgb: 13, 148, 136;
+  --accent-mid-rgb: 20, 184, 166;
+  --accent-2-rgb: 45, 212, 191;
+  --accent-3-rgb: 15, 118, 110;
+  --accent-4-rgb: 94, 234, 212;
+  --neon-rgb: 143, 243, 230;
+
+  --nav-1: #04262a;  --nav-2: #0b4f55;  --nav-3: #0f6a70;  --nav-rgb: 4, 38, 42;
+  --aurora-1: #021b1e;  --aurora-2: #0b4f55;  --aurora-3: #0f7078;  --aurora-4: #05303a;  --deep-rgb: 2, 27, 30;
+}
+
+/* ===== THEME: BLACK & GOLD - premium charcoal + gold ===== */
+:root:root {
+  --ink: #1c1917;  --ink-muted: #5f5750;  --ink-faint: #9a928a;
+  --bg: #faf7f2;  --surface: #ffffff;  --surface-sunk: #f3eee6;
+  --border: #e8e0d3;  --border-strong: #d6cbb8;
+
+  --accent: #b45309;  --accent-hover: #92400e;  --accent-active: #78350f;
+  --accent-soft: #fdf1dc;  --accent-soft-border: #f3d9a4;
+  --accent-mid: #d97706;  --accent-pale: #f6d28b;
+  --accent-2: #f59e0b;  --accent-3: #92400e;  --accent-4: #fbbf24;
+  --neon: #ffe08a;
+
+  --accent-rgb: 180, 83, 9;
+  --accent-mid-rgb: 217, 119, 6;
+  --accent-2-rgb: 245, 158, 11;
+  --accent-3-rgb: 146, 64, 14;
+  --accent-4-rgb: 251, 191, 36;
+  --neon-rgb: 255, 224, 138;
+
+  --nav-1: #0c0a09;  --nav-2: #292524;  --nav-3: #44300f;  --nav-rgb: 12, 10, 9;
+  --aurora-1: #0a0806;  --aurora-2: #2b2118;  --aurora-3: #4a3410;  --aurora-4: #171210;  --deep-rgb: 10, 8, 6;
+}
