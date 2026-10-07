@@ -218,3 +218,318 @@
   --nav-1: #0c0a09;  --nav-2: #292524;  --nav-3: #44300f;  --nav-rgb: 12, 10, 9;
   --aurora-1: #0a0806;  --aurora-2: #2b2118;  --aurora-3: #4a3410;  --aurora-4: #171210;  --deep-rgb: 10, 8, 6;
 }
+
+/* ==========================================================================
+   LUXURY THEMES (purple / gold / black style) — added below
+   ========================================================================== */
+
+/* ===== THEME: ROYAL PURPLE & GOLD — deep violet, black, gold (like the reference image) ===== */
+:root:root {
+  --ink: #1a0f2e;  --ink-muted: #5d4a80;  --ink-faint: #9b8cb8;
+  --bg: #faf6ee;  --surface: #ffffff;  --surface-sunk: #f4eee0;
+  --border: #eadfc8;  --border-strong: #d9c9a4;
+
+  --accent: #5b2a9d;  --accent-hover: #4a2085;  --accent-active: #3a1770;
+  --accent-soft: #f1e9fc;  --accent-soft-border: #d9c5f5;
+  --accent-mid: #7c3fc9;  --accent-pale: #c9a8f5;
+  --accent-2: #d4a62a;  --accent-3: #b8860b;  --accent-4: #f3d98b;
+  --neon: #f5d77a;
+
+  --accent-rgb: 91, 42, 157;
+  --accent-mid-rgb: 124, 63, 201;
+  --accent-2-rgb: 212, 166, 42;
+  --accent-3-rgb: 184, 134, 11;
+  --accent-4-rgb: 243, 217, 139;
+  --neon-rgb: 245, 215, 122;
+
+  --nav-1: #0a0614;  --nav-2: #2a1250;  --nav-3: #3b2a0c;  --nav-rgb: 10, 6, 20;
+  --aurora-1: #07040f;  --aurora-2: #2a1250;  --aurora-3: #4b2a7a;  --aurora-4: #120a24;  --deep-rgb: 7, 4, 15;
+}
+
+/* ===== THEME: IMPERIAL VIOLET & ROSE GOLD — vivid violet with soft rose-gold ===== */
+:root:root {
+  --ink: #1f0a33;  --ink-muted: #6b4f86;  --ink-faint: #a28fb8;
+  --bg: #fbf6ff;  --surface: #ffffff;  --surface-sunk: #f4eafc;
+  --border: #ecdcf8;  --border-strong: #dcc3f0;
+
+  --accent: #7e22ce;  --accent-hover: #6b21a8;  --accent-active: #581c87;
+  --accent-soft: #f6ecff;  --accent-soft-border: #e3c8fb;
+  --accent-mid: #a855f7;  --accent-pale: #d8b4fe;
+  --accent-2: #e0a98f;  --accent-3: #c97b84;  --accent-4: #f5cdb8;
+  --neon: #ffd6c2;
+
+  --accent-rgb: 126, 34, 206;
+  --accent-mid-rgb: 168, 85, 247;
+  --accent-2-rgb: 224, 169, 143;
+  --accent-3-rgb: 201, 123, 132;
+  --accent-4-rgb: 245, 205, 184;
+  --neon-rgb: 255, 214, 194;
+
+  --nav-1: #14061f;  --nav-2: #4a1578;  --nav-3: #6b2d5c;  --nav-rgb: 20, 6, 31;
+  --aurora-1: #0f0418;  --aurora-2: #4a1578;  --aurora-3: #7a3a8a;  --aurora-4: #1f0a33;  --deep-rgb: 15, 4, 24;
+}
+
+/* ===== THEME: MIDNIGHT BLACK & GOLD DELUXE — near-black surfaces, rich gold ===== */
+:root:root {
+  --ink: #141108;  --ink-muted: #5e563a;  --ink-faint: #9c9370;
+  --bg: #fcfaf3;  --surface: #ffffff;  --surface-sunk: #f6f1e0;
+  --border: #ece3c6;  --border-strong: #dccf9f;
+
+  --accent: #a16207;  --accent-hover: #854d0e;  --accent-active: #713f12;
+  --accent-soft: #fef6d8;  --accent-soft-border: #f6e08a;
+  --accent-mid: #ca8a04;  --accent-pale: #fcd34d;
+  --accent-2: #eab308;  --accent-3: #854d0e;  --accent-4: #fde047;
+  --neon: #fff0a0;
+
+  --accent-rgb: 161, 98, 7;
+  --accent-mid-rgb: 202, 138, 4;
+  --accent-2-rgb: 234, 179, 8;
+  --accent-3-rgb: 133, 77, 14;
+  --accent-4-rgb: 253, 224, 71;
+  --neon-rgb: 255, 240, 160;
+
+  --nav-1: #050505;  --nav-2: #1a1a1a;  --nav-3: #3a2a08;  --nav-rgb: 5, 5, 5;
+  --aurora-1: #030303;  --aurora-2: #1a1408;  --aurora-3: #3d2d0a;  --aurora-4: #0c0c0c;  --deep-rgb: 3, 3, 3;
+}
+
+/* ===== THEME: PLUM & CHAMPAGNE — magenta-plum with soft champagne gold ===== */
+:root:root {
+  --ink: #25052b;  --ink-muted: #75507a;  --ink-faint: #b08fb4;
+  --bg: #fdf6fe;  --surface: #ffffff;  --surface-sunk: #f8eaf9;
+  --border: #f0dbf2;  --border-strong: #e4c3e8;
+
+  --accent: #86198f;  --accent-hover: #701a75;  --accent-active: #4a044e;
+  --accent-soft: #fbeafc;  --accent-soft-border: #f0c4f3;
+  --accent-mid: #a21caf;  --accent-pale: #f0abfc;
+  --accent-2: #e6c27a;  --accent-3: #c026d3;  --accent-4: #f4e1b0;
+  --neon: #f7e7b8;
+
+  --accent-rgb: 134, 25, 143;
+  --accent-mid-rgb: 162, 28, 175;
+  --accent-2-rgb: 230, 194, 122;
+  --accent-3-rgb: 192, 38, 211;
+  --accent-4-rgb: 244, 225, 176;
+  --neon-rgb: 247, 231, 184;
+
+  --nav-1: #1a0420;  --nav-2: #4a0f55;  --nav-3: #5c3a1a;  --nav-rgb: 26, 4, 32;
+  --aurora-1: #12021a;  --aurora-2: #4a0f55;  --aurora-3: #7a2a80;  --aurora-4: #230535;  --deep-rgb: 18, 2, 26;
+}
+
+/* ===== THEME: EMERALD & GOLD — deep green with gold highlights ===== */
+:root:root {
+  --ink: #07211a;  --ink-muted: #4a6b5e;  --ink-faint: #89a79a;
+  --bg: #f6fbf8;  --surface: #ffffff;  --surface-sunk: #e9f5ef;
+  --border: #d7ebe0;  --border-strong: #bfdccd;
+
+  --accent: #047857;  --accent-hover: #065f46;  --accent-active: #064e3b;
+  --accent-soft: #e0f7ee;  --accent-soft-border: #a9e8cc;
+  --accent-mid: #059669;  --accent-pale: #6ee7b7;
+  --accent-2: #d4a62a;  --accent-3: #b8860b;  --accent-4: #f3d98b;
+  --neon: #f5d77a;
+
+  --accent-rgb: 4, 120, 87;
+  --accent-mid-rgb: 5, 150, 105;
+  --accent-2-rgb: 212, 166, 42;
+  --accent-3-rgb: 184, 134, 11;
+  --accent-4-rgb: 243, 217, 139;
+  --neon-rgb: 245, 215, 122;
+
+  --nav-1: #03140e;  --nav-2: #064e3b;  --nav-3: #3b2f0c;  --nav-rgb: 3, 20, 14;
+  --aurora-1: #02100b;  --aurora-2: #064e3b;  --aurora-3: #0b6b52;  --aurora-4: #03211a;  --deep-rgb: 2, 16, 11;
+}
+
+/* ===== THEME: BURGUNDY & GOLD — wine red with gold ===== */
+:root:root {
+  --ink: #2a0710;  --ink-muted: #7a4552;  --ink-faint: #b38e97;
+  --bg: #fff7f8;  --surface: #ffffff;  --surface-sunk: #fdebee;
+  --border: #f6dbe0;  --border-strong: #ebc2ca;
+
+  --accent: #9f1239;  --accent-hover: #881337;  --accent-active: #6b0f2c;
+  --accent-soft: #ffe8ee;  --accent-soft-border: #fbc0cf;
+  --accent-mid: #be123c;  --accent-pale: #fda4af;
+  --accent-2: #d4a62a;  --accent-3: #e11d48;  --accent-4: #f3d98b;
+  --neon: #f5d77a;
+
+  --accent-rgb: 159, 18, 57;
+  --accent-mid-rgb: 190, 18, 60;
+  --accent-2-rgb: 212, 166, 42;
+  --accent-3-rgb: 225, 29, 72;
+  --accent-4-rgb: 243, 217, 139;
+  --neon-rgb: 245, 215, 122;
+
+  --nav-1: #1c0309;  --nav-2: #5a0c25;  --nav-3: #4a300c;  --nav-rgb: 28, 3, 9;
+  --aurora-1: #140206;  --aurora-2: #5a0c25;  --aurora-3: #8a1a3a;  --aurora-4: #26040e;  --deep-rgb: 20, 2, 6;
+}
+
+/* ===== THEME: NAVY & GOLD — royal navy with gold ===== */
+:root:root {
+  --ink: #0b1430;  --ink-muted: #4a5679;  --ink-faint: #8792b0;
+  --bg: #f5f7fd;  --surface: #ffffff;  --surface-sunk: #e9eefa;
+  --border: #dbe3f4;  --border-strong: #c4d0ea;
+
+  --accent: #1e3a8a;  --accent-hover: #1a3277;  --accent-active: #14285f;
+  --accent-soft: #e8eefc;  --accent-soft-border: #c3d1f5;
+  --accent-mid: #2f55c4;  --accent-pale: #a5b8f0;
+  --accent-2: #d4a62a;  --accent-3: #b8860b;  --accent-4: #f3d98b;
+  --neon: #f5d77a;
+
+  --accent-rgb: 30, 58, 138;
+  --accent-mid-rgb: 47, 85, 196;
+  --accent-2-rgb: 212, 166, 42;
+  --accent-3-rgb: 184, 134, 11;
+  --accent-4-rgb: 243, 217, 139;
+  --neon-rgb: 245, 215, 122;
+
+  --nav-1: #050b1c;  --nav-2: #0f2a63;  --nav-3: #3a2d0c;  --nav-rgb: 5, 11, 28;
+  --aurora-1: #040918;  --aurora-2: #0f2a63;  --aurora-3: #1a4290;  --aurora-4: #0a1a45;  --deep-rgb: 4, 9, 24;
+}
+
+
+/* ===== THEME: PURE GOLD - pure gold everywhere ===== */
+:root:root {
+  --ink: #2a1f05;  --ink-muted: #7a6535;  --ink-faint: #b3a273;
+  --bg: #fffbec;  --surface: #ffffff;  --surface-sunk: #faf1d2;
+  --border: #f2e4b4;  --border-strong: #e6d08a;
+
+  --accent: #b8860b;  --accent-hover: #9a7009;  --accent-active: #7a5a07;
+  --accent-soft: #fdf5d9;  --accent-soft-border: #f3e0a0;
+  --accent-mid: #d4a017;  --accent-pale: #f0d878;
+  --accent-2: #e6b422;  --accent-3: #a67c00;  --accent-4: #f5d76e;
+  --neon: #ffe58a;
+
+  --accent-rgb: 184, 134, 11;
+  --accent-mid-rgb: 212, 160, 23;
+  --accent-2-rgb: 230, 180, 34;
+  --accent-3-rgb: 166, 124, 0;
+  --accent-4-rgb: 245, 215, 110;
+  --neon-rgb: 255, 229, 138;
+
+  --nav-1: #2a1f05;  --nav-2: #6b4f0a;  --nav-3: #8a6a10;  --nav-rgb: 42, 31, 5;
+  --aurora-1: #1f1603;  --aurora-2: #6b4f0a;  --aurora-3: #a07a14;  --aurora-4: #3a2a06;  --deep-rgb: 31, 22, 3;
+}
+
+
+/* ===== THEME: SILVER - pure silver / steel grey everywhere ===== */
+:root:root {
+  --ink: #1c2028;  --ink-muted: #5a6270;  --ink-faint: #98a0ae;
+  --bg: #f5f6f8;  --surface: #ffffff;  --surface-sunk: #eaecf0;
+  --border: #dfe2e8;  --border-strong: #c8cdd6;
+ 
+  --accent: #6b7280;  --accent-hover: #565d6b;  --accent-active: #434956;
+  --accent-soft: #eef0f3;  --accent-soft-border: #d3d8df;
+  --accent-mid: #8b95a5;  --accent-pale: #c5ccd6;
+  --accent-2: #b8c0cc;  --accent-3: #4b5563;  --accent-4: #d1d5db;
+  --neon: #e5e9f0;
+ 
+  --accent-rgb: 107, 114, 128;
+  --accent-mid-rgb: 139, 149, 165;
+  --accent-2-rgb: 184, 192, 204;
+  --accent-3-rgb: 75, 85, 99;
+  --accent-4-rgb: 209, 213, 219;
+  --neon-rgb: 229, 233, 240;
+ 
+  --nav-1: #12151a;  --nav-2: #3a414d;  --nav-3: #5b6472;  --nav-rgb: 18, 21, 26;
+  --aurora-1: #0d0f13;  --aurora-2: #353c47;  --aurora-3: #6b7482;  --aurora-4: #1a1e25;  --deep-rgb: 13, 15, 19;
+}
+
+
+/* ===== THEME: BLACK - true dark mode (black + graphite + soft white) =====
+   NOTE: this one is a FULL dark mode, so it ships with a few extra rules
+   (the second block). Paste BOTH blocks at the end of style.css. */
+:root:root {
+  --ink: #f4f4f5;  --ink-muted: #a1a1aa;  --ink-faint: #71717a;
+  --bg: #0a0a0b;  --surface: #141416;  --surface-sunk: #0f0f11;
+  --border: #26262b;  --border-strong: #3a3a42;
+ 
+  --accent: #5b5b66;  --accent-hover: #6c6c78;  --accent-active: #8a8a96;
+  --accent-soft: #1f1f24;  --accent-soft-border: #34343c;
+  --accent-mid: #7a7a86;  --accent-pale: #c4c4cc;
+  --accent-2: #a8a8b3;  --accent-3: #3f3f46;  --accent-4: #d4d4d8;
+  --neon: #f4f4f5;
+ 
+  --accent-rgb: 91, 91, 102;
+  --accent-mid-rgb: 122, 122, 134;
+  --accent-2-rgb: 168, 168, 179;
+  --accent-3-rgb: 63, 63, 70;
+  --accent-4-rgb: 212, 212, 216;
+  --neon-rgb: 244, 244, 245;
+ 
+  --nav-1: #000000;  --nav-2: #141416;  --nav-3: #2a2a30;  --nav-rgb: 0, 0, 0;
+  --aurora-1: #000000;  --aurora-2: #18181b;  --aurora-3: #2f2f36;  --aurora-4: #0a0a0b;  --deep-rgb: 0, 0, 0;
+ 
+  /* light tints become dark tints */
+  --tint-1: #1a1a1d;  --tint-2: #202024;
+}
+/* --- extra rules needed ONLY for the BLACK theme (things that are hard-coded white) --- */
+a { color: var(--accent-pale); }
+a:hover { color: #ffffff; }
+.text-primary { color: var(--accent-pale) !important; }
+.dropdown-menu { background: rgba(20, 20, 22, .97); }
+.list-group-item { background: var(--surface); color: var(--ink); }
+.page-link { background: var(--surface); }
+.modal-header .btn-close, .offcanvas-header .btn-close { filter: invert(1); }
+.input-group-text { color: var(--accent-pale); }
+html body.login-page .card,
+html body .login-card,
+html body .kiosk-card,
+html body .offcanvas { background: rgba(20, 20, 22, .92); border-color: rgba(255, 255, 255, .08); }
+html body .login-card .text-decoration-none { color: var(--accent-pale); }
+html body .login-card .input-group .input-group-text { color: var(--accent-pale); }
+html body .info-panel-item i { color: var(--accent-pale); }
+html body .login-card #defaultCredentials { color: var(--accent-pale) !important; }
+ 
+ 
+/* ===== THEME: WHITE - truly white: white navbar, white login/kiosk, soft slate-grey buttons =====
+   Paste BOTH blocks (the :root block + the extra rules under it) at the end of style.css. */
+:root:root {
+  --ink: #0f172a;  --ink-muted: #475569;  --ink-faint: #94a3b8;
+  --bg: #f8fafc;  --surface: #ffffff;  --surface-sunk: #f1f5f9;
+  --border: #e2e8f0;  --border-strong: #cbd5e1;
+ 
+  --accent: #475569;  --accent-hover: #334155;  --accent-active: #1e293b;
+  --accent-soft: #f1f5f9;  --accent-soft-border: #e2e8f0;
+  --accent-mid: #5f6f86;  --accent-pale: #94a3b8;
+  --accent-2: #7c8aa0;  --accent-3: #334155;  --accent-4: #cbd5e1;
+  --neon: #e2e8f0;
+ 
+  --accent-rgb: 71, 85, 105;
+  --accent-mid-rgb: 95, 111, 134;
+  --accent-2-rgb: 124, 138, 160;
+  --accent-3-rgb: 51, 65, 85;
+  --accent-4-rgb: 203, 213, 225;
+  --neon-rgb: 226, 232, 240;
+ 
+  /* light navbar + light login/kiosk background */
+  --nav-1: #ffffff;  --nav-2: #fafbfc;  --nav-3: #f1f5f9;  --nav-rgb: 15, 23, 42;
+  --aurora-1: #ffffff;  --aurora-2: #f1f5f9;  --aurora-3: #e2e8f0;  --aurora-4: #f8fafc;  --deep-rgb: 15, 23, 42;
+}
+/* --- extra rules needed ONLY for the WHITE theme (text that was hard-coded white) --- */
+/* navbar */
+html body .navbar { box-shadow: 0 1px 0 var(--border), 0 10px 28px -16px rgba(15, 23, 42, .18); }
+html body .navbar .navbar-brand { color: var(--ink) !important; }
+html body .navbar .navbar-text { color: var(--ink-muted) !important; }
+html body .navbar .navbar-nav .nav-link { color: var(--ink-muted) !important; }
+html body .navbar .navbar-nav .nav-link:hover { color: var(--ink) !important; background: var(--surface-sunk); }
+html body .navbar .navbar-nav .nav-link.active { color: #ffffff !important; }
+html body .navbar .navbar-toggler { border: 1px solid var(--border-strong); }
+html body .navbar .navbar-toggler-icon {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='%230f172a' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") !important;
+}
+.modal-backdrop.show { background: #0f172a; }
+html body .offcanvas-header { background: var(--surface-sunk); color: var(--ink); }
+/* kiosk (home_attendance) */
+html body .kiosk-topbar { background: rgba(255, 255, 255, .88); border-bottom: 1px solid var(--border); box-shadow: 0 8px 24px -16px rgba(15, 23, 42, .18); }
+html body .kiosk-brand { color: var(--ink); }
+html body .kiosk-brand small { color: var(--ink-muted); }
+html body .kiosk-clock { color: var(--ink-muted); }
+html body .kiosk-clock #liveTime { background-image: linear-gradient(90deg, var(--ink), var(--accent-mid)); text-shadow: none; }
+html body .kiosk-hero h1 { background-image: linear-gradient(90deg, var(--ink) 0%, var(--accent-3) 55%, var(--accent-2) 100%); }
+html body .kiosk-hero p { color: var(--ink-muted); }
+html body .kiosk-footer { color: var(--ink-muted); }
+html body .kiosk-footer a { color: var(--accent); }
+html body .kiosk-footer a:hover { color: var(--accent-active); }
+/* cards on the white login / kiosk background need an edge */
+html body .kiosk-card { border: 1px solid var(--border); box-shadow: 0 20px 50px -28px rgba(15, 23, 42, .25); }
+html body.login-page .card,
+html body .login-card { border: 1px solid var(--border-strong); box-shadow: 0 25px 60px -25px rgba(15, 23, 42, .28); }
+ 
