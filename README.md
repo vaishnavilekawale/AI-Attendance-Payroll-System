@@ -674,13 +674,16 @@ This must print nothing.
 
 1. Install **[Inno Setup 6](https://jrsoftware.org/isdl.php)**.
 2. Make sure `dist\AttendancePayrollSystem\` exists (Inno only packages what's already on disk).
-3. Compile — either:
+3. Compile — any one of these:
+   - **`setup.bat`:** choose **2** (PyInstaller, then the installer, in one go). If Inno Setup 6 is not installed, the script says so, keeps your `dist` folder and offers to open the download page — install it, press any key in the same window and the installer step continues (no rebuild).
    - **GUI:** open `installer\AttendancePayrollSystem.iss` → **Build ▸ Compile**, or
-   - **Command line:**
+   - **Command line** (run from the project root):
 
 ```
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AttendancePayrollSystem.iss
 ```
+
+> 💡 In **PowerShell** put `&` in front: `& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\AttendancePayrollSystem.iss`. In **CMD** use it exactly as written above.
 
 4. Your installer appears at:
 

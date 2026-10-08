@@ -92,7 +92,7 @@ echo ==========================================================
 :menu
 echo.
 echo   1 - Run the app now ^(development mode^)
-echo   2 - Build the .exe ^(PyInstaller, slow^)
+echo   2 - Build the .exe + installer ^(PyInstaller, then Inno Setup - slow^)
 echo   3 - Exit
 choice /c 123 /n /m "Choose 1-3: "
 if errorlevel 3 goto :done
@@ -127,6 +127,196 @@ echo.
 echo Build done. Output is in the 'dist\AttendancePayrollSystem' folder.
 echo Look above for the line "Bundling DeepFace weights from:". If you see
 echo "WARNING: DeepFace weights folder not found", the exe will not work offline.
+goto :makeinstaller
+
+:: ---------------------------------------------------------
+:: Inno Setup: wrap dist\AttendancePayrollSystem into ONE Setup.exe
+:: ---------------------------------------------------------
+:makeinstaller
+echo.
+if not exist "dist\AttendancePayrollSystem\AttendancePayrollSystem.exe" (
+    echo [ERROR] dist\AttendancePayrollSystem was not found.
+    echo         Choose option 2 first ^(PyInstaller build^), then try again.
+    goto :menu
+)
+set "ISCC="
+if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+if not defined ISCC goto :noinno
+echo [WARN] Inno Setup 6 is NOT installed on this PC, so the Setup.exe
+echo        cannot be created yet. Your dist folder is fine and was kept.
+echo.
+echo        Download and install Inno Setup 6 ^(free, keep default options^):
+echo           https://jrsoftware.org/isdl.php
+echo.
+choice /c YN /n /m "Open the download page now? (Y/N): "
+if errorlevel 2 goto :menu
+start "" https://jrsoftware.org/isdl.php
+echo.
+echo   Install Inno Setup, then come back to this window.
+echo   No need to rebuild - the installer step simply continues.
+pause
+goto :makeinstaller
+
+:nopython
+echo [OK] Using Python:
+%PY% --version
+echo.
+
+:: ---------------------------------------------------------
+:: 2. Virtual environment
+:: ---------------------------------------------------------
+if not exist venv\Scripts\activate.bat (
+    echo [..] Creating virtual environment ^(venv^)...
+    %PY% -m venv venv
+    if errorlevel 1 goto :fail
+) else (
+    echo [OK] venv already exists.
+)
+call venv\Scripts\activate.bat
+if errorlevel 1 goto :fail
+
+:: ---------------------------------------------------------
+:: 3. Install dependencies (stops on first error)
+:: ---------------------------------------------------------
+echo [..] Upgrading pip...
+python -m pip install --upgrade pip
+if errorlevel 1 goto :fail
+
+:: plain opencv-python conflicts with opencv-contrib-python
+pip uninstall -y opencv-python opencv-python-headless >nul 2>&1
+
+echo [..] Installing requirements.txt ^(several GB, please wait^)...
+pip install -r requirements.txt
+if errorlevel 1 goto :fail
+
+echo [..] Checking that the heavy ML packages import correctly...
+python -c "import cv2, tensorflow, mediapipe, deepface; print('ML stack OK')"
+if errorlevel 1 goto :fail
+
+:: ---------------------------------------------------------
+:: 4. .env and runtime folders
+:: ---------------------------------------------------------
+if not exist .env (
+    if exist .env.example (
+        copy .env.example .env >nul
+        echo [OK] .env created from .env.example - edit it for email settings.
+    )
+)
+:: Vendor portal settings (only needed on YOUR vendor server, never given to customers)
+if not exist licensing\.env.vendor (
+    if exist licensing\.env.vendor.example (
+        copy licensing\.env.vendor.example licensing\.env.vendor >nul
+        echo [OK] licensing\.env.vendor created - fill Razorpay, email and admin password
+        echo      ONLY on your vendor server. Customers never need this file.
+    )
+)
+if not exist dataset mkdir dataset
+if not exist instance mkdir instance
+if not exist uploads mkdir uploads
+if not exist trained_model mkdir trained_model
+if not exist logs mkdir logs
+
+:: ---------------------------------------------------------
+:: 5. Offline UI assets (Bootstrap, icons, Chart.js, fonts)
+:: ---------------------------------------------------------
+echo [..] Downloading UI assets into static\vendor ...
+python scripts\download_vendor_assets.py
+if errorlevel 1 (
+    echo [WARN] UI assets download failed. The pages will look unstyled.
+    echo        Check your internet and run:  python scripts\download_vendor_assets.py
+)
+
+echo.
+echo ==========================================================
+echo   Setup finished. Nothing has been built yet.
+echo ==========================================================
+
+:menu
+echo.
+echo   1 - Run the app now ^(development mode^)
+echo   2 - Build the .exe + installer ^(PyInstaller, then Inno Setup - slow^)
+echo   3 - Exit
+choice /c 123 /n /m "Choose 1-3: "
+if errorlevel 3 goto :done
+if errorlevel 2 goto :build
+if errorlevel 1 goto :runapp
+goto :menu
+
+:runapp
+echo.
+echo Starting at http://127.0.0.1:5000  ^(Ctrl+C to stop^)
+echo First run opens the Setup Wizard. The first face registration
+echo downloads the face-model weights, so keep internet ON.
+set FLASK_ENV=development
+python app.py
+goto :menu
+
+:build
+echo.
+echo [..] Installing packaging tools...
+pip install -r requirements-packaging.txt
+if errorlevel 1 goto :fail
+echo [..] Pre-downloading face-model weights ^(optional, needed for offline PCs^)...
+python -c "from deepface import DeepFace; DeepFace.build_model('Facenet512'); print('weights OK')"
+if errorlevel 1 (
+    echo [WARN] Could not pre-download weights. Register one test face with
+    echo        python app.py first, then build again.
+)
+echo [..] Building .exe ...
+pyinstaller attendance_app.spec --clean
+if errorlevel 1 goto :fail
+echo.
+echo Build done. Output is in the 'dist\AttendancePayrollSystem' folder.
+echo Look above for the line "Bundling DeepFace weights from:". If you see
+echo "WARNING: DeepFace weights folder not found", the exe will not work offline.
+goto :makeinstaller
+
+:: ---------------------------------------------------------
+:: Inno Setup: wrap dist\AttendancePayrollSystem into ONE Setup.exe
+:: ---------------------------------------------------------
+:makeinstaller
+echo.
+if not exist "dist\AttendancePayrollSystem\AttendancePayrollSystem.exe" (
+    echo [ERROR] dist\AttendancePayrollSystem was not found.
+    echo         Choose option 2 first ^(PyInstaller build^), then try again.
+    goto :menu
+)
+set "ISCC="
+if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+if not defined ISCC goto :noinno
+
+echo [..] Compiling installer with Inno Setup...
+"%ISCC%" installer\AttendancePayrollSystem.iss
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Inno Setup failed. Scroll up to read the message.
+    echo         ^(A missing wizard_*.bmp / app_icon.ico is the usual cause.^)
+    goto :menu
+)
+echo.
+echo ==========================================================
+echo   Installer ready - give THIS file to the customer:
+echo   installer\Output\AttendancePayrollSystem-Setup-1.0.0.exe
+echo   ^(Do NOT give the exe from the dist folder - it needs its folder.^)
+echo ==========================================================
+if exist installer\Output start "" explorer installer\Output
+goto :menu
+
+:noinno
+echo [WARN] Inno Setup 6 is NOT installed on this PC, so the Setup.exe
+echo        could not be created. The dist folder is fine and was kept.
+echo.
+echo        1. Download and install Inno Setup 6 ^(free, keep default options^):
+echo           https://jrsoftware.org/isdl.php
+echo        2. Run this file again and choose option 3.
+echo.
+choice /c YN /n /m "Open the Inno Setup download page now? (Y/N): "
+if errorlevel 2 goto :menu
+start "" https://jrsoftware.org/isdl.php
 goto :menu
 
 :nopython

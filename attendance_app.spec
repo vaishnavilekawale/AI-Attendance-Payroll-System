@@ -285,13 +285,33 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# ---------------------------------------------------------------------
+# ONEDIR build (matches README + installer\AttendancePayrollSystem.iss).
+#
+# The EXE below only holds the launcher + bootloader (exclude_binaries=True);
+# COLLECT then gathers it together with every DLL / data file into
+#     dist\AttendancePayrollSystem\AttendancePayrollSystem.exe  (+ _internal\)
+# The Inno Setup script packages exactly that folder. A previous version of
+# this spec had no COLLECT step, which produced a single-file exe at
+# dist\AttendancePayrollSystem.exe instead - slow to start (TensorFlow is
+# unpacked to a temp folder on every launch) and not what the .iss expects
+# ("No files found matching ...\dist\AttendancePayrollSystem\*").
+#
+# Console window: OFF for customer builds. To see console output while
+# debugging a build on YOUR OWN machine, build with
+#     set APS_CONSOLE=1
+#     pyinstaller attendance_app.spec --clean
+# (never ship a console build to a customer).
+# ---------------------------------------------------------------------
+CONSOLE_BUILD = os.environ.get('APS_CONSOLE', '').strip().lower() in ('1', 'true', 'yes', 'on')
+if CONSOLE_BUILD:
+    print("[spec] APS_CONSOLE is set - building WITH a console window (debug build, do not ship).")
+
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='AttendancePayrollSystem',
     debug=False,
     bootloader_ignore_signals=False,
@@ -302,16 +322,24 @@ exe = EXE(
                          # worth the smaller exe size for something you're charging customers for.
                          # Re-enable only if you've separately verified it doesn't get flagged on
                          # a clean VM with default Defender settings.
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,     # windowed app, no console popup - customer just sees the browser open.
-                         # Flip to True TEMPORARILY on your own machine only, if you need to see
-                         # console output while debugging a build issue - never ship console=True.
+    console=CONSOLE_BUILD,   # False = windowed app, no console popup - customer just sees the
+                              # browser open. See APS_CONSOLE note above for debugging.
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon=APP_ICON_PATH,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='AttendancePayrollSystem',
 )
 
 # ---------------------------------------------------------------------
