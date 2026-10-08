@@ -112,6 +112,14 @@ WizardStyle=modern
 ; the installer will still build and work fine without them.
 SetupIconFile=app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
+; Big logo inside the installer window itself:
+;   WizardImageFile      = tall banner on the Welcome / Finished pages (left side)
+;   WizardSmallImageFile = small logo in the top-right corner of the other pages
+; Three sizes each (100% / 150% / 200% screen scaling) so the logo stays sharp
+; on every display. Needs Inno Setup 6.1 or newer (this script already needs
+; 6.3+ because of x64compatible). The .bmp files live next to this .iss file.
+WizardImageFile=wizard_large_100.bmp,wizard_large_150.bmp,wizard_large_200.bmp
+WizardSmallImageFile=wizard_small_100.bmp,wizard_small_150.bmp,wizard_small_200.bmp
 ; Shown on the "ready to install" page and in Add/Remove Programs.
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
