@@ -9,6 +9,7 @@
 ![Security](https://img.shields.io/badge/Security-AES--256%20%7C%20Ed25519-success)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20(64--bit)-0078D6?logo=windows&logoColor=white)
 ![Tests](https://img.shields.io/badge/tests-pytest-brightgreen?logo=pytest&logoColor=white)
+![Version](https://img.shields.io/badge/version-1.0.0-informational)
 ![Status](https://img.shields.io/badge/status-internal--production-orange)
 
 [Features](#2--features) • [Quick Start](#6--quick-start) • [Installation](#7--installation--setup-a-to-z) • [Build the .exe](#11--building--packaging-for-developers) • [Licensing](#12--license--backup-management) • [Troubleshooting](#14--troubleshooting--faqs)
@@ -42,11 +43,11 @@
 
 The **AI Attendance & Payroll System** is a full-stack Flask application that:
 
-- ✅ marks employee attendance automatically using **face recognition** at a public kiosk,
-- 💰 runs a complete **payroll pipeline** (allowances, deductions, net pay),
+- ✅ marks employee attendance automatically using **face recognition** — at a public kiosk screen *and* from each employee's own login,
+- 💰 runs a complete **payroll pipeline** (allowances, deductions, overtime, net pay),
 - 📄 generates **AES-256 password-protected PDF payslips** and emails them automatically,
-- 🔑 protects the product with **Ed25519-signed, machine-bound licenses**, and
-- 💾 protects customer data with **automated weekly backups**.
+- 🔑 protects the product with **Ed25519-signed, machine-bound licenses** (30-day trial, then a license lock screen), and
+- 💾 protects customer data with **automated weekly backups** (plus a catch-up backup if the PC was off).
 
 It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Setup, so a non-technical client just installs and double-clicks — **no Python, no `pip`, no server setup** on their machine.
 
@@ -67,46 +68,55 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 
 | Feature | Details |
 | --- | --- |
-| **Face-recognition kiosk** | Public scanning page, DeepFace (FaceNet512) with strict cosine-distance matching |
-| **No guessing on look-alikes** | Configurable confidence margin — ambiguous faces are rejected |
-| **Single punch per appearance** | Frame-presence locking prevents duplicate punches |
+| **Face-recognition kiosk** | Public scanning page (`/`) that scans continuously (about every 2 seconds). DeepFace (FaceNet512, RetinaFace detector) with strict cosine-distance matching |
+| **Employee self-service attendance** | After logging in, an employee marks their *own* attendance with their face (**My Attendance** page). The face must match the logged-in employee, otherwise it is rejected |
+| **No guessing on look-alikes** | Hard distance ceiling of `0.30` plus a minimum margin of `0.05` over the second-best candidate — ambiguous faces are reported *Unknown* instead of being guessed |
+| **Single punch per appearance** | Frame-presence lock (8-second timeout) prevents duplicate punches while someone stands in front of the camera |
+| **Multiple IN/OUT pairs per day** | Every IN→OUT pair is stored as an activity; working hours are the exact sum of all pairs |
+| **Auto-logout approval** | At **23:59** every day, anyone who never punched out gets a *logout approval request* that a manager/admin approves or rejects. A startup pass also backfills requests missed while the PC was off |
 | **Manual fallback with approval** | Password-verified manual attendance, gated behind manager/admin approval |
+| **Admin / manager attendance edit** | Managers and admins can correct IN/OUT times; calculations are re-run from the edited times |
 | **Full audit trail** | `attendance_type`, `approval_status`, `submission_timestamp` on every record |
-| **One shared rule engine** | Present / Late / Half-Day / Absent computed in one place for face *and* manual punches |
-| **Versioned settings** | Past attendance is always evaluated against the rules in force *on that date* |
+| **One shared rule engine** | Present / Late / Half-Day / Absent / Overtime computed in one place (`services/attendance_calculator.py`) for face *and* manual punches |
+| **Versioned settings** | Past attendance is always evaluated against the rules in force *on that date* (`AttendanceSettingsHistory`) |
 
 ### 💰 Payroll & Reports
 
 - Configurable **allowances** (HRA, DA, Medical, Travel, Special, Other) and **deductions** (PF, ESIC, TDS, Professional Tax, LOP, Late, Transport)
-- **Automated monthly payroll** via APScheduler, with a startup **reconciliation pass** that backfills any period missed while the PC was off
-- **AES-256 password-protected PDF payslips** (ReportLab + pikepdf) with automated email delivery
+- **Overtime** and **late-entry deduction** rules (configurable in Settings / `.env`)
+- Payroll eligibility follows each employee's **joining date**
+- **Automated monthly payroll** via APScheduler (1st of every month, 12:01, for the month just completed), with a startup **reconciliation pass** that backfills any period missed while the PC was off
+- **AES-256 password-protected PDF payslips** (ReportLab + pikepdf) with automated email delivery. Admins or employees can set a **custom payslip password**; otherwise a default formula derived from the employee's own details is used
 - Admin dashboard analytics, department-wise stats, and PDF export for admin and employee reports
 - A single shared aggregation service, so numbers never disagree between screens
 
 ### 🔐 Security
 
-- **Face photos encrypted at rest** (Fernet / AES) — opt-in biometric consent
-- **AES-256** password-protected payslips
-- **Ed25519 licensing** — customers only hold the *public* key, so they cannot forge a license
+- **Face photos encrypted at rest** (Fernet / AES) — with an **opt-in biometric consent log** per employee
+- **AES-256** password-protected payslips; custom payslip passwords are stored encrypted
+- **Ed25519 licensing** — customers only hold the *public* key, so they cannot forge a license. In packaged builds the public key is embedded and cannot be overridden from `.env`
+- **Tamper-resistant 30-day trial** (stored in several places; winding the clock back revokes the trial)
 - **CSRF protection** on all state-changing routes
-- **Rate-limited login** against brute-force attempts
+- **Rate-limited login and password flows** (login: 10/minute and 50/hour; password/reset/setup routes: 5/minute)
 - Werkzeug password hashing
 
 ### 💾 Operations
 
-- **Automated weekly backups** every Sunday at 02:00 (last 4 kept)
+- **Automated weekly backups** every Sunday at 02:00 — saved to a dedicated `backups\` folder **and** copied to an external location when one is available (see [Backups](#-backups)); last 4 kept per folder
+- **Startup catch-up backup** if the newest backup is older than 7 days
 - One-click **manual backup download** from Admin → Settings
 - **Role-based access:** Admin, Manager, Employee
-- **First-run Setup Wizard** — no manual database or admin seeding
+- **First-run Setup Wizard** — admin account, company details, license (optional) — no manual database or admin seeding
+- **License lock screen** when the trial has ended and no valid license exists
 - **Fully offline-capable UI** — Bootstrap, icons, Chart.js and fonts are bundled locally
 
 ### 👥 Roles
 
 | Role | Access |
 | --- | --- |
-| **Admin** | Full control — employees, payroll, settings, licensing, backups, reports, approvals |
-| **Manager** | An employee flagged as manager; approves manual-attendance and logout-regularization requests in their scope |
-| **Employee** | Self-service — own attendance, payslips, profile, password |
+| **Admin** | Full control — employees, face registration, payroll, settings, licensing, backups, reports, approvals |
+| **Manager** | An employee whose designation is **Manager**; approves manual-attendance and logout requests for their department |
+| **Employee** | Self-service portal — Dashboard, **My Attendance** (face scan), **My Payroll** (payslips), **My Reports**, **My Profile**, change password |
 
 ---
 
@@ -115,13 +125,14 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 | Layer | Technology |
 | --- | --- |
 | **Backend** | Python 3.10, Flask 3.0, SQLAlchemy 2.0, Flask-Migrate / Alembic, Flask-WTF, Flask-Limiter |
-| **AI / Computer Vision** | DeepFace (FaceNet512), TensorFlow 2.15 + tf-keras, OpenCV-Contrib, MediaPipe |
+| **AI / Computer Vision** | DeepFace 0.0.93 (FaceNet512 + RetinaFace), TensorFlow 2.15 + tf-keras, OpenCV-Contrib 4.8.1.78, MediaPipe 0.10.21, NumPy 1.26.4 |
 | **Frontend** | Bootstrap 5, Bootstrap Icons, vanilla JavaScript (`fetch`), Chart.js |
 | **Database** | SQLite (default) or MySQL via PyMySQL |
 | **PDF & Security** | ReportLab, pikepdf (AES-256), `cryptography` (Fernet, Ed25519) |
-| **Scheduling** | APScheduler (payroll, auto-logout, backups) |
+| **Scheduling** | APScheduler (payroll, auto-logout approvals, backups) |
+| **Licensing / payments (vendor side)** | Ed25519 signing, Razorpay purchase portal (`licensing/vendor_app.py`) |
 | **Production server** | Waitress (used automatically outside development mode) |
-| **Testing** | pytest, with a fully stubbed ML/CV layer |
+| **Testing / CI** | pytest (600+ tests, stubbed ML/CV layer), GitHub Actions workflow |
 | **Packaging** | PyInstaller 6.x + Inno Setup 6 |
 
 ---
@@ -140,21 +151,36 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 │     │                    ├─ 3. Open browser automatically      │
 │     │                    └─ 4. Serve on 127.0.0.1:5000         │
 │     │                                                          │
+│     ├─ License gate: runs before every request; shows the      │
+│     │               lock screen when trial/license has ended   │
 │     ├─ Flask blueprints: setup · auth · employees · attendance │
 │     │                    payroll · reports · approvals · settings
-│     ├─ APScheduler: monthly payroll · 23:59 auto-logout ·      │
-│     │               Sunday 02:00 backup                        │
+│     ├─ APScheduler: monthly payroll · 23:59 auto-logout        │
+│     │               approvals · Sunday 02:00 backup            │
 │     │                                                          │
 │     ├─ instance/attendance.db      (SQLite)                    │
 │     ├─ dataset/                    (encrypted face photos)     │
-│     ├─ uploads/                    (payslips, backups/)        │
+│     ├─ uploads/                    (payslips, profile photos)  │
+│     ├─ backups/                    (automated backup zips)     │
 │     ├─ trained_model/              (face-embedding cache)      │
+│     ├─ logs/                       (rotating app logs)         │
 │     ├─ license.lic                 (signed license token)      │
 │     └─ .env                        (secrets & configuration)   │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 **In plain words:** when you start the app it (1) checks the license, (2) loads the face-recognition model, (3) opens your browser, and (4) keeps running in the background and serves the web pages. Everything is stored in plain folders next to the app.
+
+### Main pages
+
+| Area | URLs |
+| --- | --- |
+| **Kiosk** | `/` (public, auto-scan), `POST /api/auto-scan-attendance` |
+| **Auth** | `/login` (admin and employee tabs), `/logout`, `/forgot-password`, `/employee-forgot-password`, `/change-password`, `/employee-change-password` |
+| **Setup & license** | `/setup/` (admin → company → license → done), `/license` (lock screen), `/license/activate` |
+| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll`, `/payroll-settings`, `/reports`, `/settings`, `/admin/approvals`, `/admin/pending-manual-attendance` |
+| **Manager** | `/manager/approvals`, `/manager/pending-manual-attendance`, `/manager/edit-attendance/<id>` |
+| **Employee** | `/employee-dashboard`, `/employee-attendance`, `/employee-payroll`, `/employee-reports`, `/employee-profile` |
 
 ---
 
@@ -254,10 +280,9 @@ It does these steps for you and **stops at the first error** (it never prints a 
 | --- | --- |
 | 1 | Finds **Python 3.10** (stops with a clear message if it is missing) |
 | 2 | Creates the `venv` folder |
-| 3 | Upgrades `pip` and installs everything in `requirements.txt` |
-| 4 | Removes the conflicting plain `opencv-python`, then checks that `cv2`, TensorFlow, MediaPipe and DeepFace import correctly |
-| 5 | Creates `.env` from `.env.example` and creates the folders the app needs |
-| 6 | Downloads the UI files (Bootstrap, icons, Chart.js, fonts) into `static\vendor` |
+| 3 | Upgrades `pip`, removes the conflicting plain `opencv-python`, installs everything in `requirements.txt` and checks that `cv2`, TensorFlow, MediaPipe and DeepFace import correctly |
+| 4 | Creates `.env` from `.env.example`, creates `licensing\.env.vendor` from its example (vendor use only) and creates the folders the app needs |
+| 5 | Downloads the UI files (Bootstrap, icons, Chart.js, fonts) into `static\vendor` |
 
 Then a menu appears:
 
@@ -271,7 +296,7 @@ Then a menu appears:
 
 > 📝 During install you will see a list of **about 112 packages**. That is normal. Your `requirements.txt` has about 35 direct packages, but TensorFlow, DeepFace and MediaPipe bring many more of their own.
 
-> ⚠️ **OpenCV conflict:** DeepFace installs plain `opencv-python` as a dependency, which clashes with `opencv-contrib-python` (both provide `cv2`). If you see `cv2` errors after setup, run the fix in [Step 4](#step-4️⃣--install-dependencies) below.
+> ⚠️ **OpenCV conflict:** DeepFace asks for plain `opencv-python`, which clashes with `opencv-contrib-python` (both provide `cv2`). If you see `cv2` errors after setup, follow the repair steps in [Troubleshooting](#-cv2-errors-module-cv2-has-no-attribute-imread--attendance-not-marked).
 
 ### Option B: manual setup, step by step
 
@@ -326,9 +351,9 @@ python -c "import cv2, tensorflow, mediapipe, deepface; print('OK')"
 pip check
 ```
 
-You want to see `OK` and `No broken requirements found`.
+You want to see `OK`. `pip check` may still print `deepface ... requires opencv-python, which is not installed` — that message is **harmless** (see [Troubleshooting](#-pip-check-says-deepface-requires-opencv-python)).
 
-> ⚠️ Use a **clean** venv. Never have plain `opencv-python` installed next to `opencv-contrib-python` — both provide `cv2` and will conflict. If in doubt: delete the `venv` folder and start again from Step 3.
+> ⚠️ Use a **clean** venv. Never have plain `opencv-python` installed next to `opencv-contrib-python` — both provide `cv2` and will conflict. Always install packages with the **pinned versions** from `requirements.txt`, and never interrupt a `pip install` halfway.
 
 #### Step 5️⃣ — Configure the environment file (`.env`)
 
@@ -357,9 +382,17 @@ MAIL_DEFAULT_SENDER=your-company@gmail.com
 
 # ── Company & office defaults (also editable later in Settings) ──
 COMPANY_NAME=Your Company Pvt Ltd
+COMPANY_LOGO=static/images/company_logo.png
 OFFICE_START_TIME=09:00
 OFFICE_END_TIME=18:00
 GRACE_PERIOD_MINUTES=15
+
+# ── Working hours & salary rules ───────────────────────────
+WORKING_HOURS_PER_DAY=9.0
+LATE_DEDUCTION_ENABLED=false
+LATE_DEDUCTION_PER_OCCURRENCE=0.0
+OVERTIME_ENABLED=true
+OVERTIME_RATE=1.5
 
 # ── Face recognition ───────────────────────────────────────
 FACE_RECOGNITION_TOLERANCE=0.6
@@ -369,6 +402,11 @@ MIN_FACE_IMAGES_REQUIRED=20
 # Do NOT set on a fresh install — generated automatically and written here.
 # BACK UP .env once it exists. Losing this key = face photos unrecoverable.
 # FACE_DATA_ENCRYPTION_KEY=
+
+# ── Licensing (customer app) ───────────────────────────────
+# LICENSE_PURCHASE_URL=https://buy.yourcompany.com
+SUPPORT_EMAIL=your@gmail.com
+# LICENSE_SERVER_URL=https://buy.yourcompany.com
 ```
 
 | Key | Required? | What to know |
@@ -377,8 +415,17 @@ MIN_FACE_IMAGES_REQUIRED=20
 | `FLASK_ENV` | Yes | `development` enables Flask's debugger (unsafe for customers). `production` uses Waitress. |
 | `MAIL_*` | Only for email | Without valid SMTP credentials payslip/reset emails fail and log an error; everything else still works. For Gmail use an **App Password**. |
 | `DATABASE_URL` | No | Default is SQLite — right for a single-site install. |
+| `WORKING_HOURS_PER_DAY`, `OVERTIME_*`, `LATE_DEDUCTION_*` | No | Default salary rules; also editable later in Settings. |
+| `FACE_RECOGNITION_TOLERANCE` | No | Admin-tunable, but can only make matching **stricter** than the built-in `0.30` ceiling, never looser. |
 | `FACE_DATA_ENCRYPTION_KEY` | Auto | Managed by `crypto_utils.py`. **Back it up.** |
-| `LICENSE_TOKEN` / `LICENSE_PUBLIC_KEY_HEX` | No | Optional overrides for the licensing system (see [License Management](#12--license--backup-management)). |
+| `LICENSE_PURCHASE_URL` | No | Address of your vendor portal; powers the **Buy a license** button on the lock screen (the machine fingerprint is appended automatically). |
+| `SUPPORT_EMAIL` | No | Shown on the license lock screen. |
+| `LICENSE_SERVER_URL` | No | If set, successful activations are reported to your vendor portal (best effort, never blocks activation). |
+| `LICENSE_TOKEN` / `LICENSE_PUBLIC_KEY_HEX` | No | Optional overrides for development (see [License Management](#12--license--backup-management)). The public-key override is **ignored in packaged builds**. |
+| `BACKUP_DIR`, `BACKUP_AUTO_EXTERNAL`, `BACKUP_KEEP`, `BACKUP_CATCHUP_DAYS` | No | Backup behaviour (see [Backups](#-backups)). |
+| `DISABLE_CATCHUP_BACKUP` | No | `true` disables the startup catch-up backup. |
+| `SKIP_BROWSER_AUTOLAUNCH` | No | `true` stops the app from opening the browser on start. |
+| `RATELIMIT_STORAGE_URI` | No | Rate-limit storage; default `memory://`. |
 
 > 🔒 **Never commit `.env`** and never copy your own `.env` into a customer deliverable. Every install gets its own.
 
@@ -403,11 +450,11 @@ DeepFace downloads FaceNet512 + RetinaFace weights to `%USERPROFILE%\.deepface\w
 dir %USERPROFILE%\.deepface\weights
 ```
 
-You should see `facenet512_weights.h5` and RetinaFace weights (~100–300 MB total). The PyInstaller build bundles these so client PCs work **offline**.
+You should see `facenet512_weights.h5` and RetinaFace weights (~100–300 MB total). The PyInstaller build bundles these so client PCs work **offline**. (`scripts\prepare_deepface_weights.py` can also prepare them.)
 
 #### Step 8️⃣ — Create the runtime folders (only if they are missing)
 
-The app creates `instance/`, `dataset/`, `uploads/`, `trained_model/` and `logs/` by itself on first run. `setup.bat` also creates them. If you ever need to do it by hand:
+The app creates `instance/`, `dataset/`, `uploads/`, `trained_model/` and `logs/` by itself on first run (and `backups/` on the first backup). `setup.bat` also creates them. If you ever need to do it by hand:
 
 ```
 mkdir dataset instance uploads trained_model logs
@@ -431,21 +478,24 @@ python app.py
 
 Always run it from inside the activated venv (`venv\Scripts\activate`). Or just choose **1** in the `setup.bat` menu.
 
-Expected console output:
+Expected console output (abridged):
 
 ```
 ==================================================
 [LICENSE] Checking license status...
 ==================================================
-✅ License valid: Trial mode: 30 day(s) remaining
+✅ License check passed: License is valid
 🔍 Loading face recognition model and employee face data...
-✅ Face recognition loaded: 0 employees registered
+✅ Face recognition loaded: 4 employees registered
+✅ Face embeddings ready: 80 image(s) ...
 ==================================================
 🚀 Attendance & Payroll System
    Running at: http://127.0.0.1:5000/
    Mode: DEVELOPMENT (debug=True)
 ==================================================
 ```
+
+On a fresh install the license line reads `Trial mode: 30 day(s) remaining` and the face line reads `0 employees registered`.
 
 Stop the app any time with **Ctrl + C**.
 
@@ -456,18 +506,27 @@ Stop the app any time with **Ctrl + C**.
 | URL | Purpose |
 | --- | --- |
 | `/` | Public kiosk attendance screen |
-| Admin / Employee login | One click away from the kiosk page |
-| Setup Wizard | Shown automatically until the first Admin exists |
+| `/login?role=admin` · `/login?role=employee` | Admin / Employee login (one click away from the kiosk page) |
+| `/setup/` | Setup Wizard — shown automatically until the first Admin exists |
+| `/license` | License lock screen — shown automatically once trial/license has ended |
 
 ### 🧙 First-run Setup Wizard
 
 1. Create the first **Admin** account (remember this password — write it down).
-2. Enter **Company** details (name, address, logo, contact).
-3. Set default **office timing / working hours** (editable later in Settings).
+2. Enter **Company** details (name, office hours, etc.).
+3. **License** — activate a license now, or skip to start the 30-day trial.
+4. **Done** — confirmation and a link into the dashboard.
 
 > ℹ️ Outside development mode (`FLASK_ENV=production`, or any packaged build) the app is served by **Waitress** with 8 threads, so several kiosk check-ins can be handled at once.
 
 On first run the app creates `instance/attendance.db`, `dataset/`, `uploads/` and `trained_model/` automatically. Logs go to `logs/` (rotating).
+
+### 👩‍💼 Typical daily workflow
+
+1. **Admin** adds employees and registers their faces (at least `MIN_FACE_IMAGES_REQUIRED` photos each), then trains/refreshes the face model.
+2. **Employees** are marked present by the kiosk screen, or log in and use **My Attendance**.
+3. At **23:59** anyone who never punched out gets a logout approval request → **manager/admin** approves or rejects it.
+4. On the **1st of every month** payroll for the previous month is generated, payslip PDFs are created and emailed.
 
 ---
 
@@ -475,12 +534,13 @@ On first run the app creates `instance/attendance.db`, `dataset/`, `uploads/` an
 
 Do this once after setup (and again on a clean PC before delivering to a client). If a step fails, see [section 14](#14--troubleshooting--faqs).
 
-- [ ] The console shows **License valid: Trial mode** and **Face recognition loaded**
+- [ ] The console shows **License check passed** and **Face recognition loaded**
 - [ ] The page opens **with styling** (colours, buttons) — if it looks like plain text, run `python scripts\download_vendor_assets.py`
 - [ ] The Setup Wizard finishes and you can **log in as Admin**
 - [ ] You can **add an employee**
 - [ ] **Face registration** works: the camera opens and photos are captured (the first time it downloads the model files, so keep the internet on)
 - [ ] On the kiosk page (`/`) the registered face **marks attendance**
+- [ ] The employee can **log in and mark attendance** on the **My Attendance** page (no "Attendance Not Marked" error)
 - [ ] Manual attendance goes to a manager/admin for **approval**
 - [ ] You can run **payroll** for a month
 - [ ] You can **download a payslip PDF** (it asks for a password)
@@ -502,11 +562,11 @@ pytest -k "attendance"    # keyword filter
 pytest -x --maxfail=1     # stop on first failure
 ```
 
-The suite (470+ tests) covers authentication, attendance rules, payroll math, PDF generation, email, scheduling, rate limiting, face-data encryption/consent (`test_face_security.py`) and the Flask routes.
+The suite (600+ tests) covers authentication, attendance rules, the attendance calculator, approvals, payroll math, PDF generation, email, scheduling, backups, rate limiting, face matching and wrong-person protection, face-data encryption/consent (`test_face_security.py`), licensing, configuration/setup and the Flask routes.
 
 `conftest.py` stubs `cv2`, `mediapipe`, `deepface` and TensorFlow, so tests run **fast, offline, with no GPU or camera**.
 
-**How to read the result:** at the end pytest prints a line such as `470 passed`. If you see `failed`, scroll up to read which test failed and why, and send that text when asking for help.
+**How to read the result:** at the end pytest prints a line such as `626 passed`. If you see `failed`, scroll up to read which test failed and why, and send that text when asking for help.
 
 Optional coverage:
 
@@ -517,6 +577,8 @@ pytest --cov=. --cov-report=term-missing
 
 **Run the suite** before every commit touching core modules, before every client build, and after upgrading any dependency.
 
+**CI:** `.github/workflows/ci.yml` runs the app import check and `pytest tests/` on every push and pull request to `main`/`master` (Python 3.10).
+
 ---
 
 ## 11. 📦 Building & Packaging (For Developers)
@@ -525,14 +587,35 @@ Two stages: **PyInstaller** makes the app folder → **Inno Setup** wraps it int
 
 ### 📋 Pre-build checklist
 
-- [ ] Clean venv with `requirements.txt` installed (no plain `opencv-python`)
+- [ ] Clean venv with `requirements.txt` installed (no plain `opencv-python`; `python -c "import cv2; print(cv2.imread)"` works)
 - [ ] `python scripts/download_vendor_assets.py` has been run
 - [ ] DeepFace weights exist in `%USERPROFILE%\.deepface\weights` (Step 7)
 - [ ] `pytest` passes
-- [ ] Your **own** Ed25519 public key is set in `licensing/license_manager.py` (or via `LICENSE_PUBLIC_KEY_HEX`) — see [License Management](#12--license--backup-management)
+- [ ] Your **own** Ed25519 public key is embedded in `licensing/license_manager.py` — see [License Management](#12--license--backup-management)
 - [ ] `console=False` in `attendance_app.spec` for client builds (`True` is only for debugging a build on your own machine)
 - [ ] `upx=False` stays as is (UPX triggers antivirus false-positives)
-- [ ] `installer\app_icon.ico` exists (or comment out the `SetupIconFile` line in the `.iss`)
+- [ ] `installer\app_icon.ico` exists and is a **multi-size** icon (see below)
+- [ ] The six `installer\wizard_*.bmp` images are present (see below)
+
+### 🎨 Application icon & installer images
+
+**Application icon — `installer\app_icon.ico`.** Used by PyInstaller (the `.exe` icon) and by Inno Setup (`SetupIconFile`). It **must contain several sizes**: 16, 24, 32, 48, 64, 128 **and 256 px**. An icon with only one small size looks tiny and blurry in Explorer's *Large* and *Extra large icons* views, because Windows has to scale it up. Create it from a PNG of at least 256×256 (512×512 is better, with a transparent background):
+
+```
+python -c "from PIL import Image; img = Image.open('logo.png').convert('RGBA'); img.save('installer/app_icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+python scripts\verify_icon.py
+```
+
+Rebuild the `.exe` afterwards (the icon is embedded at build time). If Explorer still shows the old icon, rename the `.exe` once or restart the PC — Windows caches icons.
+
+**Installer wizard images — `installer\wizard_*.bmp`.** The Inno Setup script (`WizardImageFile` / `WizardSmallImageFile`) uses them for the setup wizard. **Do not delete them** — the installer will not compile without them.
+
+| Files | Used for | Sizes (px) |
+| --- | --- | --- |
+| `wizard_large_100.bmp`, `_150.bmp`, `_200.bmp` | Tall banner on the Welcome / Finished pages | 164×314 · 246×459 · 328×604 |
+| `wizard_small_100.bmp`, `_150.bmp`, `_200.bmp` | Small logo in the top-right of the other pages | 55×58 · 83×80 · 110×106 |
+
+The three variants are for 100 %, 150 % and 200 % display scaling.
 
 ### 1️⃣ Install build tools
 
@@ -560,6 +643,8 @@ If you see `WARNING: DeepFace weights folder not found`, **stop** — the build 
 set DEEPFACE_WEIGHTS_DIR=C:\path\to\.deepface\weights
 pyinstaller attendance_app.spec --clean
 ```
+
+Also check for `[spec] Using application icon: ...installer\app_icon.ico` — if you see `WARNING: app icon not found`, the exe gets PyInstaller's generic icon.
 
 Output (a **onedir** build — ship the whole folder, not just the exe):
 
@@ -611,7 +696,7 @@ installer\Output\AttendancePayrollSystem-Setup-1.0.0.exe
 
 > ❌ Do **not** switch the install path to `Program Files` without also changing where the app stores data (`BASE_DIR` in `config.py`) — first launch would fail with permission errors. The `.iss` header explains how.
 
-To bump the version, edit `MyAppVersion` in the `.iss` file.
+To bump the version, edit `MyAppVersion` (currently `1.0.0`) in the `.iss` file.
 
 ---
 
@@ -623,7 +708,7 @@ Licenses use **Ed25519 public-key signatures**. The vendor keeps a **private key
 
 Each license token is bound to the customer's **machine fingerprint** (a SHA-256 hash of hardware identifiers) and can be perpetual or time-limited.
 
-**On every start, the app decides in this order:**
+**On every start, and before every request, the app decides in this order:**
 
 ```
 Valid signed license found?  ──yes──►  Start normally
@@ -632,10 +717,13 @@ Valid signed license found?  ──yes──►  Start normally
 30-day trial still active?   ──yes──►  Start in Trial mode
         │ no
         ▼
-Show the machine fingerprint and exit
+Block the app: browsers are redirected to the License lock screen (/license),
+API calls get a 403 "license_required" answer
 ```
 
-The license token is read from the `LICENSE_TOKEN` environment variable, or from a `license.lic` file next to the application.
+The license token is read from the `LICENSE_TOKEN` environment variable, or from a `license.lic` file next to the application. The check **fails closed**: if it ever crashes, the app stays locked.
+
+> ℹ️ The trial start date is stored in several places, and winding the system clock back revokes the trial. As with any offline licensing, a determined reverse-engineer of a packaged exe can always patch it out — it stops every non-technical route.
 
 ### 🧑‍💼 Vendor workflow (you)
 
@@ -653,11 +741,11 @@ copy licensing\.env.vendor.example licensing\.env.vendor
 
 Fill in your Razorpay keys, email settings and `VENDOR_ADMIN_PASSWORD` in `licensing\.env.vendor` **only on your vendor server**. This file is git-ignored and is never bundled into customer builds. For local testing without Razorpay set `VENDOR_DEV_MODE=true` and run `python -m licensing.vendor_app`.
 
-Back to the keys: the command above writes `licensing/vendor_private_key.pem` and prints a **public-key hex**. Paste that hex into `LICENSE_PUBLIC_KEY_HEX` in `licensing/license_manager.py` (or set it as an environment variable) **before building any customer release**.
+Back to the keys: the command above writes `licensing/vendor_private_key.pem` and prints a **public-key hex**. Embed that key in `licensing/license_manager.py` **before building any customer release**. (During development you can instead set `LICENSE_PUBLIC_KEY_HEX` in `.env`; packaged builds ignore that variable and always use the embedded key.)
 
 > 🚨 **Never ship, email or commit `vendor_private_key.pem`.** Anyone holding it can issue unlimited licenses. Keep an offline backup. Regenerating it invalidates every license already issued. It is already listed in `.gitignore`, together with `license.lic` and `license_keys_log.txt`.
 
-**Issuing a license for a customer:**
+**Issuing a license manually for a customer:**
 
 ```
 python licensing/keygen.py issue <MACHINE_FINGERPRINT> "Customer Name" --days 365 --edition pro
@@ -665,31 +753,39 @@ python licensing/keygen.py issue <MACHINE_FINGERPRINT> "Customer Name" --days 36
 
 `--days` sets the validity period — **omit it for a perpetual license**. `--edition` is an optional tag. The command prints a token — send it to the customer.
 
-### 🙋 Customer activation (License Activation UI)
+**Selling licenses online (vendor portal).** `licensing/vendor_app.py` is a small separate Flask app with a purchase page, **Razorpay** checkout, a webhook, customer database and automatic license emails. Plans are **monthly**, **yearly** and **lifetime**; the price is always looked up on the server from `licensing/plans.py` (override with `PLAN_PRICE_MONTHLY`, `PLAN_PRICE_YEARLY`, `PLAN_PRICE_LIFETIME`, `PLAN_CURRENCY` in `.env.vendor`). Renewing a still-running plan extends from its current expiry. See `licensing/VENDOR_PORTAL_SETUP.md` and `licensing/VENDOR_SYSTEM_GUIDE.md` for deployment.
 
-1. Log in as **Admin** → **Settings** → **🔑 License Activation** card.
-2. The card shows the current state: **License Valid** (customer, expiry or *Perpetual*), **Trial Mode** (days remaining) or **No License**.
-3. To get the **machine fingerprint** for the vendor: it is printed in the console message when startup is blocked, and returned in full by the admin-only `/settings/license-info` endpoint. *(The Settings card only displays the first 16 characters as a preview.)*
-4. Paste the token received from the vendor into the text box and click **Activate License**.
+### 🙋 Customer activation
+
+There are three equivalent ways:
+
+1. **License lock screen** (`/license`) — shown automatically when trial/license has ended. It displays the **machine fingerprint** (with a Copy button), a **Buy a license** button (if `LICENSE_PURCHASE_URL` is set) and a box to paste the token, then **Activate**. No restart needed.
+2. **Setup Wizard** — step 3 of the first-run wizard.
+3. **Admin → Settings → 🔑 License Activation** card. It shows the current state: **License Valid** (customer, expiry or *Perpetual*), **Trial Mode** (days remaining) or **No License**. *(The card only displays the first 16 characters of the fingerprint as a preview; the full value is on the lock screen and in the admin-only `/settings/license-info` endpoint.)*
 
 Alternative (no UI): save the token as **`license.lic`** next to the `.exe`, or set the `LICENSE_TOKEN` environment variable.
 
 > ℹ️ A license is tied to one machine. If the customer changes hardware, the fingerprint changes and a new license must be issued.
 
-The `licensing/` folder also contains a vendor-side customer database, email dispatch, and guides — see `licensing/VENDOR_SYSTEM_GUIDE.md`, `licensing/USER_MANUAL.md` and `licensing/EULA.txt`.
+The `licensing/` folder also contains the vendor-side customer database, email dispatch, and guides — see `licensing/VENDOR_SYSTEM_GUIDE.md`, `licensing/USER_MANUAL.md` and `licensing/EULA.txt`.
 
 ### 💾 Backups
 
+All backup logic lives in `backup_manager.py` and is shared by the weekly job, the startup catch-up and the admin **Backup Now** button.
+
 | Type | When | Where |
 | --- | --- | --- |
-| ⏰ **Automated weekly backup** | Every **Sunday at 02:00** while the app is running | `uploads/backups/automated_backup_<YYYYMMDD_HHMMSS>.zip` |
+| ⏰ **Automated weekly backup** | Every **Sunday at 02:00** while the app is running | `backups\automated_backup_<YYYYMMDD_HHMMSS>.zip` in the install folder **plus** a second copy in an external location when available |
+| 🔁 **Startup catch-up backup** | About 60 seconds after startup, if the newest successful backup is older than `BACKUP_CATCHUP_DAYS` (default 7) or none exists | Same as above |
 | 🖱 **Manual backup** | Any time: **Admin → Settings → Data Backup → Backup Now** | Downloaded through the browser as `attendance_backup_<timestamp>.zip` |
 
-- The automated job keeps only the **last 4** backups and deletes older ones.
-- Each zip contains: `instance/attendance.db`, `uploads/`, `dataset/` (encrypted face photos) and `.env` (secrets + encryption key).
-- Look for `AUTOMATED BACKUP SCHEDULER REGISTERED - Every Sunday at 2:00 AM` in the logs to confirm it is scheduled.
+- **External copy:** the folder in `BACKUP_DIR` if set; otherwise (unless `BACKUP_AUTO_EXTERNAL=false`) the first usable non-system **fixed** drive such as `D:\`, in an `AttendancePayrollSystem_Backups` folder. Removable USB drives are **never** chosen automatically. A failed external copy only logs a warning — the local copy already succeeded.
+- Only the **last 4** backups are kept per folder (`BACKUP_KEEP`).
+- Each zip contains: `instance/attendance.db`, `uploads/`, `dataset/` (encrypted face photos) and `.env` (secrets + encryption key). Backups never contain other backups.
+- Older versions saved backups in `uploads/backups/`; those files are moved to `backups\` the first time a backup runs.
+- Look for `AUTOMATED BACKUP SCHEDULER REGISTERED - Every Sunday at 2:00 AM` and `Catch-up backup not needed - last backup: ...` in the logs.
 
-> ⚠️ Backups live on the **same PC** as the data. **Copy them to an external drive or cloud storage regularly** — they don't protect against disk failure or theft. Treat backup zips like passwords: they contain `.env` and the face-encryption key.
+> ⚠️ A same-disk copy does not protect against disk failure or theft. Point `BACKUP_DIR` at an external drive or synced cloud folder, or copy the zips away regularly. Treat backup zips like passwords: they contain `.env` and the face-encryption key.
 
 **Restoring:** stop the app, extract the zip over the install folder (keeping the same `.env`), and start the app again.
 
@@ -712,7 +808,8 @@ The `licensing/` folder also contains a vendor-side customer database, email dis
 ├── license.lic              ← after activation
 ├── instance\attendance.db   ← all records                    (back up!)
 ├── dataset\                 ← encrypted face photos          (back up!)
-├── uploads\                 ← payslips + backups\            (back up!)
+├── uploads\                 ← payslips, profile photos       (back up!)
+├── backups\                 ← automated backup zips
 ├── trained_model\           ← face-embedding cache (rebuilt automatically)
 └── logs\                    ← rotating app logs
 ```
@@ -752,17 +849,80 @@ Normal. TensorFlow, DeepFace and MediaPipe depend on many other packages, and pi
 
 The UI files in `static\vendor\` are not stored in GitHub. Run `python scripts\download_vendor_assets.py` (it needs internet). `setup.bat` does this for you.
 
+### 🧩 `cv2` errors: `module 'cv2' has no attribute 'imread'` / "Attendance Not Marked"
+
+**Symptom:** it worked yesterday, but today the **My Attendance** page shows *"Attendance Not Marked — Reason: Error: module 'cv2' has no attribute 'imread'"* and the kiosk (`/`) marks nothing. The log shows `POST /api/auto-scan-attendance 200` repeatedly but nobody is recorded.
+
+**Cause:** your code is fine — the OpenCV install inside the venv is damaged. `import cv2` finds an *empty* `cv2` folder (or a stray `cv2` folder / `cv2.py` in the project), so every `cv2.*` call fails. It usually happens after two OpenCV packages (`opencv-python`, `opencv-python-headless`, `opencv-contrib-python`) were installed together and one was uninstalled, or after an interrupted `pip install`.
+
+**Fix — no need to delete the venv.** With the venv active:
+
+```
+pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless
+Remove-Item -Recurse -Force .\venv\Lib\site-packages\cv2 -ErrorAction SilentlyContinue
+pip install --no-cache-dir opencv-contrib-python==4.8.1.78
+pip install numpy==1.26.4
+python -c "import cv2; print(cv2.__version__, cv2.imread)"
+```
+
+The last command must print `4.8.1 <built-in function imread>`. Then restart `python app.py`. ("Skipping … as it is not installed" warnings in the first command are normal.)
+
+If it still fails, check for something shadowing OpenCV:
+
+```
+python -c "import cv2; print(cv2.__file__)"
+dir cv2*
+```
+
+If `cv2.__file__` is `None`, or `dir cv2*` lists a `cv2` folder / `cv2.py` in the project folder, delete or rename it. As a last resort, rename `venv` to `venv_old`, create a new one and run `pip install -r requirements.txt` again.
+
+### 🧹 `WARNING: Ignoring invalid distribution -andas` (or `~umpy`, `~il`, …)
+
+**Cause:** an interrupted `pip install` or uninstall left half-removed folders whose names start with `~` inside `venv\Lib\site-packages` (for example `~andas`, `~umpy`, `~il`).
+
+**Fix:**
+
+1. List them:
+
+   ```
+   Get-ChildItem .\venv\Lib\site-packages -Directory -Filter "~*"
+   ```
+
+2. Check that the real packages still import:
+
+   ```
+   python -c "import numpy, PIL, sqlalchemy, markupsafe, pikepdf, pandas, cv2; print('ALL OK')"
+   ```
+
+3. Only if that prints `ALL OK`, delete the leftovers (only names starting with `~` are matched; real packages are untouched):
+
+   ```
+   Remove-Item -Recurse -Force ".\venv\Lib\site-packages\~*"
+   ```
+
+4. If a package was damaged, reinstall it at its **pinned** version, e.g. `pip install --force-reinstall --no-deps pandas==2.2.3`, then run `pip check`.
+
+> Prevention: never interrupt `pip` (Ctrl+C / closing the window) while it is installing, and install with the pinned versions from `requirements.txt`.
+
+### ℹ️ `pip check` says `deepface requires opencv-python`
+
+`deepface` and `retina-face` list plain `opencv-python` as a dependency, but this project deliberately uses `opencv-contrib-python`, which provides the same `cv2` module. The message is **harmless**. Do **not** "fix" it by installing `opencv-python` — that brings the two-OpenCV conflict back.
+
+### 🖼 The `.exe` icon looks small or blurry in Explorer
+
+`installer\app_icon.ico` contains only one small size. Rebuild it as a multi-size icon (16–256 px) as described in [Application icon & installer images](#-application-icon--installer-images), then rebuild the exe. Windows caches icons, so rename the exe or restart the PC if the old one still shows.
+
 ### Licensing
 
-**🔑 The app closes immediately with "LICENSE VALIDATION FAILED"**
+**🔑 The app shows the License lock screen / closes with "LICENSE VALIDATION FAILED"**
 
-The trial has ended (or the license is invalid/expired) and no valid license was found. Note the **machine fingerprint** printed in the message, send it to the vendor, and place the returned token in `license.lic` next to the exe (or set `LICENSE_TOKEN`). A token issued for a different PC, or signed by a different key than the one built into the app, will not verify.
+The trial has ended (or the license is invalid/expired) and no valid license was found. Copy the **machine fingerprint** from the lock screen (or console message), send it to the vendor, and paste the returned token into the box on the lock screen — or place it in `license.lic` next to the exe (or set `LICENSE_TOKEN`). A token issued for a different PC, or signed by a different key than the one built into the app, will not verify.
 
 **🔑 "License activation failed" when pasting a token**
 
 - Paste the **entire** token (`xxxx.yyyy`, no spaces or line breaks).
 - The token must be issued for **this machine's** fingerprint.
-- The app's public key must match the vendor private key used to sign it (`LICENSE_PUBLIC_KEY_HEX`).
+- The app's public key must match the vendor private key used to sign it.
 - Check whether the license has expired.
 
 ### Files, camera and face recognition
@@ -773,7 +933,7 @@ The app is installed in a write-protected folder (e.g. `Program Files`). Reinsta
 
 **📷 Camera doesn't open / black preview**
 
-1. **Settings ▸ Privacy & security ▸ Camera** → enable **"Let desktop apps access your camera"**.
+1. **Settings ▸ Privacy & security ▸ Camera** → enable **"Let desktop apps access your camera"** (and allow the browser to use the camera for the kiosk / My Attendance pages).
 2. Close Zoom / Teams / the Windows Camera app — only one program can use the camera.
 3. On PCs with multiple cameras, the wrong device index may be used (`cv2.VideoCapture(0)` vs `1`); adjust `FaceCapture.start_capture()` in `ai_engine.py`.
 4. If the Windows Camera app also fails, it's a driver problem.
@@ -782,13 +942,21 @@ The app is installed in a write-protected folder (e.g. `Program Files`). Reinsta
 
 On a normal PC it is downloading the model files (about 100 to 300 MB). Keep the internet on and wait. On an **offline PC** the build didn't include DeepFace weights: rebuild after populating `%USERPROFILE%\.deepface\weights` (Step 7) and confirm the `[spec] Bundling DeepFace weights` line appears.
 
+**🙅 The face is not recognised / shows "Unknown"**
+
+Matching is intentionally strict (distance ≤ 0.30 and a 0.05 margin over the next-best employee). Make sure the employee has at least `MIN_FACE_IMAGES_REQUIRED` good, well-lit photos from slightly different angles, that the face model was **trained/refreshed** after registration, and that the camera image is not too dark. Look-alikes may be rejected on purpose.
+
+**⛔ "Face does not match your profile" on My Attendance**
+
+The employee-login page only accepts the face of the logged-in employee. Log in with the right account, or re-register that employee's photos.
+
 ### Scheduler and operations
 
 **⏰ Payroll / auto-logout / backups didn't run**
 
 1. Check the logs for `Payroll scheduler started`, `DAILY APPROVAL SCHEDULER REGISTERED - 23:59`, and `AUTOMATED BACKUP SCHEDULER REGISTERED`. If missing, look for `Failed to start scheduler:`.
 2. The scheduler only runs **while the exe is running** — there is no background service. Closing the browser tab does *not* stop the app; closing the exe does.
-3. If the PC was **off or asleep** at the scheduled time the job is skipped. Payroll and approvals are backfilled on next start (`PAYROLL RECONCILIATION CHECK` in the log); **backups are not backfilled**, so use **Backup Now** if a Sunday was missed.
+3. If the PC was **off or asleep** at the scheduled time the job is skipped, but it is backfilled on the next start: payroll (`PAYROLL RECONCILIATION CHECK`), logout approval requests (`AUTO LOGOUT RECONCILIATION`) and backups (`Startup Catch-up Backup Check`, if the newest backup is older than 7 days). You can also use **Backup Now** any time.
 4. In a custom PyInstaller spec, keep `copy_metadata('APScheduler')` — removing it makes the scheduler fail silently.
 
 **✉️ Payslip emails are not sent**
@@ -809,6 +977,10 @@ Very common for PyInstaller apps bundling TensorFlow/OpenCV. In order of effecti
 
 A hidden import or data file wasn't bundled. Ensure `pyinstaller-hooks-contrib` is installed, add the missing module to `hiddenimports` in `attendance_app.spec`, rebuild with `--clean`, and temporarily set `console=True` **on your own machine** to see the traceback.
 
+**🧱 Inno Setup says a `wizard_*.bmp` file is missing**
+
+Keep all six images in `installer\` (see [Application icon & installer images](#-application-icon--installer-images)). Don't delete them.
+
 ### Other questions
 
 **❓ Can I use MySQL instead of SQLite?**
@@ -819,33 +991,39 @@ Yes. Set `DATABASE_URL=mysql+pymysql://user:password@host/dbname` in `.env`. Not
 
 The host/port are set in the `__main__` block of `app.py` (`SERVER_HOST`, `SERVER_PORT`).
 
+**❓ What is the payslip PDF password?**
+
+If the admin (or the employee, from the portal) set a custom payslip password, that is used. Otherwise a default is derived from the employee's own details: first 2 letters of the name (uppercase) + last 4 digits of the phone number + date of birth as `DDMM` + last 2 characters of the employee ID (e.g. `VA3210150301`). If there is no date of birth on file, the joining date is used.
+
 ---
 
 ## 15. 🗂 Project Structure
 
 | Path | Purpose |
 | --- | --- |
-| `app.py` | Flask app factory, blueprint registration, startup block (license check → face model → server) |
+| `app.py` | Flask app creation/config, extensions, blueprint registration, error handlers, startup block (license check → face model → server) |
 | `launcher.py` | PyInstaller entry point that runs `app.py` |
 | `config.py` | Environment-aware config, frozen-safe `BASE_DIR`, logging |
-| `database.py` · `models.py` · `extensions.py` | DB init/migrations, ORM models, Flask extensions |
-| `auth_routes.py` · `attendance_routes.py` · `payroll_routes.py` · `reports_routes.py` · `approvals_routes.py` · `settings_routes.py` | Blueprints |
-| `setup_wizard.py` | First-run admin/company setup |
-| `employees.py` · `attendance.py` · `payroll.py` | Employee, attendance-rule and payroll engines |
-| `ai_engine.py` · `face_recognition_singleton.py` | Face detection/recognition, embedding cache |
-| `crypto_utils.py` | Encryption for face photos and payslip passwords |
+| `database.py` · `models.py` · `extensions.py` | DB init/migrations, ORM models (Admin, Employee, Attendance, AttendanceActivity, Payroll, Settings, LogoutApprovalRequest, BiometricConsentLog, …), Flask extensions |
+| `auth_routes.py` · `attendance_routes.py` · `payroll_routes.py` · `reports_routes.py` · `approvals_routes.py` · `settings_routes.py` · `employees.py` | Blueprints (every route lives in one of them) |
+| `auth_decorators.py` · `auth_helpers.py` · `file_helpers.py` | Login/role decorators, admin-creation helpers, safe file handling |
+| `setup_wizard.py` | First-run admin / company / license setup |
+| `attendance.py` · `payroll.py` | Attendance-rule and payroll engines |
+| `ai_engine.py` · `face_recognition_singleton.py` | Face detection/recognition, strict matching, presence tracker, embedding cache |
+| `crypto_utils.py` | Encryption for face photos and stored payslip passwords |
 | `pdf_generator.py` · `email_service.py` | PDF payslips/reports (AES-256), SMTP delivery |
-| `scheduler_service.py` | APScheduler: payroll, auto-logout, weekly backup, reconciliation |
-| `backup_manager.py` | Backup creation and cleanup |
-| `services/` | Admin reports, approvals, attendance calculator & stats |
-| `licensing/` | Ed25519 license verification, **vendor-only** `keygen.py`, customer DB and guides |
-| `installer/` | Inno Setup script (`.iss`), icon and instructions |
-| `scripts/download_vendor_assets.py` | Downloads offline UI assets |
+| `scheduler_service.py` | APScheduler: monthly payroll, 23:59 auto-logout approvals, weekly backup, startup reconciliation and catch-up |
+| `backup_manager.py` | Backup creation, external copy, pruning and catch-up detection |
+| `services/` | `admin_reports_service`, `approval_service`, `attendance_calculator`, `attendance_stats`, `app_services` |
+| `licensing/` | Customer side: `license_manager.py` (Ed25519, trial, fingerprint), `client_security.py` (license gate + lock screen). Vendor side: `keygen.py`, `vendor_app.py` (Razorpay portal), `plans.py`, `payment_gateway.py`, `customer_*`, `license_email_service.py`, guides and `EULA.txt` |
+| `installer/` | Inno Setup script (`.iss`), `app_icon.ico`, six `wizard_*.bmp` images and icon instructions |
+| `scripts/` | `download_vendor_assets.py`, `prepare_deepface_weights.py`, `verify_icon.py`, `fix_cdn_links.py`, `update_contact_details.py` |
 | `attendance_app.spec` | PyInstaller build specification |
 | `setup.bat` | One-click environment setup with a menu: run the app or build the `.exe` |
 | `templates/` · `static/` | Jinja2 views and CSS/JS/images (`static/vendor/` is filled by the download script) |
-| `tests/` · `conftest.py` | pytest suite with stubbed ML layer |
-| `instance/` · `dataset/` · `uploads/` · `trained_model/` · `logs/` | Runtime data (git-ignored) |
+| `tests/` · `conftest.py` | pytest suite (600+ tests) with stubbed ML layer |
+| `.github/workflows/ci.yml` | GitHub Actions: import check + pytest on every push/PR |
+| `instance/` · `dataset/` · `uploads/` · `backups/` · `trained_model/` · `logs/` | Runtime data (git-ignored) |
 | `requirements.txt` · `requirements-packaging.txt` | Runtime vs build-only dependencies |
 | `.env.example` | Template for your `.env` settings file |
 
