@@ -307,50 +307,27 @@ class PayrollScheduler:
                             year=year
                         ).first()
 
-                        if existing_payroll:
-                            logger.info(f"Payroll already exists for {employee.name} for {month}/{year}")
-
-                            # Auto email existing payslip if enabled
-                            if (
-                                    payroll_settings.auto_send_payslip_email
-                                    and existing_payroll.payslip_generated
-                                    and existing_payroll.payslip_path
-                                    and not existing_payroll.email_sent
-                                ):
-                            # if (
-                            #     payroll_settings.auto_send_payslip_email
-                            #     and existing_payroll.payslip_generated
-                            #     and not existing_payroll.email_sent
-                            # ):
-                                month_name = self._get_month_name(month)
-
-                                logger.info(f"[AUTO EMAIL] Sending payslip to {employee.email}")
-
-                                # Same deterministic password used everywhere payslips
-                                # are protected (first 4 letters of name + DOB DDMM,
-                                # falling back to Employee ID + DOB DDMM) - see
-                                # pdf_generator.generate_payslip_password(). Passed here
-                                # so the auto-email correctly tells the employee how to
-                                # open their already-generated, password-protected PDF.
-                                payslip_password = generate_payslip_password(employee)
-
-                                result = self.email_service.send_payslip(
-                                    employee_email=employee.email,
-                                    employee_name=employee.name,
-                                    payslip_path=existing_payroll.payslip_path,
-                                    month=month_name,
-                                    year=year,
-                                    pdf_password=payslip_password
-                                )
-
-                                if result["success"]:
-                                    existing_payroll.email_sent = True
-                                    db.session.commit()
-                                    logger.info(f"[AUTO EMAIL] Email sent successfully to {employee.email}")
-                                else:
-                                    logger.error(f"[AUTO EMAIL] Failed to send email to {employee.email}")
-
+                        if existing_payroll and existing_payroll.email_sent:
+                            # Already finalized: payslip was generated AND emailed
+                            # to the employee, so never overwrite it.
+                            logger.info(
+                                f"Payroll for {employee.name} for {month}/{year} already "
+                                f"finalized (payslip emailed) - skipping"
+                            )
                             continue
+
+                        if existing_payroll:
+                            # A record exists but was never finalized (e.g. an admin
+                            # ran a manual MID-MONTH "Calculate Payroll" earlier,
+                            # which only covers the days up to that point). The
+                            # month has now fully ended, so recalculate it over the
+                            # whole month and regenerate the payslip below instead
+                            # of keeping the stale partial-month figures.
+                            logger.info(
+                                f"Payroll for {employee.name} for {month}/{year} exists but "
+                                f"was not finalized - recalculating for the full month"
+                            )
+
                         # existing_payroll = Payroll.query.filter_by(
                         #     employee_id=employee.id,
                         #     month=month,

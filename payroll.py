@@ -258,7 +258,15 @@ def compute_payroll_amounts(
     # converted value.
     # ------------------------------------------------------------------
     late_mark_half_days = convert_late_marks_to_half_days(late_days)
+    # A late day is ALREADY counted as a full present day in `present_days`
+    # (late is only a flag on a present record). Converting 3 late marks into
+    # a half-day must therefore MOVE that day out of present and into half,
+    # not add a half-day on top - otherwise present + half + absent exceeds
+    # working_days and paid_days + lop_days double-counts. The conversion can
+    # never exceed the number of present days actually available.
+    late_mark_half_days = min(late_mark_half_days, int(present_days or 0))
     payslip_half_days = round_days(half_days + late_mark_half_days)
+    present_days = present_days - late_mark_half_days
 
     paid_days, lop_days = compute_paid_and_lop_days(present_days, absent_days, payslip_half_days)
 
@@ -635,4 +643,3 @@ class PayrollCalculator:
             'total_overtime_bonus': round_money(sum(p.overtime_bonus for p in payrolls)),
             'total_deductions': round_money(sum(p.total_deductions for p in payrolls)),
         }
-
