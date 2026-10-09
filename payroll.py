@@ -381,6 +381,10 @@ def compute_payroll_amounts(
     earned_gross = max(0.0, round_money(gross_salary - lop_deduction))
 
     professional_tax = round_money(payroll_settings.get_professional_tax(month))
+    # Per-employee opt-out: only an explicit False disables PT (None/missing
+    # keeps the existing behaviour for every pre-existing employee).
+    if getattr(employee, 'pt_applicable', True) is False:
+        professional_tax = 0.0
 
     # FIX 4: Statutory Deductions calculated on Earned Wages (Post LOP)
     employee_pf_percentage = getattr(employee, 'employee_pf_percentage', 12.0) or 0.0
@@ -643,3 +647,4 @@ class PayrollCalculator:
             'total_overtime_bonus': round_money(sum(p.overtime_bonus for p in payrolls)),
             'total_deductions': round_money(sum(p.total_deductions for p in payrolls)),
         }
+

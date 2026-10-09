@@ -123,6 +123,9 @@ class Employee(db.Model):
     tds_percentage = db.Column(db.Float, default=0.0)
     bus_charges = db.Column(db.Numeric(10, 2, asdecimal=False), default=0.0)
     other_deduction = db.Column(db.Numeric(10, 2, asdecimal=False), default=0.0)
+    # Whether Professional Tax (from Payroll Settings) is deducted for this
+    # employee. Defaults to True so existing employees are unaffected.
+    pt_applicable = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=now_ist)
     updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     

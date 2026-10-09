@@ -143,6 +143,9 @@ def add_employee():
         tds_percentage = _parse_allowance('tds_percentage')
         bus_charges = _parse_allowance('bus_charges')
         other_deduction = _parse_allowance('other_deduction')
+        # Checkbox: unchecked boxes are not submitted, so the hidden marker
+        # field tells us the form actually carried this control.
+        pt_applicable = True if 'pt_applicable_present' not in request.form else (request.form.get('pt_applicable') == 'on')
 
         if Employee.query.filter_by(name=name).first():
             flash('This Employee Name already exists.', 'danger')
@@ -202,6 +205,7 @@ def add_employee():
             tds_percentage=tds_percentage,
             bus_charges=bus_charges,
             other_deduction=other_deduction,
+            pt_applicable=pt_applicable,
             status='active',
             role='employee',
             must_change_password=True
@@ -333,6 +337,10 @@ def edit_employee(id):
         employee.tds_percentage = tds_percentage
         employee.bus_charges = bus_charges
         employee.other_deduction = other_deduction
+        # Only change when the form actually carried the checkbox, so any
+        # other caller posting to this route never silently flips it.
+        if 'pt_applicable_present' in request.form:
+            employee.pt_applicable = (request.form.get('pt_applicable') == 'on')
 
         if 'profile_photo' in request.files:
             file = request.files['profile_photo']

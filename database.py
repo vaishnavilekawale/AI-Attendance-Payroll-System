@@ -172,6 +172,13 @@ def init_db(app):
                 conn.execute(db.text("ALTER TABLE employees ADD COLUMN other_deduction FLOAT DEFAULT 0.0"))
                 conn.commit()
 
+        if 'pt_applicable' not in columns:
+            with db.engine.connect() as conn:
+                # Existing employees default to True (Professional Tax keeps
+                # applying exactly as before this field existed).
+                conn.execute(db.text("ALTER TABLE employees ADD COLUMN pt_applicable BOOLEAN DEFAULT 1"))
+                conn.commit()
+
         if 'biometric_consent_given' not in columns:
             with db.engine.connect() as conn:
                 # Existing employees default to True (consent already

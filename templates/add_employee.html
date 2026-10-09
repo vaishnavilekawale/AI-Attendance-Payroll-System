@@ -393,6 +393,14 @@
                                 </div>
                             </div>
                             <div class="col-12">
+                                <div class="mb-3 form-check">
+                                    <input type="hidden" name="pt_applicable_present" value="1">
+                                    <input type="checkbox" class="form-check-input" id="pt_applicable" name="pt_applicable" checked>
+                                    <label class="form-check-label" for="pt_applicable">Professional Tax applicable</label>
+                                    <small class="text-muted d-block">Untick if Professional Tax should not be deducted for this employee.</small>
+                                </div>
+                            </div>
+                            <div class="col-12">
                                 <div class="mb-3">
                                     <label class="form-label">Profile Photo</label>
                                     <input type="file" class="form-control" name="profile_photo" accept="image/*">
@@ -594,6 +602,14 @@
                                 <div class="mb-3">
                                     <label class="form-label">Other Deductions</label>
                                     <input type="number" class="form-control" name="other_deduction" step="0.01" min="0" value="{{ employee.other_deduction if employee.other_deduction is not none else 0.0 }}">
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="mb-3 form-check">
+                                    <input type="hidden" name="pt_applicable_present" value="1">
+                                    <input type="checkbox" class="form-check-input" id="pt_applicable" name="pt_applicable" {% if employee.pt_applicable is not false %}checked{% endif %}>
+                                    <label class="form-check-label" for="pt_applicable">Professional Tax applicable</label>
+                                    <small class="text-muted d-block">Untick if Professional Tax should not be deducted for this employee.</small>
                                 </div>
                             </div>
                             <div class="col-12">
