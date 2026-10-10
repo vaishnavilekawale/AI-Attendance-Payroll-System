@@ -135,6 +135,26 @@ def parse_approvals_date_range():
     return date_from, date_to
 
 
+def _approvals_return_params(attendance):
+    """
+    Date range to go back to after editing an attendance record.
+
+    The Approvals page passes the date_from/date_to the admin was looking at
+    (query string on the Edit link, hidden fields on the form). If they are
+    missing, fall back to the edited record's own date instead of 'today', so
+    the admin lands on the day they were working on.
+    """
+    raw_from = (request.values.get('date_from') or '').strip()
+    raw_to = (request.values.get('date_to') or '').strip()
+    try:
+        datetime.strptime(raw_from, '%Y-%m-%d')
+        datetime.strptime(raw_to, '%Y-%m-%d')
+    except ValueError:
+        day = attendance.date.strftime('%Y-%m-%d')
+        return {'date_from': day, 'date_to': day}
+    return {'date_from': raw_from, 'date_to': raw_to}
+
+
 # ============================================================
 # MANAGER APPROVALS
 # ============================================================
@@ -649,6 +669,8 @@ def admin_edit_attendance(attendance_id):
         flash('Attendance record not found.', 'danger')
         return redirect(url_for('approvals.admin_approvals'))
 
+    return_params = _approvals_return_params(attendance)
+
     if request.method == 'POST':
         try:
             current_app.logger.info("ADMIN ATTENDANCE EDIT - POST Request")
@@ -718,7 +740,7 @@ def admin_edit_attendance(attendance_id):
             current_app.logger.info("DATABASE COMMIT SUCCESS")
             current_app.logger.info(f"Attendance {attendance_id} edited by admin")
             flash('Attendance updated successfully!', 'success')
-            return redirect(url_for('approvals.admin_approvals'))
+            return redirect(url_for('approvals.admin_approvals', **_approvals_return_params(attendance)))
 
         except Exception as e:
             current_app.logger.error(f"Error editing attendance: {e}")
@@ -726,7 +748,8 @@ def admin_edit_attendance(attendance_id):
             current_app.logger.error(traceback.format_exc())
             flash(f'Error updating attendance: {str(e)}', 'danger')
 
-    return render_template('admin_edit_attendance.html', attendance=attendance)
+    return render_template('admin_edit_attendance.html', attendance=attendance,
+                           return_params=return_params)
 
 
 # ============================================================

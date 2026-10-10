@@ -108,6 +108,21 @@
             </div>
         </div>
 
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="row mt-3">
+                    <div class="col-12">
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endwith %}
+
         <!-- Date Range Filter (History & Attendance Records sections only - Pending is always shown in full) -->
         <div class="row mt-3">
             <div class="col-12">
@@ -445,7 +460,7 @@
                                             </span>
                                         </td>
                                         <td>
-                                            <a href="{{ url_for('approvals.admin_edit_attendance', attendance_id=att.id) }}"
+                                            <a href="{{ url_for('approvals.admin_edit_attendance', attendance_id=att.id, date_from=date_from.strftime('%Y-%m-%d'), date_to=date_to.strftime('%Y-%m-%d')) }}"
                                                class="btn btn-sm btn-primary">
                                                 <i class="bi bi-pencil-square"></i> Edit
                                             </a>
@@ -653,6 +668,17 @@
                 alert('Error: ' + error);
             });
         }
+    </script>
+    <script>
+        // Auto-hide flash messages after 4 seconds (modal alerts are left alone)
+        document.addEventListener('DOMContentLoaded', function () {
+            setTimeout(function () {
+                document.querySelectorAll('.alert-dismissible').forEach(function (el) {
+                    if (el.closest('.modal')) { return; }
+                    bootstrap.Alert.getOrCreateInstance(el).close();
+                });
+            }, 4000);
+        });
     </script>
 </body>
 </html>

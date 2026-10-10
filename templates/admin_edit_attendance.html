@@ -79,6 +79,15 @@
             </div>
         </div>
 
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endwith %}
+
         <div class="row mt-4">
             <div class="col-md-8">
                 <div class="card">
@@ -88,6 +97,8 @@
                     <div class="card-body">
                         <form method="POST">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="date_from" value="{{ return_params.date_from }}">
+                            <input type="hidden" name="date_to" value="{{ return_params.date_to }}">
                             <div class="mb-3">
                                 <label for="employee_name" class="form-label">Employee Name</label>
                                 <input type="text" class="form-control" id="employee_name" value="{{ attendance.employee.name }}" readonly>
@@ -131,7 +142,7 @@
                                 <button type="submit" class="btn btn-primary">
                                     <i class="bi bi-save"></i> Save Changes
                                 </button>
-                                <a href="{{ url_for('approvals.admin_approvals') }}" class="btn btn-secondary">
+                                <a href="{{ url_for('approvals.admin_approvals', **return_params) }}" class="btn btn-secondary">
                                     <i class="bi bi-x-circle"></i> Cancel
                                 </a>
                             </div>
@@ -200,5 +211,16 @@
     </div>
 
     <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        // Auto-hide flash messages after 4 seconds (modal alerts are left alone)
+        document.addEventListener('DOMContentLoaded', function () {
+            setTimeout(function () {
+                document.querySelectorAll('.alert-dismissible').forEach(function (el) {
+                    if (el.closest('.modal')) { return; }
+                    bootstrap.Alert.getOrCreateInstance(el).close();
+                });
+            }, 4000);
+        });
+    </script>
 </body>
 </html>

@@ -1308,5 +1308,47 @@
     {% endif %}
 
     <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+    {% if form_prefill %}
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var prefill = {{ form_prefill|tojson }};
+            var modalEl = document.getElementById(prefill.modal);
+            if (!modalEl) { return; }
+            var form = modalEl.querySelector('form');
+            Object.keys(prefill.data).forEach(function (name) {
+                var field = form.elements[name];
+                if (!field || field.type === 'file' || field.type === 'hidden') { return; }
+                if (field.type === 'checkbox') { field.checked = (prefill.data[name] === 'on'); }
+                else { field.value = prefill.data[name]; }
+            });
+            if (form.elements['pt_applicable'] && !('pt_applicable' in prefill.data)) {
+                form.elements['pt_applicable'].checked = false;
+            }
+            var body = modalEl.querySelector('.modal-body');
+            var err = document.createElement('div');
+            err.className = 'alert alert-danger alert-dismissible fade show';
+            err.setAttribute('role', 'alert');
+            err.textContent = prefill.error + ' ';
+            var close = document.createElement('button');
+            close.type = 'button'; close.className = 'btn-close';
+            close.setAttribute('data-bs-dismiss', 'alert');
+            err.appendChild(close);
+            body.insertBefore(err, body.firstChild);
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        });
+    </script>
+    {% endif %}
+
+    <script>
+        // Auto-hide flash messages after 4 seconds (modal alerts are left alone)
+        document.addEventListener('DOMContentLoaded', function () {
+            setTimeout(function () {
+                document.querySelectorAll('.alert-dismissible').forEach(function (el) {
+                    if (el.closest('.modal')) { return; }
+                    bootstrap.Alert.getOrCreateInstance(el).close();
+                });
+            }, 4000);
+        });
+    </script>
 </body>
 </html>

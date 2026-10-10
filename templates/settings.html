@@ -427,5 +427,16 @@
     <footer class="app-footer">
         AI Attendance &amp; Payroll System &middot; v{{ app_version }}
     </footer>
+    <script>
+        // Auto-hide flash messages after 4 seconds (modal alerts are left alone)
+        document.addEventListener('DOMContentLoaded', function () {
+            setTimeout(function () {
+                document.querySelectorAll('.alert-dismissible').forEach(function (el) {
+                    if (el.closest('.modal')) { return; }
+                    bootstrap.Alert.getOrCreateInstance(el).close();
+                });
+            }, 4000);
+        });
+    </script>
 </body>
 </html>

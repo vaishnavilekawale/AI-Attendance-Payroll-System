@@ -25,7 +25,7 @@ import os
 import shutil
 from datetime import datetime
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, session
 from werkzeug.security import generate_password_hash
 from werkzeug.utils import secure_filename
 
@@ -56,6 +56,21 @@ def _employee_image_counts(dataset_folder, employees):
         else:
             counts[emp.id] = 0
     return counts
+
+
+def _stash_form_for_retry(modal_id, error_message):
+    """Remember what the admin typed (and why it was rejected) so the page can
+    re-open the same modal pre-filled instead of making them type everything again."""
+    data = {k: v for k, v in request.form.items() if k != 'csrf_token'}
+    session['employee_form_prefill'] = {
+        'modal': modal_id,
+        'data': data,
+        'error': error_message,
+    }
+
+
+def _pop_form_prefill():
+    return session.pop('employee_form_prefill', None)
 
 
 @employees_bp.route('/employees')
@@ -89,7 +104,8 @@ def employees():
                          employees=employees_page,
                          search=search,
                          min_face_images=min_face_images,
-                         employee_image_counts=employee_image_counts)
+                         employee_image_counts=employee_image_counts,
+                         form_prefill=_pop_form_prefill())
 
 
 @employees_bp.route('/employees/add', methods=['GET', 'POST'])
@@ -148,15 +164,15 @@ def add_employee():
         pt_applicable = True if 'pt_applicable_present' not in request.form else (request.form.get('pt_applicable') == 'on')
 
         if Employee.query.filter_by(name=name).first():
-            flash('This Employee Name already exists.', 'danger')
+            _stash_form_for_retry('addEmployeeModal', 'This Employee Name already exists.')
             return redirect(url_for('employees.employees'))
 
         if Employee.query.filter_by(phone=phone).first():
-            flash('This Mobile Number already exists.', 'danger')
+            _stash_form_for_retry('addEmployeeModal', 'This Mobile Number already exists.')
             return redirect(url_for('employees.employees'))
 
         if Employee.query.filter_by(email=email).first():
-            flash('This Email ID already exists.', 'danger')
+            _stash_form_for_retry('addEmployeeModal', 'This Email ID already exists.')
             return redirect(url_for('employees.employees'))
 
         # Secure random temporary password for the new employee's first
@@ -298,15 +314,15 @@ def edit_employee(id):
         other_deduction = _parse_allowance('other_deduction')
 
         if Employee.query.filter(Employee.name == name, Employee.id != id).first():
-            flash('This Employee Name already exists.', 'danger')
+            _stash_form_for_retry('editEmployeeModal', 'This Employee Name already exists.')
             return redirect(url_for('employees.edit_employee', id=id))
 
         if Employee.query.filter(Employee.phone == phone, Employee.id != id).first():
-            flash('This Mobile Number already exists.', 'danger')
+            _stash_form_for_retry('editEmployeeModal', 'This Mobile Number already exists.')
             return redirect(url_for('employees.edit_employee', id=id))
 
         if Employee.query.filter(Employee.email == email, Employee.id != id).first():
-            flash('This Email ID already exists.', 'danger')
+            _stash_form_for_retry('editEmployeeModal', 'This Email ID already exists.')
             return redirect(url_for('employees.edit_employee', id=id))
 
         employee.name = name
@@ -356,7 +372,8 @@ def edit_employee(id):
 
     return render_template('add_employee.html', employee=employee, employees=all_employees,
                          edit_mode=True, min_face_images=min_face_images,
-                         employee_image_counts=employee_image_counts)
+                         employee_image_counts=employee_image_counts,
+                         form_prefill=_pop_form_prefill())
 
 
 @employees_bp.route('/employees/delete/<int:id>')
