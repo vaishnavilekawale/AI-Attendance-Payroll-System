@@ -129,7 +129,9 @@ def login():
                 session['employee_id'] = employee.id
                 session['employee_username'] = employee.employee_id
                 session['user_role'] = 'employee'
+                login_creds.previous_login = login_creds.last_login  # remember the login before this one
                 login_creds.last_login = now_ist()
+                employee.last_login = login_creds.last_login
                 db.session.commit()
 
                 # Check if first login or force password change - redirect to change password
@@ -147,7 +149,9 @@ def login():
                 session['employee_id'] = employee.id
                 session['employee_username'] = employee.employee_id
                 session['user_role'] = 'employee'
+                login_creds.previous_login = login_creds.last_login  # remember the login before this one
                 login_creds.last_login = now_ist()
+                employee.last_login = login_creds.last_login
                 db.session.commit()
 
                 # Redirect to change password
@@ -286,6 +290,7 @@ def change_password():
                 flash('New password and confirm password do not match.', 'danger')
             else:
                 login_creds.set_password(new_password)
+                login_creds.password_changed_at = now_ist()
                 login_creds.clear_temporary_password()
                 login_creds.first_login = False
                 login_creds.force_password_change = False
@@ -389,6 +394,7 @@ def employee_change_password():
                 flash('Passwords do not match', 'danger')
             else:
                 login_creds.set_password(new_password)
+                login_creds.password_changed_at = now_ist()
                 login_creds.first_login = False
                 login_creds.force_password_change = False
                 login_creds.clear_temporary_password()
@@ -405,6 +411,7 @@ def employee_change_password():
                 flash('Passwords do not match', 'danger')
             else:
                 login_creds.set_password(new_password)
+                login_creds.password_changed_at = now_ist()
                 login_creds.force_password_change = False
                 login_creds.clear_temporary_password()
                 db.session.commit()

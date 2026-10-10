@@ -74,6 +74,14 @@
     </nav>
 
     <div class="container mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                    {{ message }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            {% endfor %}
+        {% endwith %}
         <div class="row">
             <div class="col-md-4">
                 <div class="card shadow">
@@ -168,7 +176,7 @@
                             </div>
                             <div class="col-md-6 mb-3">
                                 <label class="fw-bold">Last Login:</label>
-                                <p>{{ employee.last_login.strftime('%Y-%m-%d %H:%M:%S') if employee.last_login else 'Never' }}</p>
+                                <p>{% if login_creds and login_creds.previous_login %}{{ login_creds.previous_login.strftime('%d %b %Y, %I:%M %p') }}{% else %}<span class="text-muted">First login - no earlier login yet</span>{% endif %}</p>
                             </div>
                             <div class="col-md-6 mb-3">
                                 <label class="fw-bold">Account Status:</label>
@@ -181,9 +189,14 @@
                             <div class="col-md-6 mb-3">
                                 <label class="fw-bold">Password Changed:</label>
                                 <p>
-                                    <span class="badge bg-{{ 'success' if not login_creds.first_login else 'warning' }}">
-                                        {{ 'Yes' if not login_creds.first_login else 'No (First Login)' }}
-                                    </span>
+                                    {% if login_creds.password_changed_at %}
+                                        <span class="badge bg-success">Yes</span>
+                                        <small class="text-muted ms-1">{{ login_creds.password_changed_at.strftime('%d %b %Y, %I:%M %p') }}</small>
+                                    {% elif not login_creds.first_login %}
+                                        <span class="badge bg-success">Yes</span>
+                                    {% else %}
+                                        <span class="badge bg-warning text-dark">No (still using default password)</span>
+                                    {% endif %}
                                 </p>
                             </div>
                         </div>
@@ -237,29 +250,25 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    {% with messages = get_flashed_messages(with_categories=true) %}
-                        {% if messages %}
-                            {% for category, message in messages %}
-                                <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
-                                    {{ message }}
-                                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                                </div>
-                            {% endfor %}
-                        {% endif %}
-                    {% endwith %}
+                    {% if edit_error %}
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            {{ edit_error }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endif %}
                     
                     <form method="POST" action="{{ url_for('attendance.employee_profile') }}" id="editProfileForm">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="mb-3">
                             <label for="phone" class="form-label">Phone Number</label>
                             <input type="text" class="form-control" id="phone" name="phone" 
-                                   value="{{ employee.phone }}" required>
+                                   value="{{ form_phone if form_phone is not none else employee.phone }}" required>
                         </div>
                         
                         <div class="mb-3">
                             <label for="email" class="form-label">Email</label>
                             <input type="email" class="form-control" id="email" name="email" 
-                                   value="{{ employee.email }}" required>
+                                   value="{{ form_email if form_email is not none else employee.email }}" required>
                         </div>
                         
                         <div class="text-muted small">
@@ -277,5 +286,19 @@
     </div>
 
     <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            {% if edit_error %}
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('editProfileModal')).show();
+            {% endif %}
+            // Auto-hide page-level flash messages after 4 seconds (modal alerts are left alone)
+            setTimeout(function () {
+                document.querySelectorAll('.alert-dismissible').forEach(function (el) {
+                    if (el.closest('.modal')) { return; }
+                    bootstrap.Alert.getOrCreateInstance(el).close();
+                });
+            }, 4000);
+        });
+    </script>
 </body>
 </html>

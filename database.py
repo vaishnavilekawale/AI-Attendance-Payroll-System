@@ -320,6 +320,14 @@ def init_db(app):
                 with db.engine.connect() as conn:
                     conn.execute(db.text("ALTER TABLE employee_login ADD COLUMN temporary_password_created_at DATETIME"))
                     conn.commit()
+            if 'previous_login' not in employee_login_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(db.text("ALTER TABLE employee_login ADD COLUMN previous_login DATETIME"))
+                    conn.commit()
+            if 'password_changed_at' not in employee_login_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(db.text("ALTER TABLE employee_login ADD COLUMN password_changed_at DATETIME"))
+                    conn.commit()
         except Exception as e:
             print(f"Note: employee_login table may not exist yet: {e}")
         

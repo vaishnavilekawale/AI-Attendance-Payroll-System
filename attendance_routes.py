@@ -877,18 +877,28 @@ def employee_profile():
         flash('Employee not found', 'danger')
         return redirect(url_for('auth.login'))
     
+    edit_error = None
+    form_phone = None
+    form_email = None
+
     if request.method == 'POST':
         # Handle profile editing
-        phone = request.form.get('phone')
-        email = request.form.get('email')
-        
+        phone = (request.form.get('phone') or '').strip()
+        email = (request.form.get('email') or '').strip()
+        form_phone, form_email = phone, email
+
         # Validation
         if not phone or not email:
-            flash('Phone and Email are required', 'danger')
+            edit_error = 'Phone and Email are required'
         elif len(phone) < 10:
-            flash('Phone number must be at least 10 digits', 'danger')
+            edit_error = 'Phone number must be at least 10 digits'
         elif '@' not in email or '.' not in email:
-            flash('Invalid email format', 'danger')
+            edit_error = 'Invalid email format'
+        elif Employee.query.filter(Employee.phone == phone, Employee.id != employee.id).first():
+            edit_error = 'This Mobile Number already exists.'
+        elif Employee.query.filter(db.func.lower(Employee.email) == email.lower(),
+                                   Employee.id != employee.id).first():
+            edit_error = 'This Email ID already exists.'
         else:
             # Update employee information
             employee.phone = phone
@@ -897,8 +907,13 @@ def employee_profile():
             db.session.commit()
             flash('Profile updated successfully', 'success')
             return redirect(url_for('attendance.employee_profile'))
-    
-    return render_template('employee_profile.html', employee=employee, current_user=current_user, login_creds=login_creds)
+
+    # On a validation error the page is re-rendered (not redirected) so the
+    # Edit Profile modal re-opens with what the employee typed and the error
+    # shown inside it.
+    return render_template('employee_profile.html', employee=employee, current_user=current_user,
+                           login_creds=login_creds, edit_error=edit_error,
+                           form_phone=form_phone, form_email=form_email)
 
 
 

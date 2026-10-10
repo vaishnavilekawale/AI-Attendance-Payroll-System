@@ -365,6 +365,8 @@ class EmployeeLogin(db.Model):
     force_password_change = db.Column(db.Boolean, default=False)
     is_active = db.Column(db.Boolean, default=True)
     last_login = db.Column(db.DateTime)
+    previous_login = db.Column(db.DateTime)  # the login BEFORE the current one (shown as 'Last Login')
+    password_changed_at = db.Column(db.DateTime)  # when the employee last set their OWN password
     password_reset_token = db.Column(db.String(255))
     password_reset_expiry = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=now_ist)
