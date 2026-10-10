@@ -288,19 +288,78 @@
                         <h5 class="card-title mb-0">Email Configuration</h5>
                     </div>
                     <div class="card-body">
-                        <div class="alert alert-info">
-                            <i class="bi bi-info-circle"></i> Configure SMTP settings in .env file for email functionality.
+                        {% if mail_status.configured %}
+                        <div class="alert alert-success py-2 small">
+                            <i class="bi bi-check-circle"></i>
+                            Email is configured. Currently using <strong>{{ mail_status.source }}</strong>
+                            (sender account: {{ mail_status.user }}).
+                            {% if mail_status.source == '.env file' %}
+                            <br>Saving details below will override the .env values.
+                            {% endif %}
                         </div>
-                        <h6>Required .env variables:</h6>
-                        <ul class="list-unstyled">
-                            <li><code>MAIL_SERVER</code></li>
-                            <li><code>MAIL_PORT</code></li>
-                            <li><code>MAIL_USE_TLS</code></li>
-                            <li><code>MAIL_USERNAME</code></li>
-                            <li><code>MAIL_PASSWORD</code></li>
-                            <li><code>MAIL_DEFAULT_SENDER</code></li>
-                        </ul>
-                        <p class="small text-muted">For Gmail, use App Password instead of regular password.</p>
+                        {% else %}
+                        <div class="alert alert-warning py-2 small">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            Email is not configured yet. Emails (welcome, password reset, payslips) will not be sent
+                            until you save the details below.
+                        </div>
+                        {% endif %}
+                        <form method="POST" action="{{ url_for('settings.update_email_settings') }}" autocomplete="off">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="mb-2">
+                                <label class="form-label small mb-1">SMTP Server</label>
+                                <input type="text" class="form-control form-control-sm" name="mail_server"
+                                       value="{{ settings.mail_server or 'smtp.gmail.com' }}" placeholder="smtp.gmail.com">
+                            </div>
+                            <div class="row g-2 mb-2">
+                                <div class="col-6">
+                                    <label class="form-label small mb-1">Port</label>
+                                    <input type="number" class="form-control form-control-sm" name="mail_port"
+                                           value="{{ settings.mail_port or 587 }}" min="1" max="65535">
+                                </div>
+                                <div class="col-6 d-flex align-items-end">
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" id="mail_use_tls" name="mail_use_tls"
+                                               {{ 'checked' if settings.mail_use_tls is none or settings.mail_use_tls else '' }}>
+                                        <label class="form-check-label small" for="mail_use_tls">Use TLS</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small mb-1">Email / Username</label>
+                                <input type="email" class="form-control form-control-sm" name="mail_username"
+                                       value="{{ settings.mail_username or '' }}" placeholder="yourname@gmail.com" autocomplete="off">
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small mb-1">Password (Gmail: App Password)</label>
+                                <input type="password" class="form-control form-control-sm" name="mail_password"
+                                       placeholder="{{ 'Saved - leave empty to keep it' if settings.mail_password_enc else '16-character App Password' }}"
+                                       autocomplete="new-password">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small mb-1">Sender Email (optional)</label>
+                                <input type="email" class="form-control form-control-sm" name="mail_default_sender"
+                                       value="{{ settings.mail_default_sender or '' }}" placeholder="same as Email / Username">
+                            </div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button type="submit" name="action" value="save" class="btn btn-primary btn-sm">
+                                    <i class="bi bi-save"></i> Save
+                                </button>
+                                <button type="submit" name="action" value="save_test" class="btn btn-info btn-sm">
+                                    <i class="bi bi-envelope-check"></i> Save &amp; Test
+                                </button>
+                            </div>
+                        </form>
+                        <p class="small text-muted mt-3 mb-1">
+                            For Gmail, turn on 2-Step Verification and create an <strong>App Password</strong>;
+                            the normal Gmail password will not work. The password is stored encrypted.
+                        </p>
+                        <p class="small text-muted mb-0">
+                            Leave Email / Username empty and Save to remove these settings and use the .env values again.
+                            {% if settings.mail_username and settings.mail_password_enc %}
+                            <br><span class="text-success"><i class="bi bi-check-circle"></i> Currently using these Admin Settings.</span>
+                            {% endif %}
+                        </p>
                     </div>
                 </div>
 

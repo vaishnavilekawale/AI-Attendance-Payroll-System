@@ -327,6 +327,15 @@ class Settings(db.Model):
     overtime_rate = db.Column(db.Float, default=1.5)
     face_recognition_tolerance = db.Column(db.Float, default=0.6)
     min_face_images_required = db.Column(db.Integer, default=20)
+    # Email (SMTP) configuration entered from Admin Settings. When mail_username
+    # and mail_password_enc are both set they take priority over the .env values.
+    # The password is stored ENCRYPTED (crypto_utils.encrypt_str), never in plain text.
+    mail_server = db.Column(db.String(255))
+    mail_port = db.Column(db.Integer)
+    mail_use_tls = db.Column(db.Boolean, default=True)
+    mail_username = db.Column(db.String(255))
+    mail_password_enc = db.Column(db.Text)
+    mail_default_sender = db.Column(db.String(255))
     updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
     
     @classmethod

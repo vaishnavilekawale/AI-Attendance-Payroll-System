@@ -331,6 +331,24 @@ def init_db(app):
         except Exception as e:
             print(f"Note: employee_login table may not exist yet: {e}")
         
+        # Email (SMTP) settings columns on the settings table
+        try:
+            settings_columns = [col['name'] for col in inspector.get_columns('settings')]
+            for col_name, col_type in (
+                ('mail_server', 'VARCHAR(255)'),
+                ('mail_port', 'INTEGER'),
+                ('mail_use_tls', 'BOOLEAN DEFAULT 1'),
+                ('mail_username', 'VARCHAR(255)'),
+                ('mail_password_enc', 'TEXT'),
+                ('mail_default_sender', 'VARCHAR(255)'),
+            ):
+                if col_name not in settings_columns:
+                    with db.engine.connect() as conn:
+                        conn.execute(db.text(f"ALTER TABLE settings ADD COLUMN {col_name} {col_type}"))
+                        conn.commit()
+        except Exception as e:
+            print(f"Note: settings table may not exist yet: {e}")
+
         # ------------------------------------------------------------------
         # IMPORTANT: this used to unconditionally create a default admin
         # account (username='admin', password='admin123') on every fresh

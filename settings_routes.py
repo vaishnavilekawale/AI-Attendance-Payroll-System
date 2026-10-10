@@ -44,6 +44,26 @@ from backup_manager import write_backup_zip
 settings_bp = Blueprint('settings', __name__)
 
 
+def _mask_email(address):
+    """lekawale@gmail.com -> l***@gmail.com (never show the full address or any password)."""
+    address = (address or '').strip()
+    if '@' not in address:
+        return address[:1] + '***' if address else ''
+    local, domain = address.split('@', 1)
+    return f"{local[:1]}***@{domain}"
+
+
+def _email_config_status(settings):
+    """Which email settings are active right now (same priority as EmailService)."""
+    if settings.mail_username and settings.mail_password_enc:
+        return {'configured': True, 'source': 'Admin Settings',
+                'user': _mask_email(settings.mail_username)}
+    if Config.MAIL_USERNAME and Config.MAIL_PASSWORD:
+        return {'configured': True, 'source': '.env file',
+                'user': _mask_email(Config.MAIL_USERNAME)}
+    return {'configured': False, 'source': None, 'user': ''}
+
+
 # ==================== SYSTEM / COMPANY SETTINGS ====================
 
 @settings_bp.route('/settings', methods=['GET', 'POST'])
@@ -133,16 +153,93 @@ def settings():
             db.session.commit()
             current_app.logger.info(f"ATTENDANCE SETTINGS HISTORY CREATED - Effective From: {current_timestamp}")
 
-        flash("Settings updated successfully")
+        flash("Settings updated successfully", "success")
         return redirect(url_for("settings.settings"))
 
-    # Test email connection
-    email_test = None
+    # Test email connection: show the result as a normal flash message (dismissible,
+    # auto-hides) and redirect, so refreshing the page does not run the test again.
     if request.args.get('test_email'):
         _, _, es, _ = get_services()
-        email_test = es.test_email_connection()
+        result = es.test_email_connection()
+        flash(result['message'] if not result['success'] else 'Email connection successful',
+              'success' if result['success'] else 'danger')
+        return redirect(url_for('settings.settings'))
 
-    return render_template('settings.html', settings=settings, email_test=email_test)
+    email_test = None
+    return render_template('settings.html', settings=settings, email_test=email_test,
+                           mail_status=_email_config_status(settings))
+
+
+# ==================== EMAIL (SMTP) SETTINGS ====================
+
+@settings_bp.route('/settings/email', methods=['POST'])
+@login_required
+@admin_required
+def update_email_settings():
+    """Save the SMTP settings entered in Admin Settings (password stored encrypted)."""
+    from crypto_utils import encrypt_str
+
+    settings = Settings.get_settings()
+
+    server = (request.form.get('mail_server') or '').strip()
+    port_raw = (request.form.get('mail_port') or '').strip()
+    use_tls = request.form.get('mail_use_tls') == 'on'
+    username = (request.form.get('mail_username') or '').strip()
+    password = request.form.get('mail_password') or ''
+    sender = (request.form.get('mail_default_sender') or '').strip()
+
+    # Empty username = remove the saved email settings (the .env values are used again).
+    if not username:
+        settings.mail_server = None
+        settings.mail_port = None
+        settings.mail_use_tls = True
+        settings.mail_username = None
+        settings.mail_password_enc = None
+        settings.mail_default_sender = None
+        db.session.commit()
+        flash('Email settings removed from Admin Settings. The .env values (if any) will be used.', 'success')
+        return redirect(url_for('settings.settings'))
+
+    if '@' not in username or '.' not in username:
+        flash('Enter your full email address in "Email / Username" (e.g. name@gmail.com).', 'danger')
+        return redirect(url_for('settings.settings'))
+    if sender and '@' not in sender:
+        flash('"Sender Email" must be a valid email address.', 'danger')
+        return redirect(url_for('settings.settings'))
+
+    try:
+        port = int(port_raw) if port_raw else 587
+        if not 1 <= port <= 65535:
+            raise ValueError
+    except ValueError:
+        flash('SMTP port must be a number between 1 and 65535 (e.g. 587).', 'danger')
+        return redirect(url_for('settings.settings'))
+
+    server = server or 'smtp.gmail.com'
+
+    if password:
+        # Gmail shows App Passwords as "abcd efgh ijkl mnop" - the spaces are not part of it.
+        if server.lower() == 'smtp.gmail.com':
+            password = ''.join(password.split())
+        settings.mail_password_enc = encrypt_str(password)
+    elif not settings.mail_password_enc:
+        flash('Enter the email password (for Gmail: the 16-character App Password).', 'danger')
+        return redirect(url_for('settings.settings'))
+    # else: password box left empty -> keep the already saved password
+
+    settings.mail_server = server
+    settings.mail_port = port
+    settings.mail_use_tls = use_tls
+    settings.mail_username = username
+    settings.mail_default_sender = sender or username
+    db.session.commit()
+
+    if request.form.get('action') == 'save_test':
+        flash('Email settings saved. Connection test result is shown below.', 'success')
+        return redirect(url_for('settings.settings', test_email=1))
+
+    flash('Email settings saved.', 'success')
+    return redirect(url_for('settings.settings'))
 
 
 # ==================== BIOMETRIC CONSENT ====================

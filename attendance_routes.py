@@ -610,7 +610,9 @@ def train_ai():
     except Exception as e:
         flash(f'Error training AI: {str(e)}', 'danger')
     
-    return redirect(url_for('attendance.dashboard'))
+    # The button lives on the Settings page, which shows (and auto-hides) the message.
+    # (The dashboard does not render flash messages, so the text used to leak onto a later page.)
+    return redirect(url_for('settings.settings'))
 
 
 @attendance_bp.route('/delete-face-image/<int:employee_id>/<string:image_name>', methods=['POST'])

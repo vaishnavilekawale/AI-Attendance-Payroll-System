@@ -14,23 +14,52 @@ logger = logging.getLogger(__name__)
 
 class EmailService:
     def __init__(self):
+        self._load_config()
+        self.company_name = Config.COMPANY_NAME if hasattr(Config, 'COMPANY_NAME') else 'AI Attendance System'
+
+
+    def _load_config(self):
+        """
+        Load SMTP settings. Values saved in Admin Settings (database) win when
+        a username + password are saved there; otherwise the .env values are used.
+        Re-run before every send/test so a change in Admin Settings takes effect
+        immediately, without restarting the app.
+        """
         self.smtp_server = Config.MAIL_SERVER
         self.smtp_port = Config.MAIL_PORT
         self.smtp_username = Config.MAIL_USERNAME
         self.smtp_password = Config.MAIL_PASSWORD
         self.use_tls = Config.MAIL_USE_TLS
         self.default_sender = Config.MAIL_DEFAULT_SENDER
-        self.company_name = Config.COMPANY_NAME if hasattr(Config, 'COMPANY_NAME') else 'AI Attendance System'
+        self.config_source = '.env'
+
+        try:
+            from models import Settings
+            from crypto_utils import decrypt_str
+            row = Settings.query.first()
+            if row and row.mail_username and row.mail_password_enc:
+                password = decrypt_str(row.mail_password_enc)
+                self.smtp_server = (row.mail_server or '').strip() or 'smtp.gmail.com'
+                self.smtp_port = int(row.mail_port or 587)
+                self.use_tls = True if row.mail_use_tls is None else bool(row.mail_use_tls)
+                self.smtp_username = row.mail_username.strip()
+                self.smtp_password = password
+                self.default_sender = (row.mail_default_sender or '').strip() or self.smtp_username
+                self.config_source = 'admin settings'
+        except Exception as e:
+            # No app context / table not migrated yet / bad token: fall back to .env
+            logger.debug("[Email Service] Using .env mail settings (%s)", e)
 
         logger.info(
-            "[Email Service] SMTP configuration loaded: server=%s, port=%s, username=%s, password=%s, sender=%s",
+            "[Email Service] SMTP configuration loaded from %s: server=%s, port=%s, username=%s, password=%s, sender=%s",
+            self.config_source,
             self.smtp_server,
             self.smtp_port,
             "SET" if self.smtp_username else "NOT SET",
             "SET" if self.smtp_password else "NOT SET",
             self.default_sender or "NOT SET"
         )
-    
+
     def send_email(self, to_email, subject, html_body, text_body=None, attachments=None):
         """
         Send an email with a proper multipart/mixed + multipart/alternative
@@ -58,6 +87,7 @@ class EmailService:
         HTML-only email with no plain-text part is itself a common spam
         signal.
         """
+        self._load_config()
         logger.info(f"[Email Service] Attempting to send email")
         logger.info(f"[Email Service] Recipient (to_email): {to_email}")
         logger.info(f"[Email Service] Subject: {subject}")
@@ -1097,15 +1127,16 @@ Best regards,
     
     def test_email_connection(self):
         """Test email connection"""
+        self._load_config()
         if not self.smtp_username or not self.smtp_password:
             return {'success': False, 'message': 'SMTP credentials not configured'}
         
         try:
             if self.use_tls:
-                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=20)
                 server.starttls()
             else:
-                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=20)
             
             server.login(self.smtp_username, self.smtp_password)
             server.quit()
