@@ -66,7 +66,7 @@ class AttendanceCalculator:
         activities = AttendanceActivity.query.filter_by(
             employee_id=attendance.employee_id,
             attendance_date=attendance.date
-        ).order_by(AttendanceActivity.activity_time, AttendanceActivity.id).all()
+        ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(AttendanceActivity.activity_time, AttendanceActivity.id).all()
 
         print(f"\n--- Activity Breakdown for Employee {attendance.employee_id} on {attendance.date} ---")
 

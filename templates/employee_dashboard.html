@@ -82,7 +82,7 @@
 
         <!-- Employee Info Cards -->
         <div class="row mb-4">
-            <div class="col-md-3">
+            <div class="col-md">
                 <div class="card text-white bg-primary">
                     <div class="card-body">
                         <h5 class="card-title">Employee ID</h5>
@@ -90,26 +90,34 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md">
                 <div class="card text-white bg-success">
                     <div class="card-body">
-                        <h5 class="card-title">Present (30 Days)</h5>
+                        <h5 class="card-title">Present ({{ month_label }})</h5>
                         <h3 class="card-text">{{ present_days }}</h3>
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md">
+                <div class="card text-white bg-info">
+                    <div class="card-body">
+                        <h5 class="card-title">Half Day ({{ month_label }})</h5>
+                        <h3 class="card-text">{{ half_days }}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md">
                 <div class="card text-white bg-danger">
                     <div class="card-body">
-                        <h5 class="card-title">Absent (30 Days)</h5>
+                        <h5 class="card-title">Absent ({{ month_label }})</h5>
                         <h3 class="card-text">{{ absent_days }}</h3>
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md">
                 <div class="card text-white bg-warning">
                     <div class="card-body">
-                        <h5 class="card-title">Late (30 Days)</h5>
+                        <h5 class="card-title">Late ({{ month_label }})</h5>
                         <h3 class="card-text">{{ late_days }}</h3>
                     </div>
                 </div>

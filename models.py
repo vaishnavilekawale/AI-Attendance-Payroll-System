@@ -419,6 +419,15 @@ class AttendanceActivity(db.Model):
     activity_time = db.Column(db.Time, nullable=False)
     action = db.Column(db.String(10), nullable=False)  # IN or OUT
     created_at = db.Column(db.DateTime, default=now_ist)
+
+    # Admin-edit bookkeeping (nothing is ever deleted by an admin edit):
+    #   original_time   - the real punch time, set when an admin moved this punch
+    #   hidden_by_admin - punch falls outside the admin-edited IN..OUT window;
+    #                     kept in DB but not shown / not counted
+    #   admin_added     - punch created by an admin edit (removed on next edit)
+    original_time = db.Column(db.Time, nullable=True)
+    hidden_by_admin = db.Column(db.Boolean, default=False)
+    admin_added = db.Column(db.Boolean, default=False)
     
     # Relationship
     employee = db.relationship('Employee', backref='attendance_activities')
@@ -495,7 +504,13 @@ class LogoutApprovalRequest(db.Model):
     created_at = db.Column(db.DateTime, default=now_ist)
     approved_at = db.Column(db.DateTime)
     approved_by = db.Column(db.Integer, db.ForeignKey('employees.id'))
-    
+
+    # Set when an Admin manually edits the attendance after this request was
+    # rejected. The request stays 'rejected' (so approval history is preserved),
+    # but it no longer forces the attendance to ABSENT.
+    admin_overridden = db.Column(db.Boolean, default=False)
+    admin_overridden_at = db.Column(db.DateTime)
+
     # Email notification sent flags (for duplicate email prevention)
     employee_notification_sent = db.Column(db.Boolean, default=False)
     manager_notification_sent = db.Column(db.Boolean, default=False)

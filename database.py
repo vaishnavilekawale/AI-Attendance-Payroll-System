@@ -52,6 +52,27 @@ def init_db(app):
         from sqlalchemy import inspect
         inspector = inspect(db.engine)
         
+        # logout_approval_requests: admin override flag (keeps 'rejected' history)
+        lar_columns = [col['name'] for col in inspector.get_columns('logout_approval_requests')]
+        if 'admin_overridden' not in lar_columns:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE logout_approval_requests ADD COLUMN admin_overridden BOOLEAN DEFAULT 0"))
+                conn.commit()
+        if 'admin_overridden_at' not in lar_columns:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE logout_approval_requests ADD COLUMN admin_overridden_at DATETIME"))
+                conn.commit()
+
+        # attendance_activities: admin-edit bookkeeping columns
+        act_columns = [col['name'] for col in inspector.get_columns('attendance_activities')]
+        for _col, _ddl in (('original_time', 'TIME'),
+                           ('hidden_by_admin', 'BOOLEAN DEFAULT 0'),
+                           ('admin_added', 'BOOLEAN DEFAULT 0')):
+            if _col not in act_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(db.text(f"ALTER TABLE attendance_activities ADD COLUMN {_col} {_ddl}"))
+                    conn.commit()
+
         # Check and add columns for admins table
         admin_columns = [col['name'] for col in inspector.get_columns('admins')]
         if 'force_password_change' not in admin_columns:

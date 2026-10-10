@@ -552,6 +552,88 @@ def manager_edit_attendance(attendance_id):
     return redirect(url_for('approvals.manager_approvals'))
 
 
+def _minute(t):
+    """Time truncated to the minute (the edit form has no seconds)."""
+    return t.replace(second=0, microsecond=0)
+
+
+def _sync_activities_with_admin_edit(attendance):
+    """
+    Make the visible Activities log agree with an admin-edited IN/OUT, WITHOUT
+    ever losing a punch.
+
+    Every edit is re-derived from the PRISTINE punches, so editing the times
+    back and forth (or back to the original) always restores everything:
+
+      1. undo previous admin edits: moved punches go back to original_time,
+         admin-added punches are removed, hidden punches are un-hidden
+      2. earliest IN  -> edited in_time   (original time remembered)
+      3. latest OUT   -> edited out_time  (original time remembered; a new
+         OUT is added if the day ends on an IN / has no OUT)
+      4. punches outside the edited IN..OUT window are HIDDEN (kept in the
+         DB, not shown, not counted) so the log never looks out of order
+    """
+    from models import AttendanceActivity
+
+    emp_id, day = attendance.employee_id, attendance.date
+    all_acts = AttendanceActivity.query.filter_by(
+        employee_id=emp_id, attendance_date=day).all()
+
+    # 1) back to pristine
+    for a in all_acts:
+        if a.admin_added:
+            db.session.delete(a)
+            continue
+        if a.original_time is not None:
+            a.activity_time = a.original_time
+            a.original_time = None
+        a.hidden_by_admin = False
+    db.session.flush()
+
+    acts = [a for a in all_acts if not a.admin_added]
+    acts.sort(key=lambda a: (a.activity_time, a.id))
+
+    new_in = attendance.in_time.time() if attendance.in_time else None
+    new_out = attendance.out_time.time() if attendance.out_time else None
+    cross_day = bool(attendance.out_time and attendance.out_time.date() > day)
+
+    moved = set()
+    # 2) earliest IN
+    if new_in is not None:
+        first_in = next((a for a in acts if a.action == 'IN'), None)
+        if first_in:
+            if _minute(first_in.activity_time) != _minute(new_in):
+                first_in.original_time = first_in.activity_time
+                first_in.activity_time = new_in
+            moved.add(first_in.id)
+        else:
+            db.session.add(AttendanceActivity(employee_id=emp_id, attendance_date=day,
+                                              activity_time=new_in, action='IN',
+                                              admin_added=True))
+
+    # 3) latest OUT
+    if new_out is not None:
+        last_out = next((a for a in reversed(acts) if a.action == 'OUT'), None)
+        last_in = next((a for a in reversed(acts) if a.action == 'IN'), None)
+        if last_out and (last_in is None or last_out.activity_time >= last_in.activity_time):
+            if _minute(last_out.activity_time) != _minute(new_out):
+                last_out.original_time = last_out.activity_time
+                last_out.activity_time = new_out
+            moved.add(last_out.id)
+        else:
+            db.session.add(AttendanceActivity(employee_id=emp_id, attendance_date=day,
+                                              activity_time=new_out, action='OUT',
+                                              admin_added=True))
+
+    # 4) hide punches outside the edited window (never delete)
+    for a in acts:
+        if a.id in moved:
+            continue
+        before_in = new_in is not None and a.activity_time < new_in
+        after_out = (new_out is not None and not cross_day and a.activity_time > new_out)
+        a.hidden_by_admin = bool(before_in or after_out)
+
+
 @approvals_bp.route('/admin/edit-attendance/<int:attendance_id>', methods=['GET', 'POST'])
 @login_required
 def admin_edit_attendance(attendance_id):
@@ -598,27 +680,32 @@ def admin_edit_attendance(attendance_id):
             current_app.logger.info(f"NEW IN (parsed): {attendance.in_time}")
             current_app.logger.info(f"NEW OUT (parsed): {attendance.out_time}")
 
-            # Skip AttendanceActivity sync when admin edits attendance
-            # The calculation will use attendance.in_time and attendance.out_time directly
-            # This preserves cross-day datetime information that AttendanceActivity cannot store
-            # (AttendanceActivity only stores time + attendance_date, not full datetime)
+            # The activity log is kept, NOT wiped: only the first IN and the
+            # last OUT are moved to the edited times, so the middle punches
+            # (break OUT/IN etc.) stay visible in reports.
+            _sync_activities_with_admin_edit(attendance)
 
-            # Clear any rejected logout approval request when admin manually edits attendance
-            # Admin's manual edit overrides the automatic rejection
-            rejected_request = LogoutApprovalRequest.query.filter_by(
+            # Admin's manual edit overrides a rejection for attendance purposes,
+            # but the request itself stays 'rejected' so Approval History
+            # keeps showing it. We only flag it as overridden.
+            rejected_requests = LogoutApprovalRequest.query.filter_by(
                 attendance_id=attendance.id,
                 status='rejected'
-            ).first()
-            if rejected_request:
-                current_app.logger.info(f"Clearing rejected logout approval request ID: {rejected_request.id} for Attendance ID: {attendance.id}")
-                db.session.delete(rejected_request)
-                # Flush the deletion so has_rejected_approval doesn't find it during recalculation
-                db.session.flush()
+            ).all()
+            for rejected_request in rejected_requests:
+                current_app.logger.info(f"Marking rejected logout approval request ID: {rejected_request.id} as admin-overridden (history preserved)")
+                rejected_request.admin_overridden = True
+                rejected_request.admin_overridden_at = now_ist()
+            db.session.flush()
 
-            # Recalculate attendance fields using edited times (skip AttendanceActivity)
+            # Recalculate attendance fields using edited times
             from attendance import AttendanceManager
             am = AttendanceManager()
-            am.calculator.recalculate_attendance(attendance, is_final_calculation=True, use_activities=False)
+            # Hours come from the visible IN->OUT pairs (breaks excluded), exactly like
+            # normally punched attendance - NOT from first IN to last OUT.
+            # Falls back to the raw IN..OUT span only if the day has no activities.
+            db.session.flush()
+            am.calculator.recalculate_attendance(attendance, is_final_calculation=True, use_activities=True)
 
             current_app.logger.info(f"NEW STATUS: {attendance.status}")
             current_app.logger.info(f"NEW TOTAL HOURS: {attendance.total_hours}")

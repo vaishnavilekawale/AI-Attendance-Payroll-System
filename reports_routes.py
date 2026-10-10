@@ -109,7 +109,7 @@ def reports():
             activities = AttendanceActivity.query.filter_by(
                 employee_id=att.employee.id,
                 attendance_date=att.date
-            ).order_by(AttendanceActivity.activity_time).all()
+            ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(AttendanceActivity.activity_time).all()
             activities_by_attendance[(att.employee.id, att.date)] = activities
 
             # Add display_out_time for UI
@@ -241,10 +241,16 @@ def employee_reports():
     # Validation messages
     validation_error = None
 
-    # Default to joining date to today if no filters provided (initial page load)
+    # Default to the CURRENT MONTH (1st of month to today) if no filters were
+    # provided (initial page load). Older records are still available by
+    # changing From Date / To Date and clicking Apply Filter. If the employee
+    # joined mid-month, start from the joining date.
     if not start_date and not end_date and not status_filter:
-        start_date = employee.joining_date if employee.joining_date else date.today()
-        end_date = date.today()
+        today_ = date.today()
+        start_date = today_.replace(day=1)
+        if employee.joining_date and employee.joining_date > start_date:
+            start_date = employee.joining_date
+        end_date = today_
     elif start_date or end_date or status_filter:
         # User clicked filter button - validate and apply filters
         if start_date:
@@ -318,7 +324,7 @@ def employee_reports():
             activities = AttendanceActivity.query.filter_by(
                 employee_id=att.employee.id,
                 attendance_date=att.date
-            ).order_by(AttendanceActivity.activity_time).all()
+            ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(AttendanceActivity.activity_time).all()
             activities_by_attendance[(att.employee.id, att.date)] = activities
 
             # CRITICAL: Apply same status recalculation logic as Employee Dashboard
@@ -413,6 +419,19 @@ def employee_export_report():
             att.display_out_time = actual_attendance.display_out_time
         else:
             att.display_out_time = None
+
+    # Attach ALL (visible) IN/OUT activities of each day so the PDF lists every
+    # punch, same as the Activities column on the Reports page.
+    for att in attendances:
+        acts = AttendanceActivity.query.filter_by(
+            employee_id=employee.id,
+            attendance_date=att.date
+        ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(
+            AttendanceActivity.activity_time, AttendanceActivity.id
+        ).all()
+        att.activities_text = ', '.join(
+            f"{a.activity_time.strftime('%H:%M')} {a.action}" for a in acts
+        )
 
     filename = f"attendance_report_{employee.employee_id}_{start_date}_to_{end_date}.pdf"
     output_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)

@@ -342,7 +342,7 @@ def dashboard():
             activities = AttendanceActivity.query.filter_by(
                 employee_id=att.employee.id,
                 attendance_date=today
-            ).order_by(AttendanceActivity.activity_time).all()
+            ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(AttendanceActivity.activity_time).all()
             today_activities[att.employee.id] = activities
     
     # Department stats
@@ -396,10 +396,13 @@ def employee_dashboard():
     #     am._add_display_out_time(today_attendance, today)
     #     logger.info(f"  Display OUT Time after _add_display_out_time: {today_attendance.display_out_time if hasattr(today_attendance, 'display_out_time') else 'N/A'}")
     
-    # Get attendance summary for this employee (last 30 days)
+    # Get attendance summary for this employee for the CURRENT CALENDAR MONTH
+    # (1st of the month up to yesterday). This matches payroll/reports, which
+    # are monthly. Future days are never counted.
     # Use centralized attendance calculation to include generated absent records
-    thirty_days_ago = today - timedelta(days=30)
-    current_date = thirty_days_ago
+    month_start = today.replace(day=1)
+    month_label = today.strftime('%b %Y').upper()
+    current_date = month_start
     all_attendance = []
     
     # Exclude today from cumulative historical stats - today is finalized
@@ -462,7 +465,7 @@ def employee_dashboard():
     today_activities = AttendanceActivity.query.filter_by(
         employee_id=employee_id,
         attendance_date=today
-    ).order_by(AttendanceActivity.activity_time).all()
+    ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(AttendanceActivity.activity_time).all()
     
     return render_template('employee_dashboard.html',
                          employee=employee,
@@ -473,6 +476,7 @@ def employee_dashboard():
                          absent_days=absent_days,
                          half_days=half_days,
                          late_days=late_days,
+                         month_label=month_label,
                          recent_attendance=recent_attendance,
                          today_activities=today_activities)
 

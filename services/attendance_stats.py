@@ -2,6 +2,8 @@
 
 from datetime import date, timedelta
 
+from sqlalchemy import or_
+
 
 def is_hidden_manual_attendance(attendance_type, approval_status):
     """
@@ -31,10 +33,17 @@ def has_rejected_approval(attendance):
     if attendance_id is None:
         return False
     from models import LogoutApprovalRequest
+    # A rejected request that the Admin has since overridden by manually
+    # editing the attendance no longer forces ABSENT (history still shows it
+    # as rejected).
     return (
-        LogoutApprovalRequest.query.filter_by(
-            attendance_id=attendance_id,
-            status='rejected'
+        LogoutApprovalRequest.query.filter(
+            LogoutApprovalRequest.attendance_id == attendance_id,
+            LogoutApprovalRequest.status == 'rejected',
+            or_(
+                LogoutApprovalRequest.admin_overridden.is_(None),
+                LogoutApprovalRequest.admin_overridden.is_(False),
+            ),
         ).first() is not None
     )
 
