@@ -33,6 +33,216 @@ import io
 logger = logging.getLogger(__name__)
 
 
+# ======================================================================
+# Shared "professional" report theme (used by Admin + Employee reports)
+# ======================================================================
+THEME = {
+    'ink': '#1B2437',        # headings / header band
+    'accent': '#2563EB',     # accent rule + highlights
+    'muted': '#6B7280',      # secondary text
+    'line': '#E3E7ED',       # hairline borders
+    'zebra': '#F6F8FB',      # alternate row
+    'tint': '#EEF3FF',       # light accent tint (cards)
+    'good': '#157347',
+    'bad': '#B42318',
+    'warn': '#B45309',
+}
+
+
+def _tc(key):
+    from reportlab.lib import colors as _c
+    return _c.HexColor(THEME[key])
+
+
+def _pro_table_style(font_size=7.5, align='CENTER', left_cols=(0,), pad=5):
+    """Clean modern table: dark header, zebra rows, hairline horizontal rules."""
+    from reportlab.platypus import TableStyle
+    from reportlab.lib import colors as _c
+    cmds = [
+        ('BACKGROUND', (0, 0), (-1, 0), _tc('ink')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), _c.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), font_size),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), font_size),
+        ('TEXTCOLOR', (0, 1), (-1, -1), _tc('ink')),
+        ('ALIGN', (0, 0), (-1, -1), align),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), pad),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), pad),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [_c.white, _tc('zebra')]),
+        ('LINEBELOW', (0, 1), (-1, -1), 0.4, _tc('line')),
+        ('LINEBELOW', (0, -1), (-1, -1), 0.8, _tc('line')),
+        ('BOX', (0, 0), (-1, -1), 0.4, _tc('line')),
+    ]
+    for c in left_cols:
+        cmds.append(('ALIGN', (c, 0), (c, -1), 'LEFT'))
+    return TableStyle(cmds)
+
+
+def _logo_image(path, max_w=130, max_h=52):
+    """Logo scaled to fit the box while keeping its original aspect ratio."""
+    from reportlab.platypus import Image
+    from reportlab.lib.utils import ImageReader
+    iw, ih = ImageReader(path).getSize()
+    k = min(max_w / float(iw), max_h / float(ih))
+    return Image(path, width=iw * k, height=ih * k, hAlign='RIGHT')
+
+
+def _fit(widths, total):
+    """Scale column widths so the table spans the full content width."""
+    k = total / float(sum(widths))
+    return [w * k for w in widths]
+
+
+def _status_cmds(data, status_col, late_col=None):
+    """Per-cell text colours for Status / Late columns of attendance rows."""
+    cmds = []
+    colour_for = {'PRESENT': 'good', 'ABSENT': 'bad', 'HALF DAY': 'warn', 'HALF_DAY': 'warn'}
+    for r in range(1, len(data)):
+        st = str(data[r][status_col]).strip().upper()
+        key = colour_for.get(st)
+        if key:
+            cmds.append(('TEXTCOLOR', (status_col, r), (status_col, r), _tc(key)))
+            cmds.append(('FONTNAME', (status_col, r), (status_col, r), 'Helvetica-Bold'))
+        elif st in ('-', 'PENDING', ''):
+            cmds.append(('TEXTCOLOR', (status_col, r), (status_col, r), _tc('muted')))
+        if late_col is not None and str(data[r][late_col]).strip() == 'Yes':
+            cmds.append(('TEXTCOLOR', (late_col, r), (late_col, r), _tc('bad')))
+            cmds.append(('FONTNAME', (late_col, r), (late_col, r), 'Helvetica-Bold'))
+    return cmds
+
+
+def _section_heading(title, width):
+    """Section title with an accent bar on the left and a hairline underneath."""
+    from reportlab.platypus import Table, TableStyle, Paragraph
+    from reportlab.lib.styles import ParagraphStyle
+    st = ParagraphStyle('ProSection', fontName='Helvetica-Bold', fontSize=11,
+                        leading=14, textColor=_tc('ink'))
+    t = Table([[Paragraph(title, st)]], colWidths=[width], hAlign='LEFT')
+    t.setStyle(TableStyle([
+        ('LEFTPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LINEBEFORE', (0, 0), (0, 0), 3, _tc('accent')),
+        ('LINEBELOW', (0, 0), (-1, -1), 0.5, _tc('line')),
+    ]))
+    t.spaceBefore = 10
+    t.spaceAfter = 6
+    t.keepWithNext = True
+    return t
+
+
+def _kpi_cards(items, width):
+    """Row of KPI cards. items = [(label, value, colour_key_or_None), ...]"""
+    from reportlab.platypus import Table, TableStyle, Paragraph
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    lab_style = ParagraphStyle('KpiLab', fontName='Helvetica', fontSize=7.5, leading=10,
+                               alignment=TA_CENTER, textColor=_tc('muted'))
+    n = len(items)
+    gap = 6
+    cell_w = (width - gap * (n - 1)) / n
+    row, widths = [], []
+    for i, (label, value, col) in enumerate(items):
+        val_style = ParagraphStyle('KpiVal', fontName='Helvetica-Bold', fontSize=18, leading=22,
+                                   alignment=TA_CENTER, textColor=_tc(col or 'ink'))
+        card = Table([[Paragraph(str(value), val_style)], [Paragraph(label.upper(), lab_style)]],
+                     colWidths=[cell_w])
+        card.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), _tc('tint')),
+            ('BOX', (0, 0), (-1, -1), 0.4, _tc('line')),
+            ('LINEABOVE', (0, 0), (-1, 0), 2, _tc(col or 'accent')),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 0),
+            ('TOPPADDING', (0, 1), (-1, 1), 2),
+            ('BOTTOMPADDING', (0, 1), (-1, 1), 8),
+        ]))
+        row.append(card)
+        widths.append(cell_w)
+        if i < n - 1:
+            row.append('')
+            widths.append(gap)
+    outer = Table([row], colWidths=widths, hAlign='LEFT')
+    outer.setStyle(TableStyle([
+        ('LEFTPADDING', (0, 0), (-1, -1), 0), ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+        ('TOPPADDING', (0, 0), (-1, -1), 0), ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    return outer
+
+
+def _info_card(pairs, width, cols=3):
+    """Compact label-over-value block (applied filters, employee details)."""
+    from reportlab.platypus import Table, TableStyle, Paragraph
+    from reportlab.lib.styles import ParagraphStyle
+    lab = ParagraphStyle('InfoLab', fontName='Helvetica', fontSize=7, leading=9, textColor=_tc('muted'))
+    val = ParagraphStyle('InfoVal', fontName='Helvetica-Bold', fontSize=9, leading=12, textColor=_tc('ink'))
+    cells = [[Paragraph(l.upper(), lab), Paragraph(str(v), val)] for l, v in pairs]
+    data = []
+    for i in range(0, len(cells), cols):
+        chunk = cells[i:i + cols]
+        while len(chunk) < cols:
+            chunk.append('')
+        data.append(chunk)
+    t = Table(data, colWidths=[width / cols] * cols, hAlign='LEFT')
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), _tc('zebra')),
+        ('BOX', (0, 0), (-1, -1), 0.4, _tc('line')),
+        ('LEFTPADDING', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ]))
+    return t
+
+
+def _make_numbered_canvas(company_name, report_title, pagesize):
+    """Canvas class drawing the accent top bar + footer with 'Page X of Y'."""
+    from reportlab.pdfgen import canvas as _canvas
+    from datetime import datetime as _dt
+    stamp = _dt.now().strftime('%d %b %Y, %H:%M')
+
+    class NumberedCanvas(_canvas.Canvas):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self._saved = []
+
+        def showPage(self):
+            self._saved.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved)
+            for st in self._saved:
+                self.__dict__.update(st)
+                self._decorate(total)
+                super().showPage()
+            super().save()
+
+        def _decorate(self, total):
+            w, h = pagesize
+            self.saveState()
+            self.setFillColor(_tc('ink'))
+            self.rect(0, h - 10, w, 10, stroke=0, fill=1)
+            self.setFillColor(_tc('accent'))
+            self.rect(0, h - 10, 90, 10, stroke=0, fill=1)
+            self.setStrokeColor(_tc('line'))
+            self.setLineWidth(0.5)
+            self.line(30, 34, w - 30, 34)
+            self.setFont('Helvetica', 7.5)
+            self.setFillColor(_tc('muted'))
+            self.drawString(30, 22, f"{company_name}  |  {report_title}")
+            self.drawCentredString(w / 2, 22, f"Generated {stamp}")
+            self.drawRightString(w - 30, 22, f"Page {self._pageNumber} of {total}")
+            self.restoreState()
+
+    return NumberedCanvas
+
+
+
 def generate_payslip_password(employee):
     """
     Return the payslip PDF open-password for `employee`.
@@ -237,21 +447,22 @@ class PDFGenerator:
         doc = SimpleDocTemplate(
             build_path,
             pagesize=A4,
-            rightMargin=24,
-            leftMargin=24,
-            topMargin=24,
-            bottomMargin=24,
+            rightMargin=30,
+            leftMargin=30,
+            topMargin=34,
+            bottomMargin=30,
         )
 
         story = []
+        W = A4[0] - 60  # content width
 
         style_company_name = ParagraphStyle(
             'CompName',
             parent=self.styles['Normal'],
-            fontSize=11,
-            leading=14,
+            fontSize=15,
+            leading=19,
             fontName='Helvetica-Bold',
-            textColor=colors.HexColor('#0B3D91'),
+            textColor=_tc('ink'),
             spaceAfter=4,
             wordWrap='CJK',
         )
@@ -261,8 +472,8 @@ class PDFGenerator:
             fontName='Helvetica',
             fontSize=8,
             leading=11,
-            textColor=colors.black,
-            spaceAfter=2,
+            textColor=_tc('muted'),
+            spaceAfter=1,
         )
         style_section = ParagraphStyle(
             'SectionTitle',
@@ -270,7 +481,7 @@ class PDFGenerator:
             fontSize=9,
             leading=11,
             fontName='Helvetica-Bold',
-            textColor=colors.HexColor('#0B3D91'),
+            textColor=_tc('ink'),
         )
         style_normal = ParagraphStyle(
             'CellNormal',
@@ -288,7 +499,7 @@ class PDFGenerator:
         style_center_bold = ParagraphStyle(
             'CenterBold',
             parent=self.styles['Normal'],
-            fontSize=9,
+            fontSize=8,
             leading=11,
             fontName='Helvetica-Bold',
             alignment=TA_CENTER,
@@ -317,6 +528,8 @@ class PDFGenerator:
             fontSize=7,
             leading=9,
             alignment=TA_CENTER,
+            fontName='Helvetica',
+            textColor=_tc('muted'),
         )
         style_attendance_value = ParagraphStyle(
             'AttendanceValue',
@@ -371,27 +584,25 @@ class PDFGenerator:
         logo_cell = ''
         if logo_path and os.path.exists(logo_path):
             try:
-                # Adjusted logo size for better fit on left side
-                logo_cell = Image(logo_path, width=1.2 * inch, height=1.2 * inch, hAlign='CENTER')
+                logo_cell = _logo_image(logo_path, max_w=95, max_h=60)
+                logo_cell.hAlign = 'LEFT'
             except Exception:
                 logo_cell = ''
 
         header_table = Table(
             [[logo_cell, company_lines]],
-            colWidths=[1.5 * inch, 5.8 * inch],
+            colWidths=[1.45 * inch, W - 1.45 * inch],
         )
         header_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('ALIGN', (0, 0), (0, 0), 'CENTER'),
-            ('ALIGN', (1, 0), (1, 0), 'LEFT'),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-            ('LEFTPADDING', (1, 0), (1, 0), 8),
-            ('RIGHTPADDING', (0, 0), (0, 0), 4),
-            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#CCCCCC')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('LEFTPADDING', (0, 0), (0, 0), 0),
+            ('LEFTPADDING', (1, 0), (1, 0), 6),
+            ('LINEBELOW', (0, 0), (-1, 0), 1.2, _tc('accent')),
         ]))
         story.append(header_table)
-        story.append(Spacer(1, 0.1 * inch))
+        story.append(Spacer(1, 0.12 * inch))
 
         month_names = [
             'January', 'February', 'March', 'April', 'May', 'June',
@@ -399,18 +610,26 @@ class PDFGenerator:
         ]
         period = f"{month_names[payroll.month - 1]} {payroll.year}"
 
+        style_title_l = ParagraphStyle('PayslipTitleL', parent=self.styles['Normal'], fontSize=12,
+                                       leading=15, fontName='Helvetica-Bold', textColor=colors.white)
+        style_title_r = ParagraphStyle('PayslipTitleR', parent=self.styles['Normal'], fontSize=9,
+                                       leading=15, fontName='Helvetica', textColor=colors.white,
+                                       alignment=TA_RIGHT)
         title_table = Table(
-            [[Paragraph(f'PAY SLIP - {period.upper()}', style_title)]],
-            colWidths=[7.3 * inch],
+            [[Paragraph('PAYSLIP', style_title_l), Paragraph(period.upper(), style_title_r)]],
+            colWidths=[W * 0.5, W * 0.5],
         )
         title_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#EAEAEA')),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('BACKGROUND', (0, 0), (-1, -1), _tc('ink')),
+            ('LINEBEFORE', (0, 0), (0, 0), 4, _tc('accent')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ]))
         story.append(title_table)
-        story.append(Spacer(1, 0.08 * inch))
+        story.append(Spacer(1, 0.1 * inch))
 
         employee_table = Table([
             [
@@ -445,66 +664,64 @@ class PDFGenerator:
                 Paragraph(getattr(employee, 'pf_number', None) or 'N/A', style_normal),
                 '', '',
             ],
-        ], colWidths=[1.3 * inch, 2.35 * inch, 1.3 * inch, 2.35 * inch])
+        ], colWidths=_fit([1.3, 2.35, 1.3, 2.35], W))
         employee_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BOX', (0, 0), (-1, -1), 0.4, _tc('line')),
+            ('LINEBELOW', (0, 0), (-1, -2), 0.4, _tc('line')),
+            ('BACKGROUND', (0, 0), (0, -1), _tc('zebra')),
+            ('BACKGROUND', (2, 0), (2, 3), _tc('zebra')),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('LEFTPADDING', (0, 0), (-1, -1), 5),
-            # Corporate polish: soft blue tint on the label columns so the
-            # label/value pairs are visually distinct at a glance. Column
-            # 2's tint stops before the last (PF) row, since that row's
-            # value cell is merged (SPANned) across columns 1-3 - painting
-            # column 2's background independently there would bleed a
-            # stray colored strip through the merged white value cell.
-            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#EEF2FA')),
-            ('BACKGROUND', (2, 0), (2, 3), colors.HexColor('#EEF2FA')),
-            # PF row: merge the value cell across the remaining 3 columns
-            # (label, value, value, value) so there's no dangling empty
-            # cell when only one field is present on the last row.
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
             ('SPAN', (1, 4), (3, 4)),
         ]))
         story.append(employee_table)
         story.append(Spacer(1, 0.08 * inch))
 
-        story.append(Paragraph('Attendance Summary', style_section))
-        story.append(Spacer(1, 0.04 * inch))
+        story.append(_section_heading('Attendance Summary', W))
 
         attendance_rows = build_payslip_attendance_rows(payroll)
-        attendance_headers = [Paragraph(label, style_attendance_header) for label, _ in attendance_rows]
+        attendance_headers = [Paragraph(label.upper(), style_attendance_header) for label, _ in attendance_rows]
         attendance_values = [Paragraph(value, style_attendance_value) for _, value in attendance_rows]
-        col_width = 7.3 * inch / len(attendance_rows)
+        col_width = W / len(attendance_rows)
 
         attendance_table = Table(
             [attendance_headers, attendance_values],
             colWidths=[col_width] * len(attendance_rows),
         )
         attendance_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#F5F5F5')),
+            ('BACKGROUND', (0, 0), (-1, -1), _tc('tint')),
+            ('BOX', (0, 0), (-1, -1), 0.4, _tc('line')),
+            ('LINEAFTER', (0, 0), (-2, -1), 0.4, colors.white),
+            ('LINEABOVE', (0, 0), (-1, 0), 2, _tc('accent')),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 5),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
             ('LEFTPADDING', (0, 0), (-1, -1), 3),
             ('RIGHTPADDING', (0, 0), (-1, -1), 3),
         ]))
         story.append(attendance_table)
-        story.append(Spacer(1, 0.08 * inch))
+        story.append(Spacer(1, 0.14 * inch))
 
         earnings_rows = build_payslip_earnings_rows(payroll)
         deduction_rows = build_payslip_deduction_rows(payroll)
 
         max_rows = max(len(earnings_rows), len(deduction_rows))
-        earnings_rows += [(' ', 0.0, None)] * (max_rows - len(earnings_rows))
-        deduction_rows += [(' ', 0.0)] * (max_rows - len(deduction_rows))
+        # Pad BEFORE the total row so both "Total" lines share the last row.
+        earnings_rows = earnings_rows[:-1] + [(' ', 0.0, None)] * (max_rows - len(earnings_rows)) + earnings_rows[-1:]
+        deduction_rows = deduction_rows[:-1] + [(' ', 0.0)] * (max_rows - len(deduction_rows)) + deduction_rows[-1:]
 
+        style_hdr_l = ParagraphStyle('HdrL', parent=style_center_bold, alignment=TA_LEFT)
+        style_hdr_r = ParagraphStyle('HdrR', parent=style_center_bold, alignment=TA_RIGHT)
+        style_amt = ParagraphStyle('Amt', parent=style_normal, alignment=TA_RIGHT)
+        style_amt_b = ParagraphStyle('AmtB', parent=style_bold, alignment=TA_RIGHT)
         salary_table_data = [
             [
-                Paragraph('Earnings', style_center_bold),
-                Paragraph('Amount', style_center_bold),
-                Paragraph('Deductions', style_center_bold),
-                Paragraph('Amount', style_center_bold),
+                Paragraph('EARNINGS', style_hdr_l),
+                Paragraph('AMOUNT', style_hdr_r),
+                Paragraph('DEDUCTIONS', style_hdr_l),
+                Paragraph('AMOUNT', style_hdr_r),
             ]
         ]
 
@@ -538,28 +755,36 @@ class PDFGenerator:
             )
             salary_table_data.append([
                 Paragraph(earn_label, earn_style),
-                Paragraph(earn_amount_cell, earn_style),
+                Paragraph(earn_amount_cell, style_amt_b if is_earn_total else style_amt),
                 Paragraph(ded_label, ded_style),
-                Paragraph(ded_amount_cell, ded_style),
+                Paragraph(ded_amount_cell, style_amt_b if is_ded_total else style_amt),
             ])
 
         salary_table = Table(
             salary_table_data,
-            colWidths=[2.0 * inch, 1.65 * inch, 2.0 * inch, 1.65 * inch],
+            colWidths=_fit([2.0, 1.65, 2.0, 1.65], W),
         )
+        n_rows = len(salary_table_data)
         salary_table.setStyle(TableStyle([
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0B3D91')),
+            ('BACKGROUND', (0, 0), (-1, 0), _tc('ink')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('BOX', (0, 0), (-1, -1), 0.4, _tc('line')),
+            ('LINEBELOW', (0, 1), (-1, -2), 0.4, _tc('line')),
+            ('LINEAFTER', (1, 0), (1, -1), 0.8, _tc('line')),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, _tc('zebra')]),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 4),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-            ('LEFTPADDING', (0, 0), (-1, -1), 5),
-            ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
-            ('ALIGN', (3, 1), (3, -1), 'RIGHT'),
-            ('BACKGROUND', (0, -1), (1, -1), colors.HexColor('#F5F5F5')),
-            ('BACKGROUND', (2, -1), (3, -1), colors.HexColor('#F5F5F5')),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 8),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN', (2, 0), (2, 0), 'LEFT'),
+            ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+            ('ALIGN', (3, 0), (3, 0), 'RIGHT'),
+            ('BACKGROUND', (0, -1), (-1, -1), _tc('tint')),
+            ('LINEABOVE', (0, -1), (-1, -1), 1, _tc('ink')),
         ]))
+        story.append(_section_heading('Earnings & Deductions', W))
         story.append(salary_table)
 
         if was_prorated:
@@ -597,25 +822,28 @@ class PDFGenerator:
             [
                 Paragraph('<br/>'.join(summary_parts), style_normal),
                 Paragraph(
-                    f'<b>Net Pay: {self._format_currency(net_salary)}</b>',
+                    f"<font size=8 color='#B9C4DA'>NET PAY</font><br/><b>{self._format_currency(net_salary)}</b>",
                     ParagraphStyle(
                         'NetPay',
                         parent=style_bold,
-                        fontSize=10,
+                        fontSize=16,
+                        leading=20,
                         alignment=TA_RIGHT,
-                        textColor=colors.HexColor('#0B3D91'),
+                        textColor=colors.white,
                     ),
                 ),
             ]
-        ], colWidths=[4.8 * inch, 2.5 * inch])
+        ], colWidths=[W * 0.62, W * 0.38])
         net_table.setStyle(TableStyle([
-            ('BOX', (0, 0), (-1, -1), 1, colors.HexColor('#0B3D91')),
-            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#E8F0FE')),
+            ('BACKGROUND', (0, 0), (0, 0), _tc('tint')),
+            ('BACKGROUND', (1, 0), (1, 0), _tc('ink')),
+            ('BOX', (0, 0), (-1, -1), 0.4, _tc('line')),
+            ('LINEBEFORE', (0, 0), (0, 0), 4, _tc('accent')),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('TOPPADDING', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-            ('LEFTPADDING', (0, 0), (-1, -1), 8),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
         ]))
         story.append(net_table)
         story.append(Spacer(1, 0.06 * inch))
@@ -626,7 +854,30 @@ class PDFGenerator:
             )
         )
 
-        doc.build(story)
+        def _payslip_page(canvas, doc_):
+            w, h = A4
+            canvas.saveState()
+            canvas.setFillColor(_tc('ink'))
+            canvas.rect(0, h - 10, w, 10, stroke=0, fill=1)
+            canvas.setFillColor(_tc('accent'))
+            canvas.rect(0, h - 10, 90, 10, stroke=0, fill=1)
+            canvas.setStrokeColor(_tc('line'))
+            canvas.setLineWidth(0.5)
+            canvas.line(30, 30, w - 30, 30)
+            canvas.setFont('Helvetica', 7)
+            canvas.setFillColor(_tc('muted'))
+            canvas.drawString(30, 19, comp_name)
+            canvas.drawRightString(w - 30, 19, f"Payslip - {period}")
+            canvas.restoreState()
+
+        # Guarantee a single page: if the content is ever taller than the page
+        # (long address, many rows, wrapped labels) it is scaled down to fit
+        # instead of spilling onto a second page.
+        from reportlab.platypus import KeepInFrame
+        doc.build(
+            [KeepInFrame(doc.width, doc.height, story, mode='shrink')],
+            onFirstPage=_payslip_page, onLaterPages=_payslip_page,
+        )
 
         if password:
             # Encrypt the just-built PDF (at build_path) into the real
@@ -867,8 +1118,8 @@ class PDFGenerator:
             pagesize=pagesize,
             rightMargin=right_margin,
             leftMargin=left_margin,
-            topMargin=35,
-            bottomMargin=35
+            topMargin=40,
+            bottomMargin=50
         )
         
         story = []
@@ -952,117 +1203,85 @@ class PDFGenerator:
         )
         
         # Build header content
+        period_txt = ''
+        if filters.get('start_date') or filters.get('end_date'):
+            sd, ed = filters.get('start_date'), filters.get('end_date')
+            period_txt = f"Period: {sd.strftime('%d %b %Y') if sd else 'Start'} to {ed.strftime('%d %b %Y') if ed else 'Today'}"
+        company_header_style = ParagraphStyle(
+            'CompanyHeader', parent=self.styles['Normal'], fontSize=18, leading=22,
+            fontName='Helvetica-Bold', textColor=_tc('ink'), alignment=TA_LEFT, spaceAfter=2)
+        report_title_style = ParagraphStyle(
+            'ReportTitle', parent=self.styles['Normal'], fontSize=9, leading=12,
+            fontName='Helvetica-Bold', textColor=_tc('accent'), alignment=TA_LEFT, spaceAfter=2)
+        timestamp_style = ParagraphStyle(
+            'Timestamp', parent=self.styles['Normal'], fontSize=8, leading=11,
+            fontName='Helvetica', textColor=_tc('muted'), alignment=TA_LEFT)
         company_content = [
             Paragraph(company_name, company_header_style),
             Paragraph("ADMIN ATTENDANCE REPORT", report_title_style),
-            Paragraph(f"Generated: {datetime.now().strftime('%d-%b-%Y %H:%M')}", timestamp_style)
+            Paragraph(period_txt or f"Generated {datetime.now().strftime('%d %b %Y, %H:%M')}", timestamp_style)
         ]
-        
-        # Add logo on the right if available
+
         logo_cell = ''
         if company_logo and os.path.exists(company_logo):
             try:
-                logo_cell = Image(company_logo, width=1.0*inch, height=1.0*inch, hAlign='CENTER')
-            except:
+                logo_cell = _logo_image(company_logo)
+            except Exception:
                 pass
-        
-        # Create header table with logo on right, company info on left
+
         header_table = Table(
             [[company_content, logo_cell]],
-            colWidths=[available_width * 0.75, available_width * 0.25]
+            colWidths=[available_width * 0.8, available_width * 0.2]
         )
         header_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-            ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
             ('TOPPADDING', (0, 0), (-1, -1), 0),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
             ('LEFTPADDING', (0, 0), (0, 0), 0),
             ('RIGHTPADDING', (1, 0), (1, 0), 0),
-            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#CCCCCC')),
+            ('LINEBELOW', (0, 0), (-1, 0), 1.2, _tc('accent')),
         ]))
         story.append(header_table)
-        story.append(Spacer(1, 0.1*inch))
-        
+        story.append(Spacer(1, 0.08*inch))
+
         # APPLIED FILTERS SECTION
-        story.append(Paragraph("Applied Filters", section_header_style))
-        
-        filter_data = []
-        filter_data.append(['Filter', 'Value'])
-        
+        story.append(_section_heading("Applied Filters", available_width))
+
         start_date = filters.get('start_date')
         end_date = filters.get('end_date')
         department = filters.get('department') or 'All'
         employee_id = filters.get('employee_id')
         designation = filters.get('designation') or 'All'
         status = filters.get('status') or 'All'
-        
-        filter_data.append(['Date From', start_date.strftime('%d-%b-%Y') if start_date else 'All'])
-        filter_data.append(['Date To', end_date.strftime('%d-%b-%Y') if end_date else 'All'])
-        filter_data.append(['Department', department])
-        filter_data.append(['Employee', 'All Employees' if not employee_id else f'ID: {employee_id}'])
-        filter_data.append(['Designation', designation])
-        filter_data.append(['Attendance Status', status])
-        
-        # Calculate column widths based on available width
-        filter_col_widths = [available_width * 0.25, available_width * 0.75]
-        logger.info(f"Filter table column widths: {filter_col_widths}")
-        
-        filter_table = Table(filter_data, colWidths=filter_col_widths, hAlign='LEFT')
-        filter_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-            ('TOPPADDING', (0, 0), (-1, 0), 6),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('LEFTPADDING', (0, 0), (-1, -1), 4),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        story.append(filter_table)
-        story.append(Spacer(1, 0.15*inch))
-        
+
+        story.append(_info_card([
+            ('Date From', start_date.strftime('%d-%b-%Y') if start_date else 'All'),
+            ('Date To', end_date.strftime('%d-%b-%Y') if end_date else 'All'),
+            ('Attendance Status', str(status).replace('_', ' ').title()),
+            ('Department', department),
+            ('Employee', 'All Employees' if not employee_id else f'ID: {employee_id}'),
+            ('Designation', designation),
+        ], available_width, cols=3))
+        story.append(Spacer(1, 0.12*inch))
+
         # SUMMARY SECTION
         summary = report_data.get('summary', {})
-        story.append(Paragraph("Summary", section_header_style))
-        
-        summary_data = []
-        summary_data.append(['Metric', 'Value'])
-        summary_data.append(['Total Employees', str(summary.get('total_employees', 0))])
-        summary_data.append(['Present', str(summary.get('present', 0))])
-        summary_data.append(['Absent', str(summary.get('absent', 0))])
-        summary_data.append(['Half Day', str(summary.get('half_day', 0))])
-        summary_data.append(['Late', str(summary.get('late', 0))])
-        summary_data.append(['Attendance %', f"{summary.get('attendance_percentage', 0):.1f}%"])
-        
-        # Calculate column widths based on available width
-        summary_col_widths = [available_width * 0.4, available_width * 0.6]
-        logger.info(f"Summary table column widths: {summary_col_widths}")
-        
-        summary_table = Table(summary_data, colWidths=summary_col_widths, hAlign='LEFT')
-        summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
-            ('TOPPADDING', (0, 0), (-1, 0), 6),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('LEFTPADDING', (0, 0), (-1, -1), 4),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
-        ]))
-        story.append(summary_table)
-        story.append(Spacer(1, 0.15*inch))
-        
+        story.append(_section_heading("Summary", available_width))
+        story.append(_kpi_cards([
+            ('Total Employees', summary.get('total_employees', 0), None),
+            ('Present', summary.get('present', 0), 'good'),
+            ('Absent', summary.get('absent', 0), 'bad'),
+            ('Half Day', summary.get('half_day', 0), 'warn'),
+            ('Late', summary.get('late', 0), 'bad'),
+            ('Attendance %', f"{summary.get('attendance_percentage', 0):.1f}%", 'accent'),
+        ], available_width))
+        story.append(Spacer(1, 0.12*inch))
+
         # DEPARTMENT ANALYTICS
         dept_analytics = report_data.get('department_analytics', {})
         if dept_analytics:
-            story.append(Paragraph("Department-wise Analytics", section_header_style))
+            story.append(_section_heading("Department-wise Analytics", available_width))
             
             dept_data = [['Department', 'Total Emp', 'Present', 'Absent', 'Half Day', 'Late', 'Total Hours', 'Avg Hours', 'Att %']]
             
@@ -1093,28 +1312,15 @@ class PDFGenerator:
             ]
             logger.info(f"Department table column widths: {dept_col_widths}")
             
-            dept_table = LongTable(dept_data, colWidths=dept_col_widths, hAlign='LEFT', repeatRows=1)
-            dept_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
-                ('TOPPADDING', (0, 0), (-1, 0), 5),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            dept_table = LongTable(dept_data, colWidths=_fit(dept_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            dept_table.setStyle(_pro_table_style(font_size=7, left_cols=(0,)))
             story.append(dept_table)
             story.append(Spacer(1, 0.15*inch))
         
         # EMPLOYEE SUMMARY
         emp_summary = report_data.get('employee_summary', [])
         if emp_summary:
-            story.append(Paragraph("Employee Summary", section_header_style))
+            story.append(_section_heading("Employee Summary", available_width))
             
             emp_data = [['Employee', 'Emp ID', 'Dept', 'Designation', 'Days', 'Present', 'Absent', 'Half Day', 'Late', 'Total Hours', 'Avg Hours', 'Att %', 'Punct %']]
             
@@ -1153,28 +1359,15 @@ class PDFGenerator:
             ]
             logger.info(f"Employee Summary table column widths: {emp_col_widths}")
             
-            emp_table = LongTable(emp_data, colWidths=emp_col_widths, hAlign='LEFT', repeatRows=1)
-            emp_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            emp_table = LongTable(emp_data, colWidths=_fit(emp_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            emp_table.setStyle(_pro_table_style(font_size=6, left_cols=(0, 2, 3)))
             story.append(emp_table)
             story.append(Spacer(1, 0.15*inch))
         
         # EMPLOYEE ATTENDANCE DETAILS
         attendances = report_data.get('attendances', [])
         if attendances:
-            story.append(Paragraph("Employee Attendance Details", section_header_style))
+            story.append(_section_heading("Employee Attendance Details", available_width))
             
             # Group attendances by employee
             from collections import defaultdict
@@ -1194,12 +1387,33 @@ class PDFGenerator:
             # Create attendance table for each employee
             for emp, atts in emp_attendances.items():
                 # Employee header
-                emp_header = f"<b>Employee:</b> {emp.name} | <b>ID:</b> {emp.employee_id} | <b>Dept:</b> {emp.department}"
-                story.append(Paragraph(emp_header, normal_style))
-                story.append(Spacer(1, 0.05*inch))
+                emp_bar_style = ParagraphStyle('EmpBar', parent=self.styles['Normal'], fontSize=8.5,
+                                               leading=11, textColor=_tc('ink'), fontName='Helvetica')
+                emp_bar = Table([[Paragraph(
+                    f"<b>{emp.name}</b> &nbsp;&nbsp;<font color='{THEME['muted']}'>ID {emp.employee_id}"
+                    f" &nbsp;|&nbsp; {emp.department}</font>", emp_bar_style)]],
+                    colWidths=[available_width], hAlign='LEFT')
+                emp_bar.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, -1), _tc('tint')),
+                    ('LINEBEFORE', (0, 0), (0, 0), 3, _tc('accent')),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 8),
+                    ('TOPPADDING', (0, 0), (-1, -1), 5),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+                ]))
+                emp_bar.keepWithNext = True
+                emp_bar.spaceBefore = 8
+                emp_bar.spaceAfter = 3
+                story.append(emp_bar)
                 
                 # Attendance data
-                att_data = [['Date', 'IN Time', 'OUT Time', 'Total Hours', 'Status', 'Late', 'Overtime']]
+                att_data = [['Date', 'IN Time', 'OUT Time', 'Total Hours', 'Status', 'Late', 'Overtime', 'Activities (IN/OUT)']]
+                activities_style = ParagraphStyle(
+                    'AdminActivitiesCell',
+                    parent=self.styles['Normal'],
+                    fontSize=7,
+                    leading=9,
+                    alignment=TA_LEFT
+                )
                 
                 for att in atts:
                     att_data.append([
@@ -1207,38 +1421,28 @@ class PDFGenerator:
                         att.in_time.strftime('%H:%M') if att.in_time else '-',
                         att.display_out_time.strftime('%H:%M') if hasattr(att, 'display_out_time') and att.display_out_time else '-',
                         f"{att.total_hours:.2f}" if att.total_hours and att.total_hours != 0 else '-',
-                        att.status.upper() if att.status else '-',
+                        att.status.upper().replace('_', ' ') if att.status else '-',
                         'Yes' if att.late_entry else 'No',
-                        f"{att.overtime_hours:.2f}" if att.overtime_hours and att.overtime_hours != 0 else '-'
+                        f"{att.overtime_hours:.2f}" if att.overtime_hours and att.overtime_hours != 0 else '-',
+                        Paragraph(getattr(att, 'activities_text', None) or '-', activities_style)
                     ])
                 
                 # Calculate column widths based on available width
                 att_col_widths = [
-                    available_width * 0.15,  # Date
-                    available_width * 0.12,  # IN Time
-                    available_width * 0.12,  # OUT Time
-                    available_width * 0.12,  # Total Hours
-                    available_width * 0.12,  # Status
-                    available_width * 0.10,  # Late
-                    available_width * 0.12   # Overtime
+                    available_width * 0.11,  # Date
+                    available_width * 0.08,  # IN Time
+                    available_width * 0.08,  # OUT Time
+                    available_width * 0.09,  # Total Hours
+                    available_width * 0.09,  # Status
+                    available_width * 0.06,  # Late
+                    available_width * 0.09,  # Overtime
+                    available_width * 0.40   # Activities (all IN/OUT punches)
                 ]
                 logger.info(f"Attendance table column widths: {att_col_widths}")
                 
-                att_table = LongTable(att_data, colWidths=att_col_widths, hAlign='LEFT', repeatRows=1)
-                att_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, -1), 7),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                    ('TOPPADDING', (0, 0), (-1, 0), 4),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                    ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                    ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-                ]))
+                att_table = LongTable(att_data, colWidths=_fit(att_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+                att_table.setStyle(_pro_table_style(font_size=7, left_cols=(0, 7)))
+                att_table.setStyle(TableStyle(_status_cmds(att_data, 4, 5)))
                 story.append(att_table)
                 story.append(Spacer(1, 0.08*inch))
             
@@ -1249,7 +1453,7 @@ class PDFGenerator:
         
         # Most Present
         if rankings.get('most_present'):
-            story.append(Paragraph("Most Present", section_header_style))
+            story.append(_section_heading("Most Present", available_width))
             present_data = [['Rank', 'Employee', 'Emp ID', 'Department', 'Present Days', 'Att %']]
             for item in rankings['most_present']:
                 present_data.append([
@@ -1272,27 +1476,14 @@ class PDFGenerator:
             ]
             logger.info(f"Most Present table column widths: {present_col_widths}")
             
-            present_table = LongTable(present_data, colWidths=present_col_widths, hAlign='LEFT', repeatRows=1)
-            present_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            present_table = LongTable(present_data, colWidths=_fit(present_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            present_table.setStyle(_pro_table_style(font_size=7, left_cols=(1, 3)))
             story.append(present_table)
             story.append(Spacer(1, 0.08*inch))
         
         # Most Absent
         if rankings.get('most_absent'):
-            story.append(Paragraph("Most Absent", section_header_style))
+            story.append(_section_heading("Most Absent", available_width))
             absent_data = [['Rank', 'Employee', 'Emp ID', 'Department', 'Absent Days', 'Att %']]
             for item in rankings['most_absent']:
                 absent_data.append([
@@ -1304,27 +1495,14 @@ class PDFGenerator:
                     f"{item.get('attendance_percentage', 0):.1f}%"
                 ])
             
-            absent_table = LongTable(absent_data, colWidths=present_col_widths, hAlign='LEFT', repeatRows=1)
-            absent_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            absent_table = LongTable(absent_data, colWidths=_fit(present_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            absent_table.setStyle(_pro_table_style(font_size=7, left_cols=(1, 3)))
             story.append(absent_table)
             story.append(Spacer(1, 0.08*inch))
         
         # Most Half Day
         if rankings.get('most_half_day'):
-            story.append(Paragraph("Most Half Days", section_header_style))
+            story.append(_section_heading("Most Half Days", available_width))
             half_data = [['Rank', 'Employee', 'Emp ID', 'Department', 'Half Days', 'Att %']]
             for item in rankings['most_half_day']:
                 half_data.append([
@@ -1336,27 +1514,14 @@ class PDFGenerator:
                     f"{item.get('attendance_percentage', 0):.1f}%"
                 ])
             
-            half_table = LongTable(half_data, colWidths=present_col_widths, hAlign='LEFT', repeatRows=1)
-            half_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            half_table = LongTable(half_data, colWidths=_fit(present_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            half_table.setStyle(_pro_table_style(font_size=7, left_cols=(1, 3)))
             story.append(half_table)
             story.append(Spacer(1, 0.08*inch))
         
         # Most Late
         if rankings.get('most_late'):
-            story.append(Paragraph("Most Late", section_header_style))
+            story.append(_section_heading("Most Late", available_width))
             late_data = [['Rank', 'Employee', 'Emp ID', 'Department', 'Late Days', 'Total Late Mins', 'Avg Late Mins']]
             for item in rankings['most_late']:
                 late_data.append([
@@ -1381,27 +1546,14 @@ class PDFGenerator:
             ]
             logger.info(f"Most Late table column widths: {late_col_widths}")
             
-            late_table = LongTable(late_data, colWidths=late_col_widths, hAlign='LEFT', repeatRows=1)
-            late_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            late_table = LongTable(late_data, colWidths=_fit(late_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            late_table.setStyle(_pro_table_style(font_size=7, left_cols=(1, 3)))
             story.append(late_table)
             story.append(Spacer(1, 0.08*inch))
         
         # Highest Working Hours
         if rankings.get('highest_working_hours'):
-            story.append(Paragraph("Highest Working Hours", section_header_style))
+            story.append(_section_heading("Highest Working Hours", available_width))
             high_data = [['Rank', 'Employee', 'Emp ID', 'Department', 'Total Hours', 'Avg Daily Hours']]
             for item in rankings['highest_working_hours']:
                 high_data.append([
@@ -1424,27 +1576,14 @@ class PDFGenerator:
             ]
             logger.info(f"Highest Working Hours table column widths: {hours_col_widths}")
             
-            high_table = LongTable(high_data, colWidths=hours_col_widths, hAlign='LEFT', repeatRows=1)
-            high_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            high_table = LongTable(high_data, colWidths=_fit(hours_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            high_table.setStyle(_pro_table_style(font_size=7, left_cols=(1, 3)))
             story.append(high_table)
             story.append(Spacer(1, 0.08*inch))
         
         # Lowest Working Hours
         if rankings.get('lowest_working_hours'):
-            story.append(Paragraph("Lowest Working Hours", section_header_style))
+            story.append(_section_heading("Lowest Working Hours", available_width))
             low_data = [['Rank', 'Employee', 'Emp ID', 'Department', 'Total Hours', 'Avg Daily Hours']]
             for item in rankings['lowest_working_hours']:
                 low_data.append([
@@ -1456,28 +1595,15 @@ class PDFGenerator:
                     f"{item.get('avg_daily_working_hours', 0):.1f}"
                 ])
             
-            low_table = LongTable(low_data, colWidths=hours_col_widths, hAlign='LEFT', repeatRows=1)
-            low_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            low_table = LongTable(low_data, colWidths=_fit(hours_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            low_table.setStyle(_pro_table_style(font_size=7, left_cols=(1, 3)))
             story.append(low_table)
             story.append(Spacer(1, 0.1*inch))
         
         # LATE ANALYSIS
         late_analysis = report_data.get('late_analysis', [])
         if late_analysis:
-            story.append(Paragraph("Late Analysis", section_header_style))
+            story.append(_section_heading("Late Analysis", available_width))
             
             late_anal_data = [['Employee', 'Emp ID', 'Department', 'Late Days', 'Total Late Mins', 'Avg Late Mins', 'Max Late Mins']]
             
@@ -1504,28 +1630,15 @@ class PDFGenerator:
             ]
             logger.info(f"Late Analysis table column widths: {late_anal_col_widths}")
             
-            late_anal_table = LongTable(late_anal_data, colWidths=late_anal_col_widths, hAlign='LEFT', repeatRows=1)
-            late_anal_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            late_anal_table = LongTable(late_anal_data, colWidths=_fit(late_anal_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            late_anal_table.setStyle(_pro_table_style(font_size=7, left_cols=(0, 2)))
             story.append(late_anal_table)
             story.append(Spacer(1, 0.1*inch))
         
         # DAILY ATTENDANCE TREND
         daily_trend = report_data.get('daily_trend', [])
         if daily_trend:
-            story.append(Paragraph("Daily Attendance Trend", section_header_style))
+            story.append(_section_heading("Daily Attendance Trend", available_width))
             
             trend_data = [['Date', 'Present', 'Absent', 'Half Day', 'Late']]
             
@@ -1555,25 +1668,12 @@ class PDFGenerator:
             ]
             logger.info(f"Daily Trend table column widths: {trend_col_widths}")
             
-            trend_table = LongTable(trend_data, colWidths=trend_col_widths, hAlign='LEFT', repeatRows=1)
-            trend_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
-                ('TOPPADDING', (0, 0), (-1, 0), 4),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.lightgrey]),
-                ('LEFTPADDING', (0, 0), (-1, -1), 3),
-                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
-            ]))
+            trend_table = LongTable(trend_data, colWidths=_fit(trend_col_widths, available_width), hAlign='LEFT', repeatRows=1)
+            trend_table.setStyle(_pro_table_style(font_size=7, left_cols=(0,)))
             story.append(trend_table)
         
         # Build PDF
-        doc.build(story)
+        doc.build(story, canvasmaker=_make_numbered_canvas(company_name, 'Admin Attendance Report', pagesize))
         
         logger.info("[ADMIN REPORT PDF] Rendering complete")
         logger.info("=" * 60)
@@ -1607,10 +1707,10 @@ class PDFGenerator:
         doc = SimpleDocTemplate(
             output_path,
             pagesize=pagesize,
-            rightMargin=0.75*inch,
-            leftMargin=0.75*inch,
-            topMargin=1*inch,
-            bottomMargin=0.75*inch
+            rightMargin=30,
+            leftMargin=30,
+            topMargin=40,
+            bottomMargin=50
         )
         
         story = []
@@ -1647,83 +1747,89 @@ class PDFGenerator:
             company_name = self.company_name
             company_logo = self.company_logo
         
-        # COMPANY HEADER - Logo on right, company info on left
+        # COMPANY HEADER - company info on left, logo on right
         company_header_style = ParagraphStyle(
-            'CompanyHeader',
-            parent=self.styles['Normal'],
-            fontSize=16,
-            fontName='Helvetica-Bold',
-            textColor=colors.darkblue,
-            alignment=TA_LEFT,
-            spaceAfter=2
-        )
-        
+            'CompanyHeader', parent=self.styles['Normal'], fontSize=18, leading=22,
+            fontName='Helvetica-Bold', textColor=_tc('ink'), alignment=TA_LEFT, spaceAfter=2)
         report_title_style = ParagraphStyle(
-            'ReportTitle',
-            parent=self.styles['Normal'],
-            fontSize=14,
-            fontName='Helvetica-Bold',
-            textColor=colors.darkblue,
-            alignment=TA_LEFT,
-            spaceAfter=2
-        )
-        
-        # Build header content
+            'ReportTitle', parent=self.styles['Normal'], fontSize=9, leading=12,
+            fontName='Helvetica-Bold', textColor=_tc('accent'), alignment=TA_LEFT, spaceAfter=2)
+        sub_style = ParagraphStyle(
+            'ReportSub', parent=self.styles['Normal'], fontSize=8, leading=11,
+            fontName='Helvetica', textColor=_tc('muted'), alignment=TA_LEFT)
+
         company_content = [
             Paragraph(company_name, company_header_style),
-            Paragraph("Attendance Report", report_title_style)
+            Paragraph("ATTENDANCE REPORT", report_title_style),
+            Paragraph(f"Period: {start_date} to {end_date}", sub_style),
         ]
-        
-        # Add logo on the right if available
+
         logo_cell = ''
         if company_logo and os.path.exists(company_logo):
             try:
-                logo_cell = Image(company_logo, width=1.0*inch, height=1.0*inch, hAlign='CENTER')
-            except:
+                logo_cell = _logo_image(company_logo)
+            except Exception:
                 pass
-        
-        # Calculate available width for header table
-        available_width = pagesize[0] - (1.5*inch)
-        
-        # Create header table with logo on right, company info on left
+
+        available_width = pagesize[0] - 60
+
         header_table = Table(
             [[company_content, logo_cell]],
-            colWidths=[available_width * 0.75, available_width * 0.25]
+            colWidths=[available_width * 0.8, available_width * 0.2]
         )
         header_table.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('ALIGN', (0, 0), (0, 0), 'LEFT'),
-            ('ALIGN', (1, 0), (1, 0), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
             ('TOPPADDING', (0, 0), (-1, -1), 0),
             ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
             ('LEFTPADDING', (0, 0), (0, 0), 0),
             ('RIGHTPADDING', (1, 0), (1, 0), 0),
-            ('LINEBELOW', (0, 0), (-1, 0), 1, colors.HexColor('#CCCCCC')),
+            ('LINEBELOW', (0, 0), (-1, 0), 1.2, _tc('accent')),
         ]))
         story.append(header_table)
-        story.append(Spacer(1, 0.1*inch))
-        
-        # Report Details
-        story.append(Paragraph(f"<b>Generated:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", normal_style))
-        
+        story.append(Spacer(1, 0.12*inch))
+
+        # Report details card
         if is_all_employees:
-            story.append(Paragraph("<b>Employee:</b> All Employees", normal_style))
-            story.append(Paragraph("<b>Department:</b> All Departments", normal_style))
+            story.append(_info_card([
+                ('Employee', 'All Employees'),
+                ('Department', 'All Departments'),
+                ('Period', f"{start_date} to {end_date}"),
+            ], available_width, cols=3))
         else:
-            story.append(Paragraph(f"<b>Employee:</b> {employee.name}", normal_style))
-            story.append(Paragraph(f"<b>Employee ID:</b> {employee.employee_id}", normal_style))
-            story.append(Paragraph(f"<b>Department:</b> {employee.department}", normal_style))
+            story.append(_info_card([
+                ('Employee', employee.name),
+                ('Employee ID', employee.employee_id),
+                ('Department', employee.department),
+            ], available_width, cols=3))
+        story.append(Spacer(1, 0.18*inch))
+
         
-        story.append(Paragraph(f"<b>Period:</b> {start_date} to {end_date}", normal_style))
-        story.append(Spacer(1, 0.2*inch))
+        # Summary - works for both report types
+        # Use effective report status so REJECTED approvals count strictly as ABSENT
+        from app import get_effective_report_status
+        present = len([a for a in attendances if get_effective_report_status(a) == 'present'])
+        absent = len([a for a in attendances if get_effective_report_status(a) == 'absent'])
+        half_day = len([a for a in attendances if get_effective_report_status(a) == 'half_day'])
+        late = len([a for a in attendances if a.late_entry])
         
+        story.append(_section_heading("Summary", available_width))
+        story.append(_kpi_cards([
+            ('Total Records', len(attendances), None),
+            ('Present', present, 'good'),
+            ('Absent', absent, 'bad'),
+            ('Half Days', half_day, 'warn'),
+            ('Late Arrivals', late, 'bad'),
+        ], available_width))
+        story.append(Spacer(1, 0.14*inch))
+
         # Attendance Table
         if attendances:
             # For All Employees report, include Employee ID, Name, Department columns
             if is_all_employees:
                 # Calculate automatic column widths based on content
                 # Use relative widths that sum to available page width
-                available_width = pagesize[0] - (1.5*inch)  # Total width minus margins
+                available_width = pagesize[0] - 60
                 col_widths = [
                     0.8*inch,   # Employee ID
                     1.5*inch,   # Employee Name (wider for wrapping)
@@ -1748,13 +1854,13 @@ class PDFGenerator:
                         att.in_time.strftime('%H:%M') if att.in_time else '-',
                         att.display_out_time.strftime('%H:%M') if hasattr(att, 'display_out_time') and att.display_out_time else '-',
                         f"{att.total_hours:.2f}" if att.total_hours and att.total_hours != 0 else '-',
-                        att.status.upper(),
+                        att.status.upper().replace('_', ' '),
                         'Yes' if att.late_entry else 'No',
                         f"{att.overtime_hours:.2f}" if att.overtime_hours and att.overtime_hours != 0 else '-'
                     ])
             else:
                 # Single Employee report
-                available_width = pagesize[0] - (1.5*inch)
+                available_width = pagesize[0] - 60
                 col_widths = [
                     1.0*inch,   # Date
                     1.0*inch,   # IN Time
@@ -1787,7 +1893,7 @@ class PDFGenerator:
                         att.in_time.strftime('%H:%M') if att.in_time else '-',
                         att.display_out_time.strftime('%H:%M') if hasattr(att, 'display_out_time') and att.display_out_time else '-',
                         f"{att.total_hours:.2f}" if att.total_hours and att.total_hours != 0 else '-',
-                        att.status.upper(),
+                        att.status.upper().replace('_', ' '),
                         'Yes' if att.late_entry else 'No',
                         f"{att.overtime_hours:.2f}" if att.overtime_hours and att.overtime_hours != 0 else '-'
                     ]
@@ -1795,89 +1901,20 @@ class PDFGenerator:
                         row.append(Paragraph(getattr(att, 'activities_text', None) or '-', activities_style))
                     data.append(row)
             
-            table = Table(data, colWidths=col_widths, repeatRows=1)
+            table = Table(data, colWidths=_fit(col_widths, available_width), repeatRows=1, hAlign="LEFT")
             
-            # Define table style with proper alignment
-            table_style = TableStyle([
-                # Header row styling
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 9),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
-                ('TOPPADDING', (0, 0), (-1, 0), 10),
-                
-                # Data row styling
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-                ('FONTSIZE', (0, 1), (-1, -1), 8),
-                ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-                ('TOPPADDING', (0, 1), (-1, -1), 8),
-                
-                # Column alignment
-                # Text columns (left aligned)
-                ('ALIGN', (0, 1), (2, -1), 'LEFT') if is_all_employees else ('ALIGN', (0, 1), (0, -1), 'LEFT'),
-                # Date column (center aligned)
-                ('ALIGN', (3, 1), (3, -1), 'CENTER') if is_all_employees else ('ALIGN', (0, 1), (0, -1), 'CENTER'),
-                # Numeric columns (center aligned)
-                ('ALIGN', (4, 1), (-1, -1), 'CENTER') if is_all_employees else ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
-                
-                # Word wrap for long text (employee names)
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ])
-            
+            if is_all_employees:
+                table_style = _pro_table_style(font_size=8, left_cols=(0, 1, 2), pad=6)
+                status_idx, late_idx = 7, 8
+            else:
+                table_style = _pro_table_style(font_size=8, left_cols=((0, 7) if show_activities else (0,)), pad=6)
+                status_idx, late_idx = 4, 5
             table.setStyle(table_style)
+            table.setStyle(TableStyle(_status_cmds(data, status_idx, late_idx)))
             story.append(table)
         else:
             story.append(Paragraph("No attendance records found for this period.", normal_style))
         
-        story.append(Spacer(1, 0.3*inch))
-        
-        # Summary - works for both report types
-        # Use effective report status so REJECTED approvals count strictly as ABSENT
-        from app import get_effective_report_status
-        present = len([a for a in attendances if get_effective_report_status(a) == 'present'])
-        absent = len([a for a in attendances if get_effective_report_status(a) == 'absent'])
-        half_day = len([a for a in attendances if get_effective_report_status(a) == 'half_day'])
-        late = len([a for a in attendances if a.late_entry])
-        
-        summary_data = [
-            ['Total Records:', str(len(attendances))],
-            ['Present:', str(present)],
-            ['Absent:', str(absent)],
-            ['Half Days:', str(half_day)],
-            ['Late Arrivals:', str(late)]
-        ]
-        
-        summary_table = Table(summary_data, colWidths=[2*inch, 2*inch])
-        summary_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        story.append(summary_table)
-        
-        # Page number function
-        def on_page(canvas, doc):
-            canvas.saveState()
-            # Page number at bottom center
-            page_num = canvas.getPageNumber()
-            canvas.setFont('Helvetica', 9)
-            canvas.setFillColor(colors.grey)
-            canvas.drawCentredString(
-                pagesize[0] / 2,
-                0.5*inch,
-                f"Page {page_num}"
-            )
-            canvas.restoreState()
-        
-        # Build PDF with page numbers
-        doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
-        
+        doc.build(story, canvasmaker=_make_numbered_canvas(company_name, 'Attendance Report', pagesize))
+
         return output_path

@@ -208,6 +208,20 @@ def export_report():
 
     output_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
 
+    # Attach ALL (visible) IN/OUT punches of each day so the PDF lists them in an
+    # Activities column, same as the employee report PDF and the Reports page.
+    for att in report_data['attendances']:
+        if att.employee and not hasattr(att, 'is_dummy'):
+            acts = AttendanceActivity.query.filter_by(
+                employee_id=att.employee.id,
+                attendance_date=att.date
+            ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(
+                AttendanceActivity.activity_time, AttendanceActivity.id
+            ).all()
+            att.activities_text = ', '.join(
+                f"{a.activity_time.strftime('%H:%M')} {a.action}" for a in acts
+            )
+
     # Generate PDF using dedicated Admin Reports PDF generator
     _, _, _, pg = get_services()
     company_settings = Settings.get_settings()
