@@ -64,7 +64,7 @@ def test_admin_pages(client, make_admin, make_employee, monkeypatch, tmp_path):
         assert r.status_code == 200, (path, r.status_code)
     assert client.get('/dataset/nope/x.jpg').status_code == 404
     assert client.get('/uploads/nope.pdf').status_code == 404
-    r = client.get('/train-ai'); assert r.status_code == 302 and '/dashboard' in r.headers['Location']
+    r = client.get('/train-ai'); assert r.status_code == 302 and '/settings' in r.headers['Location']
     # capture blocked by consent gate -> redirects back to face_registration
     from database import db
     emp.biometric_consent_given = False
