@@ -8,11 +8,10 @@
 ![DeepFace](https://img.shields.io/badge/DeepFace-FaceNet512-8A2BE2)
 ![Security](https://img.shields.io/badge/Security-AES--256%20%7C%20Ed25519-success)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20(64--bit)-0078D6?logo=windows&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-pytest-brightgreen?logo=pytest&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.0.0-informational)
 ![Status](https://img.shields.io/badge/status-internal--production-orange)
 
-[Features](#2--features) • [Quick Start](#6--quick-start) • [Installation](#7--installation--setup-a-to-z) • [Build the .exe](#11--building--packaging-for-developers) • [Licensing](#12--license--backup-management) • [Troubleshooting](#14--troubleshooting--faqs)
+[Features](#2--features) • [Quick Start](#6--quick-start) • [Installation](#7--installation--setup-a-to-z) • [Build the .exe](#10--building--packaging-for-developers) • [Licensing](#11--license--backup-management) • [Troubleshooting](#13--troubleshooting--faqs)
 
 > 👋 **New here?** Read [section 5](#5--prerequisites) (what you need), then jump to [section 7, Option A](#option-a-recommended-one-click-with-setupbat). Follow the steps **in order** and you will have the app running.
 
@@ -29,13 +28,12 @@
 7. [Installation & Setup (A to Z)](#7--installation--setup-a-to-z)
 8. [Running the Application](#8--running-the-application)
 9. [Check That Everything Works](#9--check-that-everything-works)
-10. [Automated Testing](#10--automated-testing)
-11. [Building & Packaging (For Developers)](#11--building--packaging-for-developers)
-12. [License & Backup Management](#12--license--backup-management)
-13. [Deploying to a Client Machine](#13--deploying-to-a-client-machine)
-14. [Troubleshooting & FAQs](#14--troubleshooting--faqs)
-15. [Project Structure](#15--project-structure)
-16. [Contributing & Support](#16--contributing--support)
+10. [Building & Packaging (For Developers)](#10--building--packaging-for-developers)
+11. [License & Backup Management](#11--license--backup-management)
+12. [Deploying to a Client Machine](#12--deploying-to-a-client-machine)
+13. [Troubleshooting & FAQs](#13--troubleshooting--faqs)
+14. [Project Structure](#14--project-structure)
+15. [Contributing & Support](#15--contributing--support)
 
 ---
 
@@ -57,8 +55,8 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 
 | You are… | You do… |
 | --- | --- |
-| 👩‍💻 A **developer / vendor** | Follow sections 5 to 12: set up Python, run from source, test, build the `.exe` and issue licenses. |
-| 🏢 A **customer / client** | Follow section 13: install the `Setup.exe` you were given and open the app from the Start Menu. |
+| 👩‍💻 A **developer / vendor** | Follow sections 5 to 11: set up Python, run from source, build the `.exe` and issue licenses. |
+| 🏢 A **customer / client** | Follow section 12: install the `Setup.exe` you were given and open the app from the Start Menu. |
 
 ---
 
@@ -132,7 +130,6 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 | **Scheduling** | APScheduler (payroll, auto-logout approvals, backups) |
 | **Licensing / payments (vendor side)** | Ed25519 signing, Razorpay purchase portal (`licensing/vendor_app.py`) |
 | **Production server** | Waitress (used automatically outside development mode) |
-| **Testing / CI** | pytest (600+ tests, stubbed ML/CV layer), GitHub Actions workflow |
 | **Packaging** | PyInstaller 6.x + Inno Setup 6 |
 
 ---
@@ -188,7 +185,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 
 | Requirement | Version | Notes |
 | --- | --- | --- |
-| 🐍 **Python** | **3.10.x** (3.10.11 recommended) | TensorFlow 2.15 / MediaPipe wheels are most reliable on 3.10. **Avoid 3.11, 3.12 and newer.** |
+| 🐍 **Python** | **3.10.x, 64-bit** (3.10.11 recommended) | TensorFlow 2.15 / MediaPipe wheels are most reliable on 3.10. **Avoid 3.11, 3.12 and newer.** `setup.bat` installs 3.10.11 for you if it is missing. |
 | 🔧 **Git** | Any recent version | To clone the repository |
 | 📷 **Webcam** | Any USB / built-in | Needed for face registration and recognition |
 | 🪟 **Windows** | 10 / 11, 64-bit | Build and ship for 64-bit only |
@@ -201,11 +198,13 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 | Tool | Purpose |
 | --- | --- |
 | **PyInstaller** (installed via `requirements-packaging.txt`) | Freezes the app into an `.exe` |
-| **[Inno Setup 6](https://jrsoftware.org/isinfo.php)** | Compiles the final `Setup.exe` installer |
+| **[Inno Setup 6](https://jrsoftware.org/isinfo.php)** | Compiles the final `Setup.exe` installer. `setup.bat` installs it for you (menu option 2) if it is missing. |
 
 > ⚠️ **Why Python 3.10?** DeepFace, TensorFlow 2.15, `tf-keras` and `mediapipe==0.10.21` all publish official Windows wheels for 3.9–3.11, and 3.10 is the safest overlap. Also, `numpy` is pinned to `1.26.4` (below 2.0) on purpose — NumPy 2.x breaks TensorFlow/MediaPipe.
 
 ### How to install Python 3.10 correctly
+
+> ✅ **You can skip this section if you use `setup.bat`.** When Python 3.10 (64-bit) is not found, `setup.bat` downloads **Python 3.10.11** from python.org and installs it silently for the current user (no admin rights, PATH is added). Follow the manual steps below only if you want to install Python yourself, or if the automatic install fails.
 
 1. Download **Python 3.10.11** from [python.org](https://www.python.org/downloads/release/python-31011/).
 2. Run the installer. On the **first screen tick "Add Python to PATH"** (this is the most common thing people forget).
@@ -216,13 +215,13 @@ python --version     # must print Python 3.10.x
 git --version
 ```
 
-If `python --version` prints a different version, another Python comes first in your PATH. You can still check that 3.10 is installed with `py -3.10 --version`. `setup.bat` finds Python 3.10 by itself using this `py -3.10` launcher.
+If `python --version` prints a different version, another Python comes first in your PATH. You can still check that 3.10 is installed with `py -3.10 --version`. `setup.bat` finds Python 3.10 by itself using the `py -3.10-64` launcher, `python` on PATH, or the default per-user install folder (`%LOCALAPPDATA%\Programs\Python\Python310`), so a PATH problem does not stop it.
 
 ---
 
 ## 6. ⚡ Quick Start
 
-Fastest path for people who already have Python 3.10 and Git:
+Fastest path (Python 3.10 is installed automatically if you do not have it):
 
 ```
 git clone https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System AI_APS
@@ -230,7 +229,7 @@ cd AI_APS
 setup.bat
 ```
 
-`setup.bat` installs everything, checks it, downloads the UI files and then shows a menu. Choose **1** (run the app). Open **<http://127.0.0.1:5000>** — on first run you'll be taken to the **Setup Wizard**. 🎉
+`setup.bat` installs Python 3.10.11 if needed, installs everything, checks it, downloads the UI files and then shows a menu. Choose **1** (run the app). Open **<http://127.0.0.1:5000>** — on first run you'll be taken to the **Setup Wizard**. 🎉
 
 Prefer typing the commands yourself?
 
@@ -257,12 +256,12 @@ python app.py
 
 Read [section 5](#5--prerequisites) first. Then choose **one** option:
 
-- **Option A:** run `setup.bat` (easiest, recommended)
+- **Option A:** run `setup.bat` (easiest, recommended; installs Python 3.10.11 for you if missing)
 - **Option B:** type the commands yourself (Steps 1 to 8)
 
 ### Option A (recommended): one click with `setup.bat`
 
-1. Install **Python 3.10.11** and **Git** (see section 5).
+1. Install **Git** (see section 5). **Python 3.10.11 is optional** here: `setup.bat` installs it if it is missing.
 2. Download the project:
 
 ```
@@ -278,9 +277,9 @@ It does these steps for you and **stops at the first error** (it never prints a 
 
 | Step | What happens |
 | --- | --- |
-| 1 | Finds **Python 3.10** (stops with a clear message if it is missing) |
+| 1 | Finds **Python 3.10 (64-bit)**. If it is missing, downloads **Python 3.10.11** from python.org and installs it silently for the current user (stops with a clear message and a manual link if that fails) |
 | 2 | Creates the `venv` folder |
-| 3 | Upgrades `pip`, removes the conflicting plain `opencv-python`, installs everything in `requirements.txt` and checks that `cv2`, TensorFlow, MediaPipe and DeepFace import correctly |
+| 3 | Upgrades `pip`, installs everything in `requirements.txt`, removes the conflicting plain `opencv-python` that DeepFace pulls in and keeps only `opencv-contrib-python` and checks that `cv2`, TensorFlow, MediaPipe and DeepFace import correctly |
 | 4 | Creates `.env` from `.env.example`, creates `licensing\.env.vendor` from its example (vendor use only) and creates the folders the app needs |
 | 5 | Downloads the UI files (Bootstrap, icons, Chart.js, fonts) into `static\vendor` |
 
@@ -288,11 +287,15 @@ Then a menu appears:
 
 ```
 1 - Run the app now (development mode)
-2 - Build the .exe (PyInstaller, slow)
+2 - Build the .exe + installer (PyInstaller, then Inno Setup - slow)
 3 - Exit
 ```
 
-**Recommended:** press **1** (run the app) and follow [section 9](#9--check-that-everything-works). Press **2** only when you really want to build the `.exe` (see section 11).
+**Recommended:** press **1** (run the app) and follow [section 9](#9--check-that-everything-works). Press **2** only when you really want to build the `.exe` (see section 10). Option **2** also installs **Inno Setup 6** automatically if it is missing.
+
+> 🛡 **Antivirus prompts:** while Python or Inno Setup is being installed, security software (for example 360 Total Security) may warn about "Modifying startup item" (a `RunOnce` registry entry). This is normal for these installers. Click **Allow** when the program is `setup.bat` and the source is the python.org / Inno Setup installer in `%TEMP%`. Windows may also show a SmartScreen or UAC prompt.
+>
+> 🌐 **Internet is required** for the automatic installs. Both downloads use HTTPS; no file hash is checked.
 
 > 📝 During install you will see a list of **about 112 packages**. That is normal. Your `requirements.txt` has about 35 direct packages, but TensorFlow, DeepFace and MediaPipe bring many more of their own.
 
@@ -421,7 +424,7 @@ SUPPORT_EMAIL=your@gmail.com
 | `LICENSE_PURCHASE_URL` | No | Address of your vendor portal; powers the **Buy a license** button on the lock screen (the machine fingerprint is appended automatically). |
 | `SUPPORT_EMAIL` | No | Shown on the license lock screen. |
 | `LICENSE_SERVER_URL` | No | If set, successful activations are reported to your vendor portal (best effort, never blocks activation). |
-| `LICENSE_TOKEN` / `LICENSE_PUBLIC_KEY_HEX` | No | Optional overrides for development (see [License Management](#12--license--backup-management)). The public-key override is **ignored in packaged builds**. |
+| `LICENSE_TOKEN` / `LICENSE_PUBLIC_KEY_HEX` | No | Optional overrides for development (see [License Management](#11--license--backup-management)). The public-key override is **ignored in packaged builds**. |
 | `BACKUP_DIR`, `BACKUP_AUTO_EXTERNAL`, `BACKUP_KEEP`, `BACKUP_CATCHUP_DAYS` | No | Backup behaviour (see [Backups](#-backups)). |
 | `DISABLE_CATCHUP_BACKUP` | No | `true` disables the startup catch-up backup. |
 | `SKIP_BROWSER_AUTOLAUNCH` | No | `true` stops the app from opening the browser on start. |
@@ -532,7 +535,7 @@ On first run the app creates `instance/attendance.db`, `dataset/`, `uploads/` an
 
 ## 9. ✅ Check That Everything Works
 
-Do this once after setup (and again on a clean PC before delivering to a client). If a step fails, see [section 14](#14--troubleshooting--faqs).
+Do this once after setup (and again on a clean PC before delivering to a client). If a step fails, see [section 13](#13--troubleshooting--faqs).
 
 - [ ] The console shows **License check passed** and **Face recognition loaded**
 - [ ] The page opens **with styling** (colours, buttons) — if it looks like plain text, run `python scripts\download_vendor_assets.py`
@@ -547,41 +550,9 @@ Do this once after setup (and again on a clean PC before delivering to a client)
 - [ ] You can download an **admin or employee report PDF**
 - [ ] A **manual backup** downloads from Admin → Settings → Data Backup
 
-> 💡 Automated tests (section 10) use fake camera and AI parts. They do **not** prove that your real camera and real face recognition work. Only the checklist above does.
-
 ---
 
-## 10. 🧪 Automated Testing
-
-```
-pip install pytest
-pytest                    # full suite
-pytest -v                 # verbose
-pytest tests/test_payroll_calculations.py
-pytest -k "attendance"    # keyword filter
-pytest -x --maxfail=1     # stop on first failure
-```
-
-The suite (600+ tests) covers authentication, attendance rules, the attendance calculator, approvals, payroll math, PDF generation, email, scheduling, backups, rate limiting, face matching and wrong-person protection, face-data encryption/consent (`test_face_security.py`), licensing, configuration/setup and the Flask routes.
-
-`conftest.py` stubs `cv2`, `mediapipe`, `deepface` and TensorFlow, so tests run **fast, offline, with no GPU or camera**.
-
-**How to read the result:** at the end pytest prints a line such as `626 passed`. If you see `failed`, scroll up to read which test failed and why, and send that text when asking for help.
-
-Optional coverage:
-
-```
-pip install pytest-cov
-pytest --cov=. --cov-report=term-missing
-```
-
-**Run the suite** before every commit touching core modules, before every client build, and after upgrading any dependency.
-
-**CI:** `.github/workflows/ci.yml` runs the app import check and `pytest tests/` on every push and pull request to `main`/`master` (Python 3.10).
-
----
-
-## 11. 📦 Building & Packaging (For Developers)
+## 10. 📦 Building & Packaging (For Developers)
 
 Two stages: **PyInstaller** makes the app folder → **Inno Setup** wraps it into a single installer.
 
@@ -590,8 +561,7 @@ Two stages: **PyInstaller** makes the app folder → **Inno Setup** wraps it int
 - [ ] Clean venv with `requirements.txt` installed (no plain `opencv-python`; `python -c "import cv2; print(cv2.imread)"` works)
 - [ ] `python scripts/download_vendor_assets.py` has been run
 - [ ] DeepFace weights exist in `%USERPROFILE%\.deepface\weights` (Step 7)
-- [ ] `pytest` passes
-- [ ] Your **own** Ed25519 public key is embedded in `licensing/license_manager.py` — see [License Management](#12--license--backup-management)
+- [ ] Your **own** Ed25519 public key is embedded in `licensing/license_manager.py` — see [License Management](#11--license--backup-management)
 - [ ] `console=False` in `attendance_app.spec` for client builds (`True` is only for debugging a build on your own machine)
 - [ ] `upx=False` stays as is (UPX triggers antivirus false-positives)
 - [ ] `installer\app_icon.ico` exists and is a **multi-size** icon (see below)
@@ -672,10 +642,10 @@ This must print nothing.
 
 ### 4️⃣ Compile the installer with Inno Setup
 
-1. Install **[Inno Setup 6](https://jrsoftware.org/isdl.php)**.
+1. Install **[Inno Setup 6](https://jrsoftware.org/isdl.php)** (not needed if you use `setup.bat`, which installs it for you).
 2. Make sure `dist\AttendancePayrollSystem\` exists (Inno only packages what's already on disk).
 3. Compile — any one of these:
-   - **`setup.bat`:** choose **2** (PyInstaller, then the installer, in one go). If Inno Setup 6 is not installed, the script says so, keeps your `dist` folder and offers to open the download page — install it, press any key in the same window and the installer step continues (no rebuild).
+   - **`setup.bat`:** choose **2** (PyInstaller, then the installer, in one go). If Inno Setup 6 is not installed, the script downloads and installs it silently for the current user, then compiles the installer (no rebuild needed). If the direct download does not work it falls back to `winget install JRSoftware.InnoSetup` (accept the admin prompt if shown). If both fail, it keeps your `dist` folder and offers to open the download page — install Inno Setup, run `setup.bat` again and choose **2**.
    - **GUI:** open `installer\AttendancePayrollSystem.iss` → **Build ▸ Compile**, or
    - **Command line** (run from the project root):
 
@@ -703,7 +673,7 @@ To bump the version, edit `MyAppVersion` (currently `1.0.0`) in the `.iss` file.
 
 ---
 
-## 12. 🔑 License & Backup Management
+## 11. 🔑 License & Backup Management
 
 ### 🔐 How licensing works
 
@@ -794,7 +764,7 @@ All backup logic lives in `backup_manager.py` and is shared by the weekly job, t
 
 ---
 
-## 13. 🚚 Deploying to a Client Machine
+## 12. 🚚 Deploying to a Client Machine
 
 1. Give the client `AttendancePayrollSystem-Setup-<version>.exe` (built above).
 2. They run it (no admin rights needed) and launch the app from the Start Menu.
@@ -821,13 +791,25 @@ All backup logic lives in `backup_manager.py` and is shared by the weekly job, t
 
 ---
 
-## 14. 🩺 Troubleshooting & FAQs
+## 13. 🩺 Troubleshooting & FAQs
 
 ### Setup problems
 
-**🐍 `setup.bat` says "Python 3.10 was not found"**
+**🐍 `setup.bat` says "Python 3.10 could not be found or installed automatically"**
 
-Install Python 3.10.11 from python.org and tick **"Add Python to PATH"**. Python 3.11, 3.12 and 3.13 will **not** work with TensorFlow 2.15. Check with `py -3.10 --version`.
+`setup.bat` normally installs Python 3.10.11 by itself. If it could not (no internet, the download was blocked, or your antivirus blocked the installer), install Python 3.10.11 manually from python.org and tick **"Add Python to PATH"**, then run `setup.bat` again. Python 3.11, 3.12 and 3.13 will **not** work with TensorFlow 2.15. Check with `py -3.10 --version`.
+
+**🛡 My antivirus shows "Modifying startup item" during setup**
+
+The Python installer writes a temporary `RunOnce` registry entry, which is normal. Choose **Allow** for the installer that `setup.bat` started. If you chose Block, the install fails; run `setup.bat` again and allow it.
+
+**🧱 PyInstaller fails with "Unable to create process using ...python.exe ... SubprocessDiedError ... exit code 101"**
+
+Windows could not start a helper Python process during the build. This is usually security software (for example 360 Total Security) blocking it, especially right after Python was freshly installed. `setup.bat` retries the build once automatically. If it still fails: add the project folder (for example `C:\AI\AI-APS`) and `%LOCALAPPDATA%\Programs\Python\Python310` to your antivirus exclusions (or pause real-time protection for the build), then run `setup.bat` again and choose **2**.
+
+**🛠 `setup.bat` says "The system cannot execute the specified program" while installing Inno Setup**
+
+The downloaded installer was blocked or was not a valid program. `setup.bat` then tries `winget` automatically. If that also fails, install [Inno Setup 6](https://jrsoftware.org/isdl.php) by hand, run `setup.bat` again and choose **2**.
 
 **📦 `pip install -r requirements.txt` fails (especially on tensorflow)**
 
@@ -1000,7 +982,7 @@ If the admin (or the employee, from the portal) set a custom payslip password, t
 
 ---
 
-## 15. 🗂 Project Structure
+## 14. 🗂 Project Structure
 
 | Path | Purpose |
 | --- | --- |
@@ -1022,22 +1004,19 @@ If the admin (or the employee, from the portal) set a custom payslip password, t
 | `installer/` | Inno Setup script (`.iss`), `app_icon.ico`, six `wizard_*.bmp` images and icon instructions |
 | `scripts/` | `download_vendor_assets.py`, `prepare_deepface_weights.py`, `verify_icon.py`, `fix_cdn_links.py`, `update_contact_details.py` |
 | `attendance_app.spec` | PyInstaller build specification |
-| `setup.bat` | One-click environment setup with a menu: run the app or build the `.exe` |
+| `setup.bat` | One-click setup: installs Python 3.10.11 if missing, sets up the environment, then a menu to run the app or build the `.exe` and installer (installs Inno Setup 6 if missing) |
 | `templates/` · `static/` | Jinja2 views and CSS/JS/images (`static/vendor/` is filled by the download script) |
-| `tests/` · `conftest.py` | pytest suite (600+ tests) with stubbed ML layer |
-| `.github/workflows/ci.yml` | GitHub Actions: import check + pytest on every push/PR |
 | `instance/` · `dataset/` · `uploads/` · `backups/` · `trained_model/` · `logs/` | Runtime data (git-ignored) |
 | `requirements.txt` · `requirements-packaging.txt` | Runtime vs build-only dependencies |
 | `.env.example` | Template for your `.env` settings file |
 
 ---
 
-## 16. 🤝 Contributing & Support
+## 15. 🤝 Contributing & Support
 
-1. ✅ Confirm `pytest` passes on a clean checkout before you start.
-2. 🔁 Run the relevant test module often while developing (`pytest tests/test_<area>.py -v`).
-3. 🧪 Run the full suite before opening a PR; if you touched packaging, walk the [pre-build checklist](#-pre-build-checklist) and make a test build.
-4. 🐞 When reporting an issue include: exact console output/log lines, whether it happens in `python app.py` or **only** in the packaged exe, and what you already tried from [Troubleshooting](#14--troubleshooting--faqs).
+1. 🔁 Make small, focused changes and check the app by following [section 9](#9--check-that-everything-works).
+2. 📦 If you touched packaging, walk the [pre-build checklist](#-pre-build-checklist) and make a test build.
+3. 🐞 When reporting an issue include: exact console output/log lines, whether it happens in `python app.py` or **only** in the packaged exe, and what you already tried from [Troubleshooting](#13--troubleshooting--faqs).
 
 **Author:** Vaishnavi Maruti Lekawale · **Repository:** [AI-Attendance-Payroll-System](https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System)
 
