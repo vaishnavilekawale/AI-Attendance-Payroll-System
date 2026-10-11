@@ -479,7 +479,7 @@ $env:FLASK_ENV="development"
 python app.py
 ```
 
-Always run it from inside the activated venv (`venv\Scripts\activate`). Or just choose **1** in the `setup.bat` menu.
+Always run it from inside the activated venv (`venv\Scripts\activate`). Or just choose **1** in the `setup.bat` menu. If PowerShell says scripts are disabled, see [Troubleshooting](#13--troubleshooting--faqs).
 
 Expected console output (abridged):
 
@@ -798,6 +798,22 @@ All backup logic lives in `backup_manager.py` and is shared by the weekly job, t
 **🐍 `setup.bat` says "Python 3.10 could not be found or installed automatically"**
 
 `setup.bat` normally installs Python 3.10.11 by itself. If it could not (no internet, the download was blocked, or your antivirus blocked the installer), install Python 3.10.11 manually from python.org and tick **"Add Python to PATH"**, then run `setup.bat` again. Python 3.11, 3.12 and 3.13 will **not** work with TensorFlow 2.15. Check with `py -3.10 --version`.
+
+**⚠️ PowerShell: `venv\Scripts\activate` says "running scripts is disabled on this system"**
+
+PowerShell blocks `Activate.ps1` by default (Execution Policy). Your project is fine. Pick one:
+
+- Use **Command Prompt** instead: `venv\Scripts\activate.bat`
+- Or allow scripts **only for the current PowerShell window** (nothing permanent changes):
+
+```
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+venv\Scripts\activate
+```
+
+- Or skip activation: `venv\Scripts\python.exe app.py`
+
+You do not need to activate the venv by hand when you use `setup.bat`; it does it for you.
 
 **🛡 My antivirus shows "Modifying startup item" during setup**
 
