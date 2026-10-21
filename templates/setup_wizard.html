@@ -65,7 +65,7 @@
                 {% endwith %}
 
                 {% if step == 1 %}
-                    <h5 class="mb-3">Step 1 of 3 &middot; Create your admin account</h5>
+                    <h5 class="mb-3">Step 1 of 4 &middot; Create your admin account</h5>
                     <form method="POST" action="{{ url_for('setup.step1_admin') }}" novalidate>
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="mb-3">
@@ -88,7 +88,7 @@
                     </form>
 
                 {% elif step == 2 %}
-                    <h5 class="mb-3">Step 2 of 3 &middot; Company settings</h5>
+                    <h5 class="mb-3">Step 2 of 4 &middot; Company settings</h5>
                     <p class="text-muted small">You can change any of these later from Settings.</p>
                     <form method="POST" action="{{ url_for('setup.step2_company') }}" novalidate>
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -163,7 +163,13 @@
                 {% elif step == 3 %}
                     <h5 class="mb-3">Step 3 of 4 &middot; License Activation</h5>
                     <p class="text-muted small">
-                        You have a 30-day trial period. To activate your license, paste your license key below.
+                        {% if admin_name %}<strong>{{ admin_name }}</strong>, you{% else %}You{% endif %}
+                        {% if trial_days and trial_days > 0 %}
+                            have <strong>{{ trial_days }} day{{ '' if trial_days == 1 else 's' }}</strong> left in your free trial.
+                        {% else %}
+                            are on the free trial.
+                        {% endif %}
+                        To activate a license, paste your license key below.
                         <a href="#" data-bs-toggle="modal" data-bs-target="#licenseHelpModal">Learn more about licensing</a>.
                     </p>
                     
@@ -186,7 +192,7 @@
                             <input type="text" class="form-control font-monospace" 
                                    id="license_key" name="license_key" autocomplete="off" spellcheck="false"
                                    placeholder="Paste your license key here">
-                            <small class="text-muted">Leave blank to continue with 30-day trial.</small>
+                            <small class="text-muted">Leave blank to continue with your free trial{% if trial_days and trial_days > 0 %} ({{ trial_days }} day{{ '' if trial_days == 1 else 's' }} left){% endif %}.</small>
                         </div>
                         <button type="submit" class="btn btn-primary w-100">Continue</button>
                     </form>
@@ -208,7 +214,8 @@
     </div>
 </div>
 
-<!-- License Help Modal -->
+<!-- License Help Modal (only the license step uses it) -->
+{% if step == 3 %}
 <div class="modal fade" id="licenseHelpModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -218,30 +225,38 @@
             </div>
             <div class="modal-body">
                 <h6>Trial Period</h6>
-                <p>You have a <strong>30-day trial period</strong> with full access to all features. No license key is required during this time.</p>
+                <p>
+                    The free trial lasts <strong>{{ trial_total_days }} days</strong> with full access to all features.
+                    {% if trial_days and trial_days > 0 %}You have <strong>{{ trial_days }} day{{ '' if trial_days == 1 else 's' }}</strong> left.{% endif %}
+                    No license key is required during this time.
+                </p>
                 
                 <h6>Purchasing a License</h6>
                 <p>To purchase a license:</p>
                 <ol>
                     <li>Copy your machine fingerprint (shown above)</li>
-                    <li>Visit <a href="https://yourcompany.com" target="_blank">https://yourcompany.com</a></li>
-                    <li>Select your license tier and complete payment</li>
-                    <li>Provide your machine fingerprint during purchase</li>
-                    <li>Receive your license key via email</li>
+                    <li>
+                        {% if purchase_url %}Open the <a href="{{ purchase_url }}" target="_blank" rel="noopener">purchase page</a>
+                        (your fingerprint is filled in for you){% else %}Contact support to get the purchase link{% endif %}
+                    </li>
+                    <li>Choose a plan and complete payment</li>
+                    <li>Receive your license key by email</li>
                 </ol>
                 
                 <h6>Activating Your License</h6>
                 <p>Paste the license key in the field above and click "Continue". The system will validate your key and activate your license.</p>
                 
-                <h6>License Tiers</h6>
+                <h6>Plans</h6>
                 <ul>
-                    <li><strong>Student License</strong>: Single machine, personal use only</li>
-                    <li><strong>Small Business</strong>: Up to 10 employees, 2 machine activations</li>
-                    <li><strong>Medium Business</strong>: Up to 50 employees, 2 machine activations</li>
+                    <li><strong>Monthly</strong>: valid for 1 month, renew to keep going</li>
+                    <li><strong>Yearly</strong>: valid for 12 months, renew to keep going</li>
+                    <li><strong>Lifetime</strong>: pay once, never expires</li>
                 </ul>
                 
                 <div class="alert alert-info small">
-                    <strong>Note:</strong> Each license allows up to 2 machine activations. Contact support if you need additional activations.
+                    <strong>Note:</strong> Each license works on <strong>one computer</strong> - the one whose machine
+                    fingerprint you gave when buying. It cannot be shared or used on a second computer. If you change
+                    computers, contact support.
                 </div>
             </div>
             <div class="modal-footer">
@@ -250,6 +265,7 @@
         </div>
     </div>
 </div>
+{% endif %}
 
 <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
 <script>

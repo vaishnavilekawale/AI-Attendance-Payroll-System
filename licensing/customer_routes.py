@@ -21,6 +21,8 @@ Routes:
 - PUT    /vendor/customers/<id>          update (payment_yn: N->Y issues + emails a license)
 - DELETE /vendor/customers/<id>          delete
 - POST   /vendor/customers/<id>/resend   re-send the license email
+- POST   /vendor/customers/<id>/reissue  re-sign + email the current license (after a key rotation)
+- GET    /vendor/trials                  who is on a free trial: admin, email, company, started, days left
 - GET    /vendor/stats                   counts
 - POST   /vendor/activate                called by an installed app after activation (public)
 """
@@ -182,6 +184,38 @@ def resend_license(customer_id):
         return _error(str(e), 404)
     except Exception as e:
         logger.error("Error resending license for %s: %s", customer_id, e)
+        return _error(str(e), 500)
+
+
+@vendor_bp.route('/customers/<int:customer_id>/reissue', methods=['POST'])
+@admin_required
+def reissue_license(customer_id):
+    try:
+        sent = get_customer_service().reissue_license(customer_id)
+        if sent:
+            return jsonify({'success': True, 'message': 'License re-issued and emailed'})
+        return jsonify({'success': True, 'message': 'License re-issued and saved, but the email could not be sent '
+                                                    '- use /resend after fixing the SMTP settings'})
+    except ValueError as e:
+        return _error(str(e), 400)
+    except Exception as e:
+        logger.error("Error re-issuing license for %s: %s", customer_id, e)
+        return _error(str(e), 500)
+
+
+@vendor_bp.route('/trials', methods=['GET'])
+@admin_required
+def list_trials():
+    """The vendor's trial list: who started a trial, when, and how many days are left.
+    Optional filter: ?status=active|expired|converted"""
+    try:
+        trials = get_customer_service().list_trials()
+        wanted = (request.args.get('status') or '').strip().lower()
+        if wanted in ('active', 'expired', 'converted'):
+            trials = [t for t in trials if t['status'] == wanted]
+        return jsonify({'success': True, 'trials': trials, 'count': len(trials)})
+    except Exception as e:
+        logger.error("Error listing trials: %s", e)
         return _error(str(e), 500)
 
 

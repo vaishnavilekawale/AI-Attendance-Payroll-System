@@ -28,9 +28,12 @@ Optional environment variables (.env next to the application):
                            (the lock screen's "Buy a license" button; the machine
                            fingerprint is appended as ?fp=... so the form is pre-filled)
     SUPPORT_EMAIL          shown on the lock screen
-    LICENSE_SERVER_URL     if set, a successful activation is reported (best effort,
-                           in the background) to <url>/vendor/activate so you can see
-                           which paying customers installed. Activation never depends on it.
+    LICENSE_SERVER_URL     your vendor portal. Used for (a) registering the free trial
+                           (see trial_client.py) and (b) reporting a successful activation
+                           (best effort, in the background) to <url>/vendor/activate so
+                           you can see which paying customers installed. Activation never
+                           depends on it. A packaged build uses the address embedded in
+                           trial_client.py instead.
 
 HONEST LIMIT: this gate is Python code running on the customer's machine, so a
 determined reverse-engineer of the packaged .exe can always patch it out. It
@@ -54,6 +57,8 @@ from extensions import limiter
 from .license_manager import (
     LICENSE_FILE_NAME, TRIAL_DAYS, get_license_manager,
 )
+from .plans import days_until
+from .trial_client import get_license_server_url
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +142,8 @@ def _compute_access_state() -> AccessState:
                     expiry = datetime.fromisoformat(expires_at)
                     if expiry.tzinfo is None:
                         expiry = expiry.replace(tzinfo=timezone.utc)
-                    days_left = max(0, (expiry - lm._effective_now_utc()).days)
+                    # Rounded UP: "(expiry - now).days" floors, which showed one day too few.
+                    days_left = days_until(expiry, lm._effective_now_utc())
                 except ValueError:
                     days_left = None
             return AccessState(
@@ -163,7 +169,7 @@ def _compute_access_state() -> AccessState:
             reason = (f'{license_message}. Send the Machine Fingerprint below to the vendor '
                       f'to get a key for this computer.')
         elif lm.get_trial_days_remaining() == 0 and 'expired' in block_reason.lower():
-            title = 'Your 30-day trial has ended'
+            title = f'Your {TRIAL_DAYS}-day trial has ended'
             reason = 'Activate a license to continue using the application. Your data is safe and will be there when you activate.'
         else:
             title = 'License Activation required'
@@ -219,6 +225,8 @@ def _license_gate():
         return None
 
     state = get_access_state()
+    if state.mode == MODE_TRIAL:
+        _maybe_sync_trial()
     if state.allowed:
         return None
 
@@ -226,6 +234,21 @@ def _license_gate():
         return jsonify({'success': False, 'error': 'license_required',
                         'message': 'A valid license is required. Open /license to activate.'}), 403
     return redirect(url_for('license_gate.lock_screen'))
+
+
+def _maybe_sync_trial() -> None:
+    """Quietly (in the background) tell the vendor about this trial when it is time to.
+
+    Covers installs that were offline during setup and installs upgraded from a
+    version that never registered. A vendor answer of "this computer already
+    used its trial" locks the app on the next request. Never raises."""
+    try:
+        from . import trial_client
+        lm = get_license_manager()
+        if trial_client.sync_due(lm):
+            trial_client.sync_in_background(current_app._get_current_object(), lm)
+    except Exception as e:
+        logger.debug('Trial sync skipped: %s', e)
 
 
 _REMINDER_TEMPLATE = (
@@ -347,8 +370,7 @@ def activate():
 
 def _report_activation_async(token: str, fingerprint: str) -> None:
     """Tell the vendor portal (if configured) that this license was activated. Best effort."""
-    import os
-    base = (os.environ.get('LICENSE_SERVER_URL') or '').strip().rstrip('/')
+    base = get_license_server_url()
     if not base:
         return
 

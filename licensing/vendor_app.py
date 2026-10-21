@@ -9,6 +9,7 @@ What it does
   GET  /api/order-status/<id>     order status for that page (never returns the token)
   POST /webhook/razorpay          Razorpay -> us: payment succeeded  => license issued + emailed
   /vendor/*                       password-protected admin API (customer_routes.py)
+  POST /api/trial/start           installed app -> "this admin just started a trial" (once per machine)
   GET  /healthz                   liveness probe
 
 The license is issued ONLY by the webhook - never because the browser says the
@@ -236,6 +237,32 @@ def create_vendor_app() -> Flask:
         if status is None:
             return jsonify({"success": False, "error": "Unknown order"}), 404
         return jsonify({"success": True, **status})
+
+    # ----- free trial registration (called by the installed app) -----------
+    @app.route("/api/trial/start", methods=["POST"])
+    @limiter.limit("10 per minute; 60 per hour")
+    def trial_start():
+        """
+        Body (JSON): {admin_name, email, company, machine_fingerprint, local_trial_start?}
+
+        The first call for a machine fixes the trial start date; later calls (a
+        reinstall) get the SAME date back, so a reinstall never gives a new trial.
+        The reply carries a signed trial token the app verifies offline.
+        """
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"success": False, "error": "Invalid request."}), 400
+        try:
+            result = get_customer_service().start_or_get_trial(
+                admin_name=data.get("admin_name"), email=data.get("email"),
+                company=data.get("company"), machine_fingerprint=data.get("machine_fingerprint"),
+                claimed_start=data.get("local_trial_start"))
+        except ValidationError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        except Exception:
+            logger.exception("Unexpected error registering a trial")
+            return jsonify({"success": False, "error": "Server error"}), 500
+        return jsonify({"success": True, **result})
 
     # ----- the payment webhook -------------------------------------------
     @app.route("/webhook/razorpay", methods=["POST"])

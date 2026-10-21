@@ -9,9 +9,9 @@
 ![Security](https://img.shields.io/badge/Security-AES--256%20%7C%20Ed25519-success)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20(64--bit)-0078D6?logo=windows&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.0.0-informational)
-![Status](https://img.shields.io/badge/status-internal--production-orange)
+![Status](https://img.shields.io/badge/status-pilot%20%2F%20beta-orange)
 
-[Features](#2--features) • [Quick Start](#6--quick-start) • [Installation](#7--installation--setup-a-to-z) • [Build the .exe](#10--building--packaging-for-developers) • [Licensing](#11--license--backup-management) • [Troubleshooting](#13--troubleshooting--faqs)
+[Features](#2--features) • [Quick Start](#6--quick-start) • [Installation](#7--installation--setup-a-to-z) • [Build the .exe](#10--building--packaging-for-developers) • [Licensing](#11--license--backup-management) • [Troubleshooting](#13--troubleshooting--faqs) • [Tests](#14--running-the-tests) • [Vendor portal](#15--vendor-license-portal-selling-licenses) • [MySQL](#16--using-mysql--phpmyadmin) • [Before you sell](#17--known-limitations--release-checklist)
 
 > 👋 **New here?** Read [section 5](#5--prerequisites) (what you need), then jump to [section 7, Option A](#option-a-recommended-one-click-with-setupbat). Follow the steps **in order** and you will have the app running.
 
@@ -32,8 +32,12 @@
 11. [License & Backup Management](#11--license--backup-management)
 12. [Deploying to a Client Machine](#12--deploying-to-a-client-machine)
 13. [Troubleshooting & FAQs](#13--troubleshooting--faqs)
-14. [Project Structure](#14--project-structure)
-15. [Contributing & Support](#15--contributing--support)
+14. [Running the Tests](#14--running-the-tests)
+15. [Vendor License Portal (selling licenses)](#15--vendor-license-portal-selling-licenses)
+16. [Using MySQL / phpMyAdmin](#16--using-mysql--phpmyadmin)
+17. [Known Limitations & Release Checklist](#17--known-limitations--release-checklist)
+18. [Project Structure](#18--project-structure)
+19. [Contributing & Support](#19--contributing--support)
 
 ---
 
@@ -159,7 +163,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 │     ├─ dataset/                    (encrypted face photos)     │
 │     ├─ uploads/                    (payslips, profile photos)  │
 │     ├─ backups/                    (automated backup zips)     │
-│     ├─ trained_model/              (face-embedding cache)      │
+│     ├─ trained_model/              (face_data.pkl + embeddings) │
 │     ├─ logs/                       (rotating app logs)         │
 │     ├─ license.lic                 (signed license token)      │
 │     └─ .env                        (secrets & configuration)   │
@@ -167,6 +171,22 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 ```
 
 **In plain words:** when you start the app it (1) checks the license, (2) loads the face-recognition model, (3) opens your browser, and (4) keeps running in the background and serves the web pages. Everything is stored in plain folders next to the app.
+
+### Database tables
+
+Created automatically on first start (`db.create_all()` plus small, safe column migrations in `database.py`):
+
+| Table | Holds |
+| --- | --- |
+| `admins` | Admin accounts (hashed passwords, forced-password-change flag) |
+| `employees` · `employee_login` | Employee master data, salary structure, statutory numbers (PAN / UAN / PF), login credentials |
+| `biometric_consent_log` | Per-employee face-data consent record |
+| `attendance` · `attendance_activities` | One row per employee per day, plus every IN/OUT pair |
+| `logout_approval_requests` | Auto-logout requests awaiting manager/admin approval |
+| `attendance_settings_history` · `working_hours` · `settings` · `company_settings` | Versioned attendance rules, office hours, company details |
+| `payroll` · `payroll_settings` | Generated payslip rows and payroll rules |
+
+The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licenses)) has its **own separate** SQLite file with `customers`, `orders` and `trials` tables. It is never part of a customer build.
 
 ### Main pages
 
@@ -535,6 +555,8 @@ On first run the app creates `instance/attendance.db`, `dataset/`, `uploads/` an
 
 ## 9. ✅ Check That Everything Works
 
+> 🧪 Automated tests are described in [section 14](#14--running-the-tests); they do **not** exercise real face recognition, so this manual checklist is still needed.
+
 Do this once after setup (and again on a clean PC before delivering to a client). If a step fails, see [section 13](#13--troubleshooting--faqs).
 
 - [ ] The console shows **License check passed** and **Face recognition loaded**
@@ -712,7 +734,7 @@ Then create the vendor portal settings file (`setup.bat` already does this for y
 copy licensing\.env.vendor.example licensing\.env.vendor
 ```
 
-Fill in your Razorpay keys, email settings and `VENDOR_ADMIN_PASSWORD` in `licensing\.env.vendor` **only on your vendor server**. This file is git-ignored and is never bundled into customer builds. For local testing without Razorpay set `VENDOR_DEV_MODE=true` and run `python -m licensing.vendor_app`.
+Fill in your Razorpay keys, email settings and `VENDOR_ADMIN_PASSWORD` in `licensing\.env.vendor` **only on your vendor server**. This file is git-ignored and is never bundled into customer builds. For local testing without Razorpay set `VENDOR_DEV_MODE=true` and run `python -m licensing.vendor_app` (full guide: [section 15](#15--vendor-license-portal-selling-licenses)).
 
 Back to the keys: the command above writes `licensing/vendor_private_key.pem` and prints a **public-key hex**. Embed that key in `licensing/license_manager.py` **before building any customer release**. (During development you can instead set `LICENSE_PUBLIC_KEY_HEX` in `.env`; packaged builds ignore that variable and always use the embedded key.)
 
@@ -783,7 +805,8 @@ All backup logic lives in `backup_manager.py` and is shared by the weekly job, t
 ├── dataset\                 ← encrypted face photos          (back up!)
 ├── uploads\                 ← payslips, profile photos       (back up!)
 ├── backups\                 ← automated backup zips
-├── trained_model\           ← face-embedding cache (rebuilt automatically)
+├── trained_model\           ← face_data.pkl (list of registered faces) + embeddings cache
+│                              (if lost, re-train from Face Registration; photos in dataset\ are untouched)
 └── logs\                    ← rotating app logs
 ```
 
@@ -926,7 +949,19 @@ The trial has ended (or the license is invalid/expired) and no valid license was
 - The app's public key must match the vendor private key used to sign it.
 - Check whether the license has expired.
 
+**🛒 The purchase page says "Online payment is not available right now"**
+
+The vendor portal found no Razorpay keys and `VENDOR_DEV_MODE` is not `true`, so it hides the pay button on purpose. Fill `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` in `licensing\.env.vendor` and restart the portal — or, for local testing only, set `VENDOR_DEV_MODE=true`. Details in [section 15](#15--vendor-license-portal-selling-licenses).
+
+**🛒 "Buy a license" on the lock screen opens nothing / a wrong page**
+
+`LICENSE_PURCHASE_URL` in the customer's `.env` must be the public HTTPS address of **your** portal. `http://127.0.0.1:8000` only works on the machine that runs the portal.
+
 ### Files, camera and face recognition
+
+**👤 A registered employee suddenly "disappears" from face recognition (log says `Loaded face recognition data with N employees` with a smaller N)**
+
+The employee's entry was removed from `trained_model\face_data.pkl`. Open **Face Registration** for that employee and train again (their photos in `dataset\<id>\` are normally still there). Older versions of the test suite caused exactly this by running against the real `trained_model/` folder — that is fixed in `conftest.py` (see [section 14](#14--running-the-tests)). Make sure you use the current `conftest.py`.
 
 **🔒 `unable to open database file` / photos or payslips not saving**
 
@@ -986,7 +1021,7 @@ Keep all six images in `installer\` (see [Application icon & installer images](#
 
 **❓ Can I use MySQL instead of SQLite?**
 
-Yes. Set `DATABASE_URL=mysql+pymysql://user:password@host/dbname` in `.env`. Note that the built-in backup zips only include the SQLite file, so back up a MySQL database with your own tooling.
+Yes — see [section 16](#16--using-mysql--phpmyadmin) for a step-by-step guide (including phpMyAdmin). Note that the built-in backup zips only include the SQLite file, so back up a MySQL database with your own tooling.
 
 **❓ Can I change the port (5000)?**
 
@@ -998,7 +1033,148 @@ If the admin (or the employee, from the portal) set a custom payslip password, t
 
 ---
 
-## 14. 🗂 Project Structure
+## 14. 🧪 Running the Tests
+
+The project ships with a pytest suite (about 600 tests: auth, employees, attendance rules, payroll maths, PDF payslips, scheduler, licensing and trial logic, rate limiting, face-matching logic and more).
+
+```
+venv\Scripts\activate
+python -m pytest              # whole suite (about 1 to 2 minutes)
+python -m pytest tests\test_employees.py -v      # a single file
+```
+
+**What the tests do and do not touch**
+
+| Resource | During tests |
+| --- | --- |
+| Database | A throw-away file `test_attendance.db` in the project folder (deleted before and after the run). Your real `instance\attendance.db` is **not** used |
+| Face storage (`dataset\`, `trained_model\`) | Redirected by `conftest.py` to a temporary folder that is deleted afterwards. Your real face photos and `face_data.pkl` are **not** touched |
+| E-mail | Sending is suppressed — no real SMTP connection is made |
+| Windows registry (trial markers) | Replaced by an in-memory fake per test |
+| TensorFlow / DeepFace / OpenCV / MediaPipe | Replaced by lightweight stubs, so the suite runs fast and on CI. This also means **real face recognition is not exercised by the tests** — check it by hand with [section 9](#9--check-that-everything-works) |
+
+> ⚠️ **Why this matters.** Test employees always get database id `1`. Before the isolation was added, tests that delete employee `1` also removed the **real** employee 1 from the real face model, so "the first employee disappeared" every time you ran `pytest` and then `python app.py`. Keep the `_TEST_STORAGE_ROOT` block at the top of `conftest.py`, and never point tests at real folders. If a test needs the original paths (for example to check config defaults), use the `real_storage_paths` fixture.
+
+The same suite runs automatically on GitHub (`.github/workflows/ci.yml`).
+
+The harmless `Logging error ... I/O operation on closed file` text printed after the summary comes from the scheduler shutting down at exit; it does not affect results.
+
+---
+
+## 15. 🛒 Vendor License Portal (selling licenses)
+
+`licensing/vendor_app.py` is a **separate small Flask app that only you run** (never ship it to customers). It shows the purchase page, takes payment through **Razorpay**, receives Razorpay's webhook, stores customers and e-mails the signed license automatically. A license is issued **only by the verified webhook**, never because the browser claims a payment succeeded.
+
+| URL | Purpose |
+| --- | --- |
+| `/` | Purchase page (monthly / yearly / lifetime plans) |
+| `POST /api/create-order` · `GET /api/order-status/<id>` | Start a payment and poll its result |
+| `POST /webhook/razorpay` | Razorpay → portal (HMAC-signature checked) |
+| `/thank-you` · `/healthz` | After-payment page · health probe |
+| `POST /api/trial/start` | Trial registration |
+| `/vendor/...` | Admin API: customers, trials, stats, resend / reissue license (HTTP Basic auth with `VENDOR_ADMIN_USER` / `VENDOR_ADMIN_PASSWORD`; switched **off** when no password is set) |
+| `POST /dev/simulate-payment/<id>` | **Only** when `VENDOR_DEV_MODE=true` — fakes the Razorpay webhook for local tests |
+
+### Run it locally (testing, no Razorpay account)
+
+Run from the project folder (the one that contains `app.py`), inside the venv:
+
+```
+# PowerShell
+$env:VENDOR_DEV_MODE="true"
+python -m licensing.vendor_app
+
+# cmd
+set VENDOR_DEV_MODE=true
+python -m licensing.vendor_app
+```
+
+Open <http://127.0.0.1:8000>. It listens on `127.0.0.1:8000` by default (change with the `HOST` and `PORT` environment variables).
+
+### Run it for real
+
+1. Create your signing keys once: `python licensing/keygen.py init-keys` (see [section 11](#11--license--backup-management)).
+2. `copy licensing\.env.vendor.example licensing\.env.vendor` and fill in:
+   - `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` (use `rzp_test_...` keys first, `rzp_live_...` only after Razorpay KYC is complete),
+   - `MAIL_*` (the license is e-mailed to the buyer), `SUPPORT_EMAIL`, `COMPANY_NAME`,
+   - `VENDOR_ADMIN_USER` / `VENDOR_ADMIN_PASSWORD`,
+   - optional plan prices (`PLAN_PRICE_MONTHLY`, `PLAN_PRICE_YEARLY`, `PLAN_PRICE_LIFETIME`, `PLAN_CURRENCY`).
+3. Start it **without** `VENDOR_DEV_MODE`:
+
+```
+python -m licensing.vendor_app
+# or
+waitress-serve --listen=0.0.0.0:8000 licensing.vendor_app:app
+```
+
+4. Put it behind **HTTPS** on a real domain (set `VENDOR_TRUST_PROXY=true` behind nginx / Cloudflare). In the Razorpay dashboard add the webhook `https://<your-domain>/webhook/razorpay` with events `payment.captured` and `order.paid` and the same secret as `RAZORPAY_WEBHOOK_SECRET`.
+5. In the **customer's** `.env` set `LICENSE_PURCHASE_URL` (and optionally `LICENSE_SERVER_URL`) to that same HTTPS address. `127.0.0.1` only works on your own PC.
+
+When the Razorpay keys are present the **pay button appears**; when they are missing (and dev mode is off) the page shows "Online payment is not available right now" on purpose.
+
+The portal re-reads `.env.vendor` when the file is saved. Its own files (`.env.vendor`, `customers.db`, `vendor_private_key.pem`) live in the `licensing/` folder, or in `VENDOR_DATA_DIR` if you set it (recommended on a server). **None of them may ever be included in a customer build, zip or repository.**
+
+More detail: `licensing/VENDOR_PORTAL_SETUP.md` and `licensing/VENDOR_SYSTEM_GUIDE.md`. Test it with `python -m pytest tests\test_licensing_flow.py`.
+
+---
+
+## 16. 🗄 Using MySQL / phpMyAdmin
+
+SQLite is the default and the right choice for one office PC. If you prefer MySQL (or MariaDB — what phpMyAdmin manages), no code change is needed:
+
+1. In phpMyAdmin create an empty database, e.g. `attendance_db`, with collation `utf8mb4_unicode_ci`. Create a dedicated user with rights only on that database (do not use `root` in production).
+2. Put this in `.env` (URL-encode special characters in the password, e.g. `@` → `%40`):
+
+```
+DATABASE_URL=mysql+pymysql://user:password@localhost/attendance_db?charset=utf8mb4
+```
+
+3. Start the app (`python app.py`). All tables are created automatically; refresh phpMyAdmin to see them. The Setup Wizard runs again because the new database is empty.
+
+**Things to know**
+
+- Existing SQLite data is **not** copied automatically; a one-off migration script is needed if you want to keep old records.
+- Face photos (`dataset\`), `trained_model\`, uploads and `.env` stay on disk — they are not stored in the database.
+- The built-in weekly / manual backup zips contain only the SQLite file. With MySQL, back up the database with phpMyAdmin **Export** or `mysqldump`, in addition to the zip.
+- Tests always use SQLite and are unaffected.
+- The vendor portal's `customers.db` is a separate SQLite file and stays as it is.
+- If MySQL runs on another machine or a hosting panel, enable remote access only for trusted IPs; never expose the database to the whole internet.
+
+---
+
+## 17. ⚠️ Known Limitations & Release Checklist
+
+Please read this before selling or deploying to a customer. The project is suitable for a **pilot / beta** with a small customer once the checklist is complete.
+
+### Known limitations
+
+| Area | Limitation | What to do |
+| --- | --- | --- |
+| **Face spoofing** | There is no liveness / anti-spoofing check. A photo or a phone screen showing a registered face can be accepted | Tell customers; place the kiosk where staff can see it; consider adding a liveness check before large deployments |
+| **Payroll** | PF, ESIC, Professional Tax and TDS are configurable **percentages**. There are no Indian income-tax slabs, and statutory rules differ by state and year | Have an accountant / CA verify the payroll maths for every customer. The software is a calculation aid, not tax advice |
+| **Single machine** | Default setup is one PC with SQLite and a local face model | Use [MySQL](#16--using-mysql--phpmyadmin) and a proper server design for multi-site needs |
+| **Offline licensing** | A determined reverse-engineer of a packaged `.exe` can patch out any offline license check | Keep the private key safe; combine licensing with the EULA |
+| **Scheduler** | Jobs run only while the app is running (missed ones are back-filled on next start) | Tell customers to keep the app running during office hours |
+| **Installer trust** | Without code signing Windows SmartScreen shows "unknown publisher" | Buy a code-signing certificate |
+| **Build verification** | `attendance_app.spec` documents that the packaged build must be verified on a clean PC | Do it (below) before every release |
+
+### Release checklist
+
+- [ ] `python -m pytest` passes (see [section 14](#14--running-the-tests))
+- [ ] **Placeholders removed.** Run `python scripts\update_contact_details.py` — it fills your company name, support e-mail, phone, website and city (jurisdiction) into `licensing\EULA.txt`, `licensing\USER_MANUAL.md` and the installer script. Afterwards confirm that no `XXXXX` or `[Your ...]` text is left: `findstr /s /n "XXXXX \[Your" licensing\*.txt licensing\*.md`
+- [ ] The same support e-mail is used in `installer\AttendancePayrollSystem.iss`, the customer `.env` (`SUPPORT_EMAIL`) and `.env.vendor`
+- [ ] **License keys.** The public key embedded in `licensing/license_manager.py` belongs to a private key that has **never** been shared, committed or e-mailed. If in doubt, generate a new pair (`keygen.py init-keys`, then `python -m licensing.license_manager encode-key <hex>`) **before** building
+- [ ] The release zip / installer contains **no** `.env`, `.env.vendor`, `*.pem`, `*.db`, `*.pkl`, `license.lic` or customer data (`dir /s /b dist\*.pem` prints nothing)
+- [ ] `FLASK_ENV=production` in the customer's `.env`
+- [ ] Customer `.env`: `LICENSE_PURCHASE_URL` points to your public **HTTPS** portal
+- [ ] Build with PyInstaller + Inno Setup ([section 10](#10--building--packaging-for-developers)) and test on a **clean Windows PC without Python**: trial start, license lock screen, **Buy a license**, activation, Setup Wizard, camera, face registration, kiosk attendance, payroll, payslip e-mail
+- [ ] Payroll results checked by an accountant
+- [ ] EULA reviewed by a lawyer (jurisdiction, liability, biometric data / DPDP Act, 2023)
+- [ ] Change the README status badge from *pilot / beta* once the above is done and you are ready for general release
+
+---
+
+## 18. 🗂 Project Structure
 
 | Path | Purpose |
 | --- | --- |
@@ -1022,13 +1198,17 @@ If the admin (or the employee, from the portal) set a custom payslip password, t
 | `attendance_app.spec` | PyInstaller build specification |
 | `setup.bat` | One-click setup: installs Python 3.10.11 if missing, sets up the environment, then a menu to run the app or build the `.exe` and installer (installs Inno Setup 6 if missing) |
 | `templates/` · `static/` | Jinja2 views and CSS/JS/images (`static/vendor/` is filled by the download script) |
-| `instance/` · `dataset/` · `uploads/` · `backups/` · `trained_model/` · `logs/` | Runtime data (git-ignored) |
+| `instance/` · `dataset/` · `uploads/` · `backups/` · `trained_model/` · `logs/` | Runtime data (git-ignored). `trained_model/face_data.pkl` is the list of employees the recogniser knows; `embeddings_cache.pkl` is a speed-up cache |
 | `requirements.txt` · `requirements-packaging.txt` | Runtime vs build-only dependencies |
 | `.env.example` | Template for your `.env` settings file |
+| `tests/` · `conftest.py` | Pytest suite (about 600 tests) and shared fixtures; `conftest.py` isolates the database **and** face storage from your real data |
+| `.github/workflows/ci.yml` | GitHub Actions: installs dependencies and runs `pytest tests/` on every push / pull request |
+| `licensing/*.md` · `licensing/EULA.txt` | `VENDOR_PORTAL_SETUP.md`, `VENDOR_SYSTEM_GUIDE.md`, `USER_MANUAL.md`, `USER_MANUAL_OUTLINE.md`, and the end-user licence agreement |
+| `licensing/vendor_templates/` | Purchase page and thank-you page of the vendor portal |
 
 ---
 
-## 15. 🤝 Contributing & Support
+## 19. 🤝 Contributing & Support
 
 1. 🔁 Make small, focused changes and check the app by following [section 9](#9--check-that-everything-works).
 2. 📦 If you touched packaging, walk the [pre-build checklist](#-pre-build-checklist) and make a test build.

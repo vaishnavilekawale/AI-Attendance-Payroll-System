@@ -96,6 +96,15 @@ HARDENING NOTES (what changed in this revision)
    who wipes every marker AND the database on a fresh install, or who
    reinstalls Windows. Only online activation can close that completely.
 
+   VENDOR-RECORDED TRIAL (reinstall protection): when the admin finishes
+   setup, the app tells the vendor server (admin name, email, company and
+   this machine's fingerprint). The server keeps the FIRST start date for
+   that machine for ever and returns it as a signed trial token on every
+   later call, so reinstalling on the same laptop continues the same trial
+   instead of starting a new one. Offline, the local markers above still
+   run the trial; it syncs the next time the internet is reachable.
+   See licensing/trial_client.py.
+
 3. Stable machine fingerprint (v2)
    The fingerprint is now built from stable identifiers only:
      - CPU id       (SMBIOS processor ID; registry model string fallback)
@@ -138,6 +147,7 @@ except ImportError:
     WINDOWS_AVAILABLE = False
 
 from config import BASE_DIR
+from .plans import TRIAL_DAYS  # re-exported: client_security imports it from here
 
 logger = logging.getLogger(__name__)
 
@@ -255,8 +265,15 @@ ENV_TRIAL_REVOKED_KEY = "TRIAL_REVOKED"
 # Trial period is a convenience for evaluation. The Ed25519 check is what
 # actually gates a paid deployment; the trial protections below simply make
 # casual resets (delete one registry key / one .env line / roll the clock
-# back) stop working.
-TRIAL_DAYS = 30
+# back) stop working. TRIAL_DAYS itself lives in plans.py so the vendor
+# portal and this app can never disagree about the length of a trial.
+#
+# The trial is ALSO recorded on the vendor's server (see trial_client.py): the
+# first registration for a computer fixes the start date there, so a reinstall
+# on the same laptop is told the original date instead of getting a new trial.
+# A trial token from the vendor is signed like a license but has
+# edition == "trial" and is never accepted as a license.
+TRIAL_EDITION = "trial"
 
 # How far BEHIND the newest recorded activity the system clock may be
 # before it is treated as a clock rollback. Generous on purpose: covers
@@ -682,13 +699,11 @@ class LicenseManager:
                 raise LicenseError(f"Invalid vendor public key configured: {e}")
         return self._public_key
 
-    def verify_license_token(self, token: str) -> Tuple[bool, str, Optional[Dict]]:
+    def _verify_signed_payload(self, token: str) -> Tuple[bool, str, Optional[Dict]]:
         """
-        Verify a license token string against the vendor public key and
-        this machine's fingerprint.
-
-        Returns:
-            (is_valid, message, payload_dict_or_None)
+        Signature + machine-binding check shared by licenses and trial tokens.
+        Does NOT look at expiry: a trial token for a trial that has ended is
+        still a perfectly genuine statement of when it began.
         """
         if not token or "." not in token:
             return False, "Malformed license token", None
@@ -727,6 +742,26 @@ class LicenseManager:
         if token_fingerprint != self.machine_fingerprint.lower():
             logger.info("License matched the legacy machine fingerprint; "
                         "consider re-issuing it against the v2 fingerprint.")
+        return True, "Signature is valid", payload
+
+    def verify_license_token(self, token: str, allow_trial: bool = False
+                             ) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Verify a license token string against the vendor public key and
+        this machine's fingerprint.
+
+        A vendor TRIAL token (edition "trial") is rejected unless allow_trial
+        is set: pasting one into the activation box must not unlock the app.
+
+        Returns:
+            (is_valid, message, payload_dict_or_None)
+        """
+        ok, message, payload = self._verify_signed_payload(token)
+        if not ok:
+            return False, message, payload
+
+        if payload.get("edition") == TRIAL_EDITION and not allow_trial:
+            return False, "That is a trial record, not a license key", payload
 
         expires_at = payload.get("expires_at")
         if expires_at:
@@ -742,6 +777,15 @@ class LicenseManager:
                 return False, "License payload has an invalid expiry date", payload
 
         return True, "License is valid", payload
+
+    def verify_trial_token(self, token: str) -> Tuple[bool, str, Optional[Dict]]:
+        """Verify a trial token from the vendor server (signature, machine, edition)."""
+        ok, message, payload = self._verify_signed_payload(token)
+        if not ok:
+            return False, message, payload
+        if payload.get("edition") != TRIAL_EDITION or not payload.get("trial_started_at"):
+            return False, "Not a trial record", payload
+        return True, "Trial record is valid", payload
 
     # ------------------------------------------------------------------
     # License file storage
@@ -1092,6 +1136,20 @@ class LicenseManager:
         if self._env_read(ENV_TRIAL_START_KEY) is None:
             self._env_write(ENV_TRIAL_START_KEY, start_str)
 
+    @staticmethod
+    def _trial_days_left(start: datetime, today: Optional[datetime] = None) -> int:
+        """
+        Days left of a trial that began on `start`, counted in whole CALENDAR days:
+        30 on the first day, 1 on the last, 0 once the trial is over.
+
+        (The old formula was (end_date - datetime.now()).days. end_date is
+        midnight and now() carries the time of day, so .days FLOORED the
+        result: a fresh trial showed 29, and the last day showed 0 while the
+        app was still usable.)
+        """
+        today_date = (today or datetime.now()).date()
+        return max(0, TRIAL_DAYS - (today_date - start.date()).days)
+
     def start_trial(self) -> bool:
         """
         Start (or continue) the evaluation trial. Returns True while the
@@ -1135,15 +1193,15 @@ class LicenseManager:
 
             self._seed_trial_markers(earliest)
 
-            end_date = earliest + timedelta(days=TRIAL_DAYS)
-            if today > end_date:
+            days_left = self._trial_days_left(earliest, today)
+            if days_left <= 0:
                 logger.warning("Trial period has expired")
                 self.touch_last_seen()
                 self._trial_block_reason = "The evaluation period has expired."
                 return False
 
             self.touch_last_seen()
-            logger.info(f"Trial active: {(end_date - today).days} days remaining")
+            logger.info(f"Trial active: {days_left} days remaining")
             return True
         except Exception as e:
             logger.error(f"Error managing trial: {e}")
@@ -1158,11 +1216,64 @@ class LicenseManager:
             earliest, invalid, status = self._trial_start_markers()
             if invalid or status == "corrupt" or earliest is None:
                 return 0
-            remaining = (earliest + timedelta(days=TRIAL_DAYS) - datetime.now()).days
-            return max(0, remaining)
+            return self._trial_days_left(earliest)
         except Exception as e:
             logger.error(f"Error getting trial days remaining: {e}")
             return 0
+
+    def get_trial_start_date(self) -> Optional[str]:
+        """The trial's start as 'YYYY-MM-DD' (earliest marker), or None. No side effects."""
+        try:
+            earliest, invalid, status = self._trial_start_markers()
+            if invalid or status == "corrupt" or earliest is None:
+                return None
+            return earliest.strftime("%Y-%m-%d")
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------
+    # Vendor-recorded trial (see trial_client.py)
+    # ------------------------------------------------------------------
+    def get_vendor_sync_time(self) -> Optional[datetime]:
+        """When this install last got a valid trial record from the vendor (UTC), or None."""
+        state, _ = self._secure_read()
+        return self._parse_iso_utc((state or {}).get("vendor_sync_at"))
+
+    def apply_vendor_trial(self, token: str) -> Tuple[bool, str]:
+        """
+        Adopt the trial start date the vendor has on record for this machine.
+
+        The token is signed by the vendor, so a customer cannot invent one. The
+        EARLIEST of (vendor date, local markers) wins - exactly like the local
+        markers among themselves - so a reinstall that wiped every local marker
+        is told the original date, and the trial simply continues (or is over).
+        """
+        ok, message, payload = self.verify_trial_token(token)
+        if not ok:
+            return False, message
+
+        started = self._parse_iso_utc(payload.get("trial_started_at"))
+        if started is None:
+            return False, "Trial record has an unreadable start date"
+        # Count in the customer's own calendar days, like the local markers do.
+        vendor_start = datetime.combine(started.astimezone().date(), datetime.min.time())
+
+        earliest, _invalid, status = self._trial_start_markers()
+        if status == "corrupt":
+            return False, "Local trial marker is damaged"
+        chosen = vendor_start if earliest is None or vendor_start < earliest else earliest
+        self._seed_trial_markers(chosen)
+        # Also remember when we last heard from the vendor (drives the re-sync schedule).
+        state, status = self._secure_read()
+        state = dict(state) if state else {}
+        if status != "corrupt":
+            state["trial_start"] = chosen.strftime("%Y-%m-%d")
+            state["vendor_sync_at"] = datetime.now(timezone.utc).isoformat()
+            self._secure_write(state)
+        self._reg_write(LICENSE_REGISTRY_TRIAL_START, chosen.strftime("%Y-%m-%d"))
+        logger.info("Vendor trial record applied: start %s (days left %s)",
+                    chosen.strftime("%Y-%m-%d"), self._trial_days_left(chosen))
+        return True, "Trial record applied"
 
     def get_license_info(self) -> Dict:
         """Comprehensive license information, e.g. for an admin settings page."""
@@ -1178,6 +1289,7 @@ class LicenseManager:
                 "trial_active": False if is_valid else self.start_trial(),
                 "trial_days_remaining": self.get_trial_days_remaining(),
                 "trial_total_days": TRIAL_DAYS,
+                "trial_start_date": self.get_trial_start_date(),
                 "clock_rollback_detected": self._rollback_detected,
             }
             if payload:

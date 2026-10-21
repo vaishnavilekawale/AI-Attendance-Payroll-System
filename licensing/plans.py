@@ -23,14 +23,21 @@ Expiry rules (see compute_expiry):
 
 A renewal of a still-running plan extends from the CURRENT expiry rather
 than from today, so paying early never wastes the days already paid for.
+
+One license = ONE machine (the token is bound to that computer's hardware
+fingerprint). There are no seat packs or second activations.
 """
 import calendar
 import logging
 import os
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
+
+# Length of the free evaluation trial. Single source of truth: the customer app
+# (license_manager.py) and the vendor portal (trial list) both read it from here.
+TRIAL_DAYS = 30
 
 PLAN_MONTHLY = "monthly"
 PLAN_YEARLY = "yearly"
@@ -112,6 +119,37 @@ def get_plans() -> Dict[str, Plan]:
             months=None, tagline="Pay once, use forever on one machine.",
         ),
     }
+
+
+def days_until(target: datetime, now: Optional[datetime] = None) -> int:
+    """
+    Whole days left until `target`, counting a started day as a full day.
+
+    A plain `(target - now).days` FLOORS, so a trial that still has 29 days
+    and 23 hours left would be shown as "29" - and a trial that has just
+    started as "29" instead of "30". Rounding UP fixes that: the number
+    shown is "how many calendar days can I still use this" and reaches 0
+    only when the time has really run out.
+    """
+    now = now or datetime.now(timezone.utc)
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    seconds = (target - now).total_seconds()
+    if seconds <= 0:
+        return 0
+    return int(-(-seconds // 86400))  # ceil without importing math
+
+
+def trial_end(started_at: datetime) -> datetime:
+    """Moment the trial that began at `started_at` ends."""
+    return started_at + timedelta(days=TRIAL_DAYS)
+
+
+def trial_days_remaining(started_at: datetime, now: Optional[datetime] = None) -> int:
+    """Days left of a trial that began at `started_at` (30 on day one, 0 when over)."""
+    return days_until(trial_end(started_at), now)
 
 
 def get_plan(code: str) -> Optional[Plan]:

@@ -9,6 +9,16 @@ and the admin API. It ties together:
     keygen.py                Ed25519 token signing
     license_email_service.py instant delivery of the token
 
+Trials
+------
+start_or_get_trial()       called (by the installed app, over the internet) when
+                           a new admin finishes setup. The FIRST call for a
+                           machine fixes the start date; every later call - a
+                           reinstall, a re-run of the wizard - gets that same
+                           date back, so a reinstall cannot give a new trial.
+                           The answer is a signed trial token (keygen.issue_trial_token).
+list_trials()              the vendor's "who is on a trial" list.
+
 Purchase flow
 -------------
 1. create_pending_order()   called when the buyer presses "Pay": validates the
@@ -40,10 +50,14 @@ from typing import Dict, List, Optional
 
 from sqlalchemy import func, update
 
-from .customer_models import Customer, Order, session_scope, init_customer_db
-from .keygen import issue_license_for_plan, is_valid_fingerprint
+from sqlalchemy.exc import IntegrityError
+
+from .customer_models import Customer, Order, Trial, session_scope, init_customer_db
+from .keygen import (
+    issue_license_for_plan, issue_license_token, issue_trial_token, is_valid_fingerprint,
+)
 from .license_email_service import get_license_email_service
-from .plans import get_plan, PLAN_LIFETIME
+from .plans import get_plan, PLAN_LIFETIME, TRIAL_DAYS, trial_days_remaining, trial_end
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +126,44 @@ def validate_purchase_form(name, email, phone, machine_fingerprint, plan_code) -
 
     return {"name": name, "email": email, "phone": phone,
             "machine_fingerprint": fingerprint, "plan": plan.code}
+
+
+def validate_trial_form(admin_name, email, company, machine_fingerprint) -> Dict[str, str]:
+    """Validate and normalise what an installed app sends when a trial starts."""
+    admin_name = re.sub(r"\s+", " ", (admin_name or "")).strip()
+    email = (email or "").strip().lower()
+    company = re.sub(r"\s+", " ", (company or "")).strip()
+    fingerprint = re.sub(r"\s+", "", machine_fingerprint or "").lower()
+
+    if len(admin_name) < 1 or len(admin_name) > 120:
+        raise ValidationError("Admin name is required.")
+    if len(email) > 254 or not _EMAIL_RE.match(email):
+        raise ValidationError("A valid admin email is required.")
+    if len(company) > 255:
+        raise ValidationError("Company name is too long.")
+    if not is_valid_fingerprint(fingerprint):
+        raise ValidationError("Invalid machine fingerprint.")
+    return {"admin_name": admin_name, "email": email, "company": company,
+            "machine_fingerprint": fingerprint}
+
+
+def _parse_claimed_start(value, now: datetime) -> Optional[datetime]:
+    """
+    A re-installing app may say "my local trial began on X" (it ran offline
+    before it could reach us). Believe it only if it is in the past and not
+    absurdly old. Claiming an EARLIER date can only shorten the claimant's own
+    trial, never extend it. Returns naive UTC, or None to ignore the claim.
+    """
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip())
+    except ValueError:
+        return None
+    parsed = _to_naive_utc(parsed)
+    if parsed > now or parsed < now - timedelta(days=365):
+        return None
+    return parsed
 
 
 class CustomerService:
@@ -389,6 +441,97 @@ class CustomerService:
         return sent
 
     # ------------------------------------------------------------------
+    # Free trials
+    # ------------------------------------------------------------------
+    def start_or_get_trial(self, admin_name: str, email: str, company: str,
+                           machine_fingerprint: str, claimed_start=None,
+                           now: Optional[datetime] = None) -> Dict[str, object]:
+        """
+        Register this machine's trial, or return the record that already exists.
+
+        The start date is set ONCE. A second call (reinstall) gets the same
+        date back and only refreshes the contact details and last-seen time.
+
+        Returns a dict with: status ('started' | 'existing'), started_at,
+        expires_at, days_remaining, expired, trial_token.
+        """
+        form = validate_trial_form(admin_name, email, company, machine_fingerprint)
+        now = _to_naive_utc(now) if now else _utcnow_naive()
+        start_guess = _parse_claimed_start(claimed_start, now) or now
+
+        status = "existing"
+        for attempt in (1, 2):
+            try:
+                with session_scope() as session:
+                    trial = session.query(Trial).filter_by(
+                        machine_fingerprint=form["machine_fingerprint"]).first()
+                    if trial is None:
+                        trial = Trial(machine_fingerprint=form["machine_fingerprint"],
+                                      admin_name=form["admin_name"], email=form["email"],
+                                      company=form["company"], started_at=start_guess,
+                                      last_seen_at=now, checkins=1)
+                        session.add(trial)
+                        status = "started"
+                    else:
+                        trial.admin_name = form["admin_name"]
+                        trial.email = form["email"]
+                        if form["company"]:
+                            trial.company = form["company"]
+                        trial.last_seen_at = now
+                        trial.checkins = (trial.checkins or 0) + 1
+                    started_at, admin = trial.started_at, trial.admin_name
+                break
+            except IntegrityError:
+                # Two first-time requests raced; the other one won. Read its row.
+                if attempt == 2:
+                    raise
+                status = "existing"
+
+        started_aware = _to_aware_utc(started_at)
+        days = trial_days_remaining(started_aware, _to_aware_utc(now))
+        token = issue_trial_token(form["machine_fingerprint"], admin, started_aware)
+        logger.info("Trial %s for %s <%s> (%s): %s day(s) left", status, admin, form["email"],
+                    form["company"] or "-", days)
+        return {
+            "status": status,
+            "started_at": started_aware.isoformat(),
+            "expires_at": trial_end(started_aware).isoformat(),
+            "days_remaining": days,
+            "expired": days <= 0,
+            "trial_token": token,
+        }
+
+    def list_trials(self, now: Optional[datetime] = None) -> List[Dict[str, object]]:
+        """Every trial, newest first, with days left (the vendor's 'trials' list)."""
+        now = _to_aware_utc(_to_naive_utc(now)) if now else datetime.now(timezone.utc)
+        with session_scope() as session:
+            rows = session.query(Trial).order_by(Trial.started_at.desc()).all()
+            paying = {
+                (c.machine_fingerprint or "").lower()
+                for c in session.query(Customer).filter_by(payment_yn="Y").all()
+            }
+            result = []
+            for t in rows:
+                started = _to_aware_utc(t.started_at)
+                days = trial_days_remaining(started, now)
+                fp = (t.machine_fingerprint or "").lower()
+                result.append({
+                    "id": t.id,
+                    "admin_name": t.admin_name,
+                    "email": t.email,
+                    "company": t.company,
+                    "machine_fingerprint": fp,
+                    "started_at": started.isoformat(),
+                    "expires_at": trial_end(started).isoformat(),
+                    "days_remaining": days,
+                    "trial_total_days": TRIAL_DAYS,
+                    "status": "converted" if fp in paying else ("expired" if days <= 0 else "active"),
+                    "last_seen_at": _to_aware_utc(t.last_seen_at).isoformat() if t.last_seen_at else None,
+                    "checkins": t.checkins,
+                })
+            return result
+
+    # ------------------------------------------------------------------
     # Admin / manual operations (used by customer_routes.py)
     # ------------------------------------------------------------------
     def add_customer(self, name: str, email: str, address: str = None, phone: str = None,
@@ -499,6 +642,39 @@ class CustomerService:
                 session.get(Customer, customer_id).license_email_sent_yn = "Y"
         return sent
 
+    def reissue_license(self, customer_id: int) -> bool:
+        """
+        Sign the customer's CURRENT plan again, with the same expiry, using the
+        current private key, and email it. Use after rotating the signing key:
+        licenses signed with the old key no longer verify in new builds.
+        """
+        with session_scope() as session:
+            customer = session.get(Customer, customer_id)
+            if not customer:
+                raise ValueError("Customer not found")
+            if customer.payment_yn != "Y" or not customer.plan or not customer.machine_fingerprint:
+                raise ValueError("Only paid customers with a plan and a machine fingerprint can be re-issued")
+            expires_at = _to_aware_utc(customer.plan_expires_at)
+            token = issue_license_token(customer.machine_fingerprint, customer.name,
+                                        expires_at=expires_at, edition=customer.plan)
+            customer.soft_key = token
+            customer.license_email_sent_yn = "N"
+            customer.updated_at = _utcnow_naive()
+            args = (customer.name, customer.email, token, customer.machine_fingerprint, customer.plan)
+        plan = get_plan(args[4])
+        try:
+            sent = bool(self.email_service.send_license_key_email(
+                customer_name=args[0], customer_email=args[1], license_key=args[2],
+                machine_fingerprint=args[3], plan_name=plan.name if plan else args[4],
+                expires_at=expires_at))
+        except Exception as e:
+            logger.error("Re-issued license email for customer %s raised: %s", customer_id, e)
+            sent = False
+        if sent:
+            with session_scope() as session:
+                session.get(Customer, customer_id).license_email_sent_yn = "Y"
+        return sent
+
     def _reload(self, customer_id: int) -> Customer:
         with session_scope() as session:
             customer = session.get(Customer, customer_id)
@@ -565,6 +741,7 @@ class CustomerService:
                 'installed_customers': session.query(Customer).filter_by(software_installed_yn='Y').count(),
                 'pending_installation': session.query(Customer).filter_by(
                     payment_yn='Y', software_installed_yn='N').count(),
+                'trials_started': session.query(Trial).count(),
             }
 
 

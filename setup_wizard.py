@@ -6,7 +6,8 @@ experience for a fresh install. Four steps:
 
   1. /setup/          - create the very first admin account, then log them in
   2. /setup/company   - basic company settings (name, office hours, etc.)
-  3. /setup/license   - license activation (optional, can skip for trial)
+  3. /setup/license   - license activation (optional, can skip for the free trial;
+                        shows the admin's name and how many trial days are left)
   4. /setup/done       - confirmation, links into the dashboard
 
 This is also the first fully-migrated Blueprint in the project, and is
@@ -27,7 +28,9 @@ from models import Admin, Settings
 from auth_decorators import admin_required
 from auth_helpers import create_admin_from_request_form
 from extensions import limiter
-from licensing.license_manager import get_license_manager
+from licensing.license_manager import get_license_manager, TRIAL_DAYS
+from licensing.client_security import invalidate_access_state, _purchase_url
+from licensing.trial_client import register_trial
 from config import BASE_DIR
 
 logger = logging.getLogger(__name__)
@@ -197,40 +200,79 @@ def step2_company():
             flash('SMTP configuration saved.', 'success')
 
         flash('Company settings saved.', 'success')
+
+        # Tell the vendor this admin has started a trial: admin name, email, company and
+        # this computer's machine fingerprint. The vendor keeps the FIRST start date for
+        # this computer, so reinstalling cannot give a new trial (licensing/trial_client.py).
+        admin = db.session.get(Admin, session['admin_id']) if session.get('admin_id') else None
+        if admin is not None:
+            trial = register_trial(admin.username, admin.email, company_name)
+            invalidate_access_state()
+            if trial.trial_over:
+                flash('This computer has already used its free trial. '
+                      'Please activate a license to continue.', 'warning')
+                return redirect(url_for('license_gate.lock_screen'))
+            if trial.status == 'offline':
+                flash('The license server could not be reached right now. Your trial works '
+                      'offline and will be registered automatically later.', 'info')
+
         return redirect(url_for('setup.step3_license'))
 
     return render_template('setup_wizard.html', step=2, settings=settings)
 
 
+def _step3_context(license_manager):
+    """Everything the license step shows: fingerprint, admin name, real days left."""
+    admin_name = ''
+    try:
+        admin = db.session.get(Admin, session['admin_id']) if session.get('admin_id') else None
+        admin_name = admin.username if admin else ''
+    except Exception:  # cosmetic only - the page works without the name
+        db.session.rollback()
+        logger.exception('Could not look up the admin name for the license step')
+    fingerprint = license_manager.machine_fingerprint
+    try:
+        trial_days = license_manager.get_trial_days_remaining()
+    except Exception:  # the page must still render; the template falls back to generic text
+        logger.exception('Could not read the trial days remaining')
+        trial_days = None
+    return {
+        'machine_fingerprint': fingerprint,
+        'admin_name': admin_name,
+        'trial_days': trial_days,
+        'trial_total_days': TRIAL_DAYS,
+        'purchase_url': _purchase_url(fingerprint),
+    }
+
+
 @setup_bp.route('/license', methods=['GET', 'POST'])
 @admin_required
 def step3_license():
-    """Step 3: license activation (optional, can skip for trial)."""
+    """Step 3: license activation (optional, can skip for the free trial)."""
     license_manager = get_license_manager()
-    machine_fingerprint = license_manager.machine_fingerprint
-    
+
     if request.method == 'POST':
         # Signed Ed25519 license token (long, case-sensitive) - whitespace from
         # an email copy/paste is stripped, the case is NOT touched.
         license_key = ''.join(request.form.get('license_key', '').split()).strip('"\'')
 
         if not license_key:
-            # Skip license activation, continue with trial
-            flash('Continuing with 30-day trial period.', 'info')
+            # Skip license activation, continue with the trial
+            days = license_manager.get_trial_days_remaining()
+            flash(f'Continuing with your free trial - {days} day{"" if days == 1 else "s"} left.', 'info')
             return redirect(url_for('setup.step4_done'))
 
         is_valid, message = license_manager.activate_license_from_string(license_key)
 
         if is_valid:
-            from licensing.client_security import invalidate_access_state
             invalidate_access_state()
             flash('License activated successfully!', 'success')
             return redirect(url_for('setup.step4_done'))
         else:
             flash(f'License validation failed: {message}', 'danger')
-            return render_template('setup_wizard.html', step=3, machine_fingerprint=machine_fingerprint)
+            return render_template('setup_wizard.html', step=3, **_step3_context(license_manager))
 
-    return render_template('setup_wizard.html', step=3, machine_fingerprint=machine_fingerprint)
+    return render_template('setup_wizard.html', step=3, **_step3_context(license_manager))
 
 
 @setup_bp.route('/done')

@@ -99,10 +99,78 @@ if 'deepface' not in sys.modules:
 # ---------------------------------------------------------------------
 os.environ['FLASK_ENV'] = 'testing'
 
+# ---------------------------------------------------------------------
+# 3) Point the on-disk face storage (dataset + trained model) at a throwaway temp dir.
+#
+# ROOT CAUSE of "employee 1 disappears after pytest, then python app.py":
+# TestingConfig only redirected the SQLite DB. DATASET_FOLDER and
+# TRAINED_MODEL_FOLDER (face_data.pkl + embeddings_cache.pkl) still pointed at the REAL folders. Test employees always get
+# DB id 1, so tests that hit /employees/delete/1 (or the face-image delete /
+# train routes) called the global recognizer's remove_employee('1') /
+# train_employee('1', ...), which removed the REAL employee 1 from the real
+# trained_model/face_data.pkl and saved it back.
+# This runs before ai_engine is imported, so the recognizer singleton and
+# EMBEDDINGS_CACHE_FILE also pick up the temp paths.
+# ---------------------------------------------------------------------
+import atexit
+import shutil
+import tempfile
+
+_TEST_STORAGE_ROOT = tempfile.mkdtemp(prefix='attendance_pytest_')
+atexit.register(shutil.rmtree, _TEST_STORAGE_ROOT, ignore_errors=True)
+
+from config import Config as _Config
+
+# Remember the real defaults so tests that verify them (test_config_and_setup)
+# can still check them via the `real_storage_paths` fixture below.
+_REAL_STORAGE_PATHS = {
+    'dataset': _Config.DATASET_FOLDER,
+    'trained_model': _Config.TRAINED_MODEL_FOLDER,
+}
+
+_Config.DATASET_FOLDER = os.path.join(_TEST_STORAGE_ROOT, 'dataset')
+_Config.TRAINED_MODEL_FOLDER = os.path.join(_TEST_STORAGE_ROOT, 'trained_model')
+for _d in (_Config.DATASET_FOLDER, _Config.TRAINED_MODEL_FOLDER):
+    os.makedirs(_d, exist_ok=True)
+
 TEST_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_attendance.db')
 TEST_DB_PATH = os.path.abspath(TEST_DB_PATH)
 
 import pytest
+
+
+@pytest.fixture
+def real_storage_paths():
+    """The real (non-redirected) dataset/trained_model paths from config.py."""
+    return _REAL_STORAGE_PATHS
+
+
+@pytest.fixture(autouse=True)
+def _isolate_license_registry(monkeypatch):
+    """
+    Keep the licensing tests away from the REAL Windows registry.
+
+    LicenseManager keeps trial markers in HKCU\\SOFTWARE\\AIAttendanceSystem
+    (TrialStartDate, LastSeenUtc, TrialRevoked). The licensing tests redirect
+    the encrypted marker file and .env into tmp_path, but on Windows the
+    registry was still the developer's real one - so a trial that began weeks
+    ago (or a "revoked" flag written by a tamper test) made unrelated tests
+    fail, and the tests could even revoke the developer's own real trial.
+    Each test now gets its own empty in-memory registry.
+    """
+    from licensing.license_manager import LicenseManager
+
+    store = {}
+
+    def _read(self, name):
+        return store.get(name)
+
+    def _write(self, name, value):
+        store[name] = value
+        return True
+
+    monkeypatch.setattr(LicenseManager, '_reg_read', _read)
+    monkeypatch.setattr(LicenseManager, '_reg_write', _write)
 
 
 @pytest.fixture(autouse=True)
@@ -356,4 +424,3 @@ def non_sunday_date():
     if today.weekday() == 6:  # Sunday
         return date(2024, 1, 8)  # a Monday
     return today
-

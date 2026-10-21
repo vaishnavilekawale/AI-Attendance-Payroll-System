@@ -10,6 +10,10 @@ Location:      VENDOR_DATA_DIR (env var) or, by default, the licensing/ folder.
 
 Tables
 ------
+trials     one row per computer (machine fingerprint) that ever started the
+           free trial. The vendor sees WHO (admin name, email, company),
+           WHEN it started and how many days are left. The row is never
+           reset, which is what stops a reinstall from giving a new trial.
 customers  one row per (email, machine fingerprint) - the license holder.
            payment_yn is set to 'Y' by the payment webhook once money has
            actually been received.
@@ -124,6 +128,31 @@ class Order(Base):
     def __repr__(self):
         return (f"<Order(id={self.id}, gateway_order_id='{self.gateway_order_id}', "
                 f"plan='{self.plan}', status='{self.status}')>")
+
+
+class Trial(Base):
+    """
+    One free-trial record per machine. See module docstring.
+
+    started_at is fixed on the first registration and NEVER moves; the app
+    asks the vendor server on every (re)install and is told this same date.
+    """
+    __tablename__ = "trials"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_fingerprint = Column(String(64), nullable=False, unique=True, index=True)
+    admin_name = Column(String(120), nullable=False)
+    email = Column(String(254), nullable=False, index=True)
+    company = Column(String(255), nullable=True)
+    started_at = Column(DateTime, nullable=False, default=_utcnow)   # UTC, naive
+    last_seen_at = Column(DateTime, default=_utcnow)
+    checkins = Column(Integer, nullable=False, default=1)            # installs / syncs seen
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    def __repr__(self):
+        return (f"<Trial(id={self.id}, admin='{self.admin_name}', email='{self.email}', "
+                f"started_at={self.started_at})>")
 
 
 # ---------------------------------------------------------------------------

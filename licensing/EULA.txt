@@ -16,37 +16,49 @@ software provider ("Licensor" or "We") for the AI Attendance & Payroll System.
 ================================================================================
 
 Subject to the terms and conditions of this EULA, Licensor grants you a 
-non-exclusive, non-transferable, perpetual license to install and use the 
-Software on a single computer or workstation ("Licensed Device") for your 
-internal business operations.
+non-exclusive, non-transferable license to install and use the Software on 
+ONE (1) computer or workstation ("Licensed Device") for your internal 
+business operations, for the period of the plan you purchased (Section 2).
 
 The license is granted based on the following conditions:
-- You have purchased a valid license key from Licensor or an authorized reseller
-- The license key is tied to a specific machine fingerprint (hardware ID)
-- The license allows up to 2 machine activations per purchased license
-- Each activation requires a separate license key or prior authorization
+- You have purchased a valid license key from Licensor or an authorized 
+  reseller
+- The license key is tied to ONE specific machine fingerprint (hardware ID), 
+  which you provide when you buy
+- One license allows the Software to run on ONE computer only. It cannot be 
+  used on a second computer, and it cannot be shared between computers or 
+  between people using different computers
+- To use the Software on a different computer, you need a separate license, 
+  or you must ask Licensor to re-issue your license for the new computer 
+  (for example after a hardware replacement)
 
 ================================================================================
-2. LICENSE TYPES
+2. PLANS
 ================================================================================
 
-2.1. STUDENT LICENSE
-   - Intended for individual students for personal learning purposes
-   - Single machine activation only
-   - Not for commercial use or business operations
-   - Non-transferable
+The Software is sold under the following plans. Every plan includes all 
+features and is valid for ONE (1) computer.
 
-2.2. SMALL BUSINESS LICENSE (1-10 Employees)
-   - Intended for small businesses with up to 10 employees
-   - Up to 2 machine activations
-   - Commercial use permitted
-   - Includes email support for 12 months
+2.1. MONTHLY PLAN
+   - License valid for 1 month from the date of purchase
+   - Renew before it ends to keep using the Software; a renewal is added on 
+     top of the days you have left
+   - When the license ends, the Software locks until you renew. Your data is 
+     kept and is available again after you renew
 
-2.3. MEDIUM BUSINESS LICENSE (11-50 Employees)
-   - Intended for medium-sized businesses with 11-50 employees
-   - Up to 2 machine activations
-   - Commercial use permitted
-   - Includes priority email and phone support for 12 months
+2.2. YEARLY PLAN
+   - License valid for 12 months from the date of purchase
+   - Renewal works the same way as the Monthly Plan
+   - When the license ends, the Software locks until you renew. Your data is 
+     kept and is available again after you renew
+
+2.3. LIFETIME PLAN
+   - One payment, no expiry date
+   - Valid on the ONE computer it was issued for
+   - Updates are covered by Section 9
+
+Current prices are shown on Licensor's purchase page. Commercial use is 
+permitted under every plan.
 
 ================================================================================
 3. PERMITTED USE
@@ -56,7 +68,7 @@ You may:
 - Install and use the Software on the Licensed Device
 - Use the Software for your internal business operations
 - Make one (1) backup copy of the Software for archival purposes
-- Use the Software for the duration of the license period
+- Use the Software for the duration of the plan you purchased (Section 2)
 
 ================================================================================
 4. PROHIBITED USE
@@ -69,10 +81,10 @@ You may NOT:
 - Distribute, sell, rent, lease, sublicense, or transfer the Software to any 
   third party
 - Remove or alter any proprietary notices, labels, or marks on the Software
-- Use the Software on more devices than authorized by your license
+- Use the Software on more than the ONE computer your license was issued for
 - Use the Software for illegal purposes or in violation of any applicable laws
 - Circumvent any technical protection measures or licensing mechanisms
-- Share your license key with any third party
+- Share your license key with any third party, or use a license key on a computer other than the one it was issued for
 - Use the Software to provide time-sharing, service bureau, or similar services
 
 ================================================================================
@@ -132,12 +144,21 @@ By using this feature, you acknowledge and agree that:
 8. TRIAL PERIOD
 ================================================================================
 
-The Software may include a 30-day trial period. During the trial:
+The Software includes a free 30-day trial. During the trial:
 - You may use all features of the Software
-- The trial period is limited to 30 days from first installation
-- After the trial expires, you must purchase a license to continue using 
-  the Software
-- Trial data may be retained after license purchase
+- The trial lasts 30 days from the day the Software is first set up on a 
+  computer. The Software shows how many days are left
+- To run and protect the trial, the Software sends Licensor the name and 
+  email address of the administrator, the company name you entered, and the 
+  computer's machine fingerprint when setup is completed. Licensor keeps the 
+  trial start date for that computer
+- The trial is ONE trial per computer. Uninstalling and reinstalling the 
+  Software on the same computer does not start a new trial; the original 
+  start date is kept
+- After the trial expires, you must purchase a license (Section 2) to 
+  continue using the Software
+- Data you entered during the trial is kept and can be used after you 
+  purchase a license
 - No technical support is provided during the trial period
 
 ================================================================================

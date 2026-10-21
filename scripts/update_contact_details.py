@@ -95,7 +95,7 @@ if installer_path.exists():
         installer_content = f.read()
 
     installer_content = installer_content.replace("Vaishnavi Maruti Lekawale", company_name)
-    installer_content = installer_content.replace("lekawalevaishnavi@gmail.com", support_email)
+    installer_content = installer_content.replace("lekawalevaishnavi22@gmail.com", support_email)
 
     with open(installer_path, 'w', encoding='utf-8') as f:
         f.write(installer_content)

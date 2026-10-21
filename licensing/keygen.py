@@ -9,13 +9,19 @@ repository - only licensing/license_manager.py's PUBLIC key travels with
 the product; this script and the private key file it manages stay on the
 vendor's own machine / server.
 
-One-time setup:
-    python keygen.py init-keys
-This generates vendor_private_key.pem and prints the matching public-key
-hex. Embed it in the customer app with:
-    python -m licensing.license_manager encode-key <public-key-hex>
-and paste the two printed constants into licensing/license_manager.py
-BEFORE building any customer release.
+One-time setup (or whenever you rotate the key):
+    python keygen.py init-keys              first key  (refuses if one exists)
+    python keygen.py init-keys --rotate     NEW key: the old PEM is renamed to
+                                            vendor_private_key.pem.revoked-<time>
+                                            (never deleted) and a fresh one is made
+Both commands also PATCH licensing/license_manager.py for you (the two
+_PUBKEY_* constants), so there is nothing to copy by hand. Pass --no-embed to
+skip that and print the encode-key command instead. Afterwards:
+    python keygen.py check-key              confirms the private key and the key
+                                            embedded in the app really match
+Then BUILD A NEW RELEASE: an installed app only trusts the public key it was
+built with. Licenses signed by the OLD key stop verifying, so re-issue them
+(Vendor admin API: POST /vendor/customers/<id>/reissue, or `issue` below).
 
 Issuing a license by hand (the app shows the fingerprint on its lock screen):
     python keygen.py issue <machine_fingerprint> "<customer name>" --plan yearly
@@ -47,6 +53,7 @@ import json
 import re
 import base64
 import argparse
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -55,11 +62,11 @@ from cryptography.hazmat.primitives import serialization
 
 try:  # imported as part of the licensing package
     from .vendor_paths import get_vendor_data_dir
-    from .plans import get_plan, compute_expiry
+    from .plans import get_plan, compute_expiry, TRIAL_DAYS
 except ImportError:  # run directly: python keygen.py ...
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from vendor_paths import get_vendor_data_dir  # type: ignore
-    from plans import get_plan, compute_expiry  # type: ignore
+    from plans import get_plan, compute_expiry, TRIAL_DAYS  # type: ignore
 
 _FINGERPRINT_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -89,15 +96,112 @@ def is_valid_fingerprint(value: Optional[str]) -> bool:
     return bool(value) and bool(_FINGERPRINT_RE.match(value.strip()))
 
 
-def init_keys(private_key_path: Optional[str] = None):
-    """Generate a new Ed25519 vendor keypair. Refuses to overwrite an
-    existing private key - see module docstring for why."""
+_APP_LICENSE_MANAGER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "license_manager.py")
+_PARTS_RE = re.compile(r"^_PUBKEY_ENC_PARTS\s*=\s*\(.*?\)\s*$", re.MULTILINE)
+_PIN_RE = re.compile(r"^_PUBKEY_SHA256_PIN\s*=\s*\".*?\"\s*$", re.MULTILINE)
+_SEED_RE = re.compile(r"^_PUBKEY_MASK_SEED\s*=\s*b\"(.*?)\"\s*$", re.MULTILINE)
+
+
+def _public_hex_of(private_key: Ed25519PrivateKey) -> str:
+    return private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
+
+
+def _mask_for(source: str) -> bytes:
+    match = _SEED_RE.search(source)
+    if not match:
+        raise RuntimeError("Could not find _PUBKEY_MASK_SEED in license_manager.py")
+    return hashlib.sha256(match.group(1).encode("utf-8")).digest()
+
+
+def embed_public_key_in_app(public_key_hex: str, app_file: Optional[str] = None) -> bool:
+    """
+    Write the encoded public key into licensing/license_manager.py (the same
+    thing `python -m licensing.license_manager encode-key` prints for you to
+    paste). Returns True when the file was updated.
+    """
+    app_file = app_file or _APP_LICENSE_MANAGER
+    if not os.path.isfile(app_file):
+        print(f"  (could not find {app_file} - embed the key by hand, see below)")
+        return False
+    with open(app_file, "r", encoding="utf-8") as f:
+        source = f.read()
+
+    raw = bytes.fromhex(public_key_hex.strip())
+    if len(raw) != 32:
+        raise ValueError("Public key must be exactly 32 bytes (64 hex characters)")
+    mask = _mask_for(source)
+    b64 = base64.b64encode(bytes(a ^ b for a, b in zip(raw, mask))).decode("ascii")
+    half = len(b64) // 2
+    parts = (b64[half:], b64[:half])  # stored reversed, same as encode_public_key_for_embedding()
+    pin = hashlib.sha256(raw).hexdigest()
+
+    if not (_PARTS_RE.search(source) and _PIN_RE.search(source)):
+        print("  (the _PUBKEY_* constants were not found in license_manager.py - embed by hand)")
+        return False
+    source = _PARTS_RE.sub(lambda _m: f"_PUBKEY_ENC_PARTS = {parts!r}", source, count=1)
+    source = _PIN_RE.sub(lambda _m: f'_PUBKEY_SHA256_PIN = "{pin}"', source, count=1)
+
+    tmp = app_file + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write(source)
+    os.replace(tmp, app_file)
+    return True
+
+
+def _embedded_public_hex(app_file: Optional[str] = None) -> str:
+    """Decode the public key currently embedded in license_manager.py (no import needed)."""
+    app_file = app_file or _APP_LICENSE_MANAGER
+    with open(app_file, "r", encoding="utf-8") as f:
+        source = f.read()
+    parts_match = re.search(r"^_PUBKEY_ENC_PARTS\s*=\s*\(\s*[\"'](.*?)[\"']\s*,\s*[\"'](.*?)[\"']\s*\)",
+                            source, re.MULTILINE)
+    pin_match = re.search(r"^_PUBKEY_SHA256_PIN\s*=\s*\"(.*?)\"", source, re.MULTILINE)
+    if not parts_match or not pin_match:
+        raise RuntimeError("Could not read the embedded key constants from license_manager.py")
+    masked = base64.b64decode(parts_match.group(2) + parts_match.group(1))
+    mask = _mask_for(source)
+    raw = bytes(a ^ b for a, b in zip(masked, mask))
+    if hashlib.sha256(raw).hexdigest() != pin_match.group(1):
+        raise RuntimeError("The embedded key does not match its own SHA-256 pin (file edited by hand?)")
+    return raw.hex()
+
+
+def check_key(private_key_path: Optional[str] = None) -> bool:
+    """True if the private key on this machine matches the public key built into the app."""
+    mine = _public_hex_of(_load_private_key(private_key_path))
+    embedded = _embedded_public_hex()
+    if mine == embedded:
+        print("OK - the private key and the key embedded in license_manager.py MATCH.")
+        return True
+    print("MISMATCH - licenses signed with this private key will NOT verify in the app.")
+    print(f"  private key's public key : {mine}")
+    print(f"  embedded in the app      : {embedded}")
+    print("Run 'python keygen.py init-keys --rotate' (new pair) or restore the right PEM.")
+    return False
+
+
+def init_keys(private_key_path: Optional[str] = None, rotate: bool = False, embed: bool = True):
+    """Generate a new Ed25519 vendor keypair.
+
+    Without rotate=True this refuses to overwrite an existing private key (see
+    module docstring). With rotate=True the old key is kept under a
+    '.revoked-<timestamp>' name - never deleted - and a fresh pair is made."""
     private_key_path = private_key_path or _default_private_key_path()
     if os.path.exists(private_key_path):
-        print(f"A private key already exists at {private_key_path}.")
-        print("Refusing to overwrite it - delete it manually first if you really want a new")
-        print("keypair (doing so invalidates every license you've already issued).")
-        sys.exit(1)
+        if not rotate:
+            print(f"A private key already exists at {private_key_path}.")
+            print("Refusing to overwrite it. To replace it with a NEW key run:")
+            print("    python keygen.py init-keys --rotate")
+            print("(doing so invalidates every license already issued with the old key).")
+            sys.exit(1)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        retired = f"{private_key_path}.revoked-{stamp}"
+        os.replace(private_key_path, retired)
+        print(f"Old private key kept as: {retired}")
+        print("  -> it can still SIGN licenses. Move it offline or destroy it once you are sure.")
 
     private_key = Ed25519PrivateKey.generate()
     pem = private_key.private_bytes(
@@ -112,10 +216,7 @@ def init_keys(private_key_path: Optional[str] = None):
     except OSError:
         pass  # best-effort; not all filesystems support POSIX permission bits
 
-    public_bytes = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.Raw,
-        format=serialization.PublicFormat.Raw,
-    )
+    public_hex = _public_hex_of(private_key)
 
     print("=" * 70)
     print("Ed25519 keypair generated.")
@@ -124,11 +225,16 @@ def init_keys(private_key_path: Optional[str] = None):
     print()
     print("Public key (64 hex chars):")
     print()
-    print(f"    {public_bytes.hex()}")
+    print(f"    {public_hex}")
     print()
-    print("Embed it in the customer app with:")
-    print(f"    python -m licensing.license_manager encode-key {public_bytes.hex()}")
-    print("and paste the two printed constants into licensing/license_manager.py.")
+    embedded = embed_public_key_in_app(public_hex) if embed else False
+    if embedded:
+        print("licensing/license_manager.py UPDATED with the new public key.")
+        print("Now: build a new release, and re-issue licenses signed by the old key.")
+    else:
+        print("Embed it in the customer app with:")
+        print(f"    python -m licensing.license_manager encode-key {public_hex}")
+        print("and paste the two printed constants into licensing/license_manager.py.")
     print("=" * 70)
 
 
@@ -151,7 +257,8 @@ def _load_private_key(private_key_path: Optional[str] = None) -> Ed25519PrivateK
 
 def issue_license_token(machine_fingerprint: str, customer_name: str,
                          expires_at: Optional[datetime] = None, edition: Optional[str] = None,
-                         private_key_path: Optional[str] = None) -> str:
+                         private_key_path: Optional[str] = None,
+                         extra: Optional[dict] = None, record: bool = True) -> str:
     """
     Build and sign a license token for `machine_fingerprint`.
 
@@ -164,6 +271,9 @@ def issue_license_token(machine_fingerprint: str, customer_name: str,
             stored here by issue_license_for_plan).
         private_key_path: path to the vendor's Ed25519 private key PEM
             (see the module docstring for the default lookup order).
+        extra: additional fields to sign into the payload (used by the trial
+            token to carry "trial_started_at"). Cannot override the core fields.
+        record: append a line to license_keys_log.txt (trial tokens turn this off).
 
     Returns:
         str: the signed license token, "<payload>.<signature>".
@@ -184,19 +294,22 @@ def issue_license_token(machine_fingerprint: str, customer_name: str,
         "expires_at": expires_at.astimezone(timezone.utc).isoformat() if expires_at else None,
         "edition": edition,
     }
+    for key, value in (extra or {}).items():
+        payload.setdefault(key, value)
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     signature = private_key.sign(payload_bytes)
 
     token = f"{_b64u(payload_bytes)}.{_b64u(signature)}"
 
-    try:
-        with open(_license_log_path(), "a", encoding="utf-8") as f:
-            f.write(
-                f"{datetime.now(timezone.utc).isoformat()}|{machine_fingerprint}|"
-                f"{customer_name}|{payload['expires_at']}|{edition}\n"
-            )
-    except OSError:
-        pass  # record-keeping only - never block issuing a license over a log write failure
+    if record:
+        try:
+            with open(_license_log_path(), "a", encoding="utf-8") as f:
+                f.write(
+                    f"{datetime.now(timezone.utc).isoformat()}|{machine_fingerprint}|"
+                    f"{customer_name}|{payload['expires_at']}|{edition}\n"
+                )
+        except OSError:
+            pass  # record-keeping only - never block issuing a license over a log write failure
 
     return token
 
@@ -226,11 +339,39 @@ def issue_license_for_plan(machine_fingerprint: str, customer_name: str, plan_co
     return token, expires_at
 
 
+def issue_trial_token(machine_fingerprint: str, customer_name: str, started_at: datetime,
+                      private_key_path: Optional[str] = None) -> str:
+    """
+    Signed proof of the vendor's trial record for one machine.
+
+    It is NOT a license: edition is "trial" and the app refuses to treat it
+    as one (see LicenseManager.verify_license_token). It tells the app the
+    one date it must believe - when the trial began - so reinstalling cannot
+    give a fresh 30 days. expires_at is the end of the trial.
+    """
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    started_at = started_at.astimezone(timezone.utc)
+    return issue_license_token(
+        machine_fingerprint, customer_name,
+        expires_at=started_at + timedelta(days=TRIAL_DAYS), edition="trial",
+        private_key_path=private_key_path,
+        extra={"trial_started_at": started_at.isoformat()}, record=False,
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="AI Attendance & Payroll System - vendor license tool")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("init-keys", help="Generate a new Ed25519 vendor keypair (run once)")
+    init_parser = subparsers.add_parser("init-keys", help="Generate a new Ed25519 vendor keypair")
+    init_parser.add_argument("--rotate", action="store_true",
+                             help="Replace an existing key (the old PEM is kept as .revoked-<time>)")
+    init_parser.add_argument("--no-embed", action="store_true",
+                             help="Do not patch licensing/license_manager.py; just print the constants command")
+
+    check_parser = subparsers.add_parser("check-key", help="Check the private key matches the key embedded in the app")
+    check_parser.add_argument("--key", default=None, help="Path to the vendor private key PEM")
 
     issue_parser = subparsers.add_parser("issue", help="Issue a signed license token for a customer machine")
     issue_parser.add_argument("machine_fingerprint", help="64-character hex fingerprint from the customer's machine")
@@ -246,8 +387,15 @@ def main():
     args = parser.parse_args()
 
     if args.command == "init-keys":
-        init_keys()
+        init_keys(rotate=args.rotate, embed=not args.no_embed)
         return
+
+    if args.command == "check-key":
+        try:
+            sys.exit(0 if check_key(args.key) else 1)
+        except Exception as e:
+            print(f"Error: {e}")
+            sys.exit(1)
 
     if args.command == "issue":
         try:

@@ -45,7 +45,7 @@
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Vaishnavi Maruti Lekawale"
 #define MyAppURL "https://github.com/vaishnavilekawale/AI-Attendance-Payroll-System"
-#define MyAppSupportEmail "lekawalevaishnavi@gmail.com"
+#define MyAppSupportEmail "lekawalevaishnavi22@gmail.com"
 ; Path (relative to this .iss file) to the PyInstaller onedir output folder.
 #define MySourceDir "..\dist\AttendancePayrollSystem"
 
