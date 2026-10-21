@@ -275,7 +275,10 @@ a = Analysis(
         'licensing.keygen', 'licensing.vendor_app', 'licensing.vendor_paths',
         'licensing.customer_models', 'licensing.customer_service',
         'licensing.customer_routes', 'licensing.license_email_service',
-        'licensing.payment_gateway', 'licensing.plans',
+        'licensing.payment_gateway',
+        # NOTE: 'licensing.plans' is deliberately NOT excluded - the customer-side
+        # license_manager.py imports TRIAL_DAYS from it. It holds no secrets
+        # (only trial length and plan prices).
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
