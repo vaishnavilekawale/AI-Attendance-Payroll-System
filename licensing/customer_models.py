@@ -228,6 +228,12 @@ def _upgrade_schema(engine) -> None:
         with engine.connect() as conn:
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_xinfo({table})"))}
         if column not in existing:
+            # For VIRTUAL columns that depend on other columns, ensure the dependency exists
+            if "GENERATED ALWAYS AS" in ddl and "amount" in ddl:
+                # Check if the 'amount' column exists before adding the VIRTUAL column
+                if "amount" not in existing:
+                    logger.info("Skipping VIRTUAL column %s.%s: dependency 'amount' column not found", table, column)
+                    continue
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
             logger.info("customers.db upgraded: added %s.%s", table, column)
