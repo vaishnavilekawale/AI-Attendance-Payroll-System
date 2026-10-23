@@ -21,6 +21,7 @@ orders     one row per checkout attempt. Created BEFORE the customer pays
            (so the webhook can verify the amount and look up the plan), and
            flipped to 'paid' exactly once - which is what makes the webhook
            safe to receive twice (payment gateways retry deliveries).
+           `amount` is in paise; `amount_rupees` (read-only) shows rupees.
 
 Older customers.db files (created before plan/expiry tracking existed) are
 upgraded in place by init_customer_db(): the missing columns are added,
@@ -122,6 +123,8 @@ class Order(Base):
     customer_id = Column(Integer, nullable=True)
     email_sent_yn = Column(String(1), nullable=False, default="N")
     fulfilled_at = Column(DateTime, nullable=True)
+    paid_at = Column(DateTime, nullable=True)         # when the gateway captured the payment (UTC)
+    receipt_no = Column(String(32), nullable=True)    # e.g. RCPT-2026-00042, shown on the PDF receipt
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -205,6 +208,12 @@ _ADDED_COLUMNS = (
     ("customers", "last_payment_id", "VARCHAR(64)"),
     ("customers", "amount_paid", "INTEGER"),
     ("customers", "license_email_sent_yn", "VARCHAR(1) NOT NULL DEFAULT 'N'"),
+    ("orders", "paid_at", "DATETIME"),
+    ("orders", "receipt_no", "VARCHAR(32)"),
+    # `amount` stays in paise (what Razorpay charges and the webhook compares).
+    # This read-only column shows the same value in rupees; SQLite computes it
+    # (VIRTUAL = nothing stored), the app never writes to it.
+    ("orders", "amount_rupees", "REAL GENERATED ALWAYS AS (amount / 100.0) VIRTUAL"),
 )
 
 
@@ -214,7 +223,10 @@ def _upgrade_schema(engine) -> None:
     for table, column, ddl in _ADDED_COLUMNS:
         if not inspector.has_table(table):
             continue
-        existing = {c["name"] for c in inspector.get_columns(table)}
+        # PRAGMA table_xinfo also lists generated columns, which SQLAlchemy's
+        # reflection may hide - a missed one would make ADD COLUMN fail on restart.
+        with engine.connect() as conn:
+            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_xinfo({table})"))}
         if column not in existing:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))

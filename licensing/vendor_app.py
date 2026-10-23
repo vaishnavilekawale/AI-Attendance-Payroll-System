@@ -129,6 +129,7 @@ def process_gateway_event(event: dict):
             gateway_payment_id=payment_id,
             paid_amount=payment.get("amount"),
             paid_currency=payment.get("currency"),
+            paid_at=payment.get("created_at"),     # Unix seconds - shown on the receipt
         )
     except Exception:
         logger.exception("Fulfilment failed for order %s - asking the gateway to retry", order_id)

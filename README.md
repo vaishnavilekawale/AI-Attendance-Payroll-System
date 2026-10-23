@@ -728,6 +728,8 @@ The license token is read from the `LICENSE_TOKEN` environment variable, or from
 python licensing/keygen.py init-keys
 ```
 
+> 💡 **Easiest way:** just run `license.bat` — it does the key creation and `customers.db` for you (`.env.vendor` is already made by `setup.bat`) (see [Licensing end to end](#-licensing-end-to-end-a-to-z--with-licensebat)). The manual commands below are what it runs.
+
 Then create the vendor portal settings file (`setup.bat` already does this for you; manually it is):
 
 ```
@@ -763,6 +765,50 @@ Alternative (no UI): save the token as **`license.lic`** next to the `.exe`, or 
 > ℹ️ A license is tied to one machine. If the customer changes hardware, the fingerprint changes and a new license must be issued.
 
 The `licensing/` folder also contains the vendor-side customer database, email dispatch, and guides — see `licensing/VENDOR_SYSTEM_GUIDE.md`, `licensing/USER_MANUAL.md` and `licensing/EULA.txt`.
+
+### 🧪 Licensing end to end (A to Z) — with `license.bat`
+
+`license.bat` is the **vendor-only** helper that does the whole licensing set-up for you. Run `setup.bat` once first (it creates `venv` and installs the packages), then **double-click `license.bat`**. Nothing has to be created by hand.
+
+**Files that are created automatically (only when missing):**
+
+| File | Created by | When |
+| --- | --- | --- |
+| `licensing\.env.vendor` | `setup.bat` (copy of `.env.vendor.example`) | during setup — it already has `VENDOR_DEV_MODE=true` (fake payments) |
+| `licensing\vendor_private_key.pem` | `keygen.py init-keys` (called by `license.bat`) | first run. Also **patches the public key into `licensing\license_manager.py`** |
+| `licensing\customers.db` | `python -m licensing.customer_models` (called by `license.bat`; the portal also does it on start) | first run |
+| `licensing\license_keys_log.txt` | `keygen.py issue` | the first time you issue a license |
+| `license.lic` (next to the app) | the customer app | when a customer activates a token |
+| `instance\attendance.db`, `.env`, `logs\` | the customer app / `setup.bat` | first run of the app |
+
+> ⚠️ The public key that ships in the project does **not** belong to any `.pem` you own, so the first `license.bat` run always creates a **new** key pair. Every customer `.exe` must be **built after** this step (`setup.bat` → option 2), otherwise it will not accept your licenses. Back up `vendor_private_key.pem` offline. **Never** give `license.bat`, the `.pem`, `.env.vendor` or `customers.db` to a customer.
+
+**Test everything on one PC (about 5 minutes, no Razorpay account):**
+
+1. **Prepare** — run `license.bat`. It prints `OK - the private key and the key embedded in license_manager.py MATCH`. Leave `VENDOR_DEV_MODE=true` in `licensing\.env.vendor`.
+2. **Start the vendor portal** — menu **1**. Open <http://127.0.0.1:8000> (shows `Mode: DEV`). Leave this window open.
+3. **Start the customer app** in a second window — run `license.bat` again and choose **4** (or `python app.py`). Open <http://127.0.0.1:5000>, finish the Setup Wizard. The app starts in **Trial mode (30 days)**.
+4. **Get the fingerprint** — Admin → Settings → 🔑 License Activation → copy the fingerprint (also menu **3** of `license.bat`).
+5. **Get a license — pick one way:**
+   - **A. Through the portal (full flow):** on <http://127.0.0.1:8000> choose a plan, paste the fingerprint, fill name/email and press pay. In dev mode the payment is simulated and the license is **e-mailed** to the buyer (this needs `MAIL_*` filled in `.env.vendor`; the page never shows the token itself). Without mail settings use way B.
+   - **B. Manually:** menu **2** of `license.bat` → fingerprint, name, plan. A long token is printed.
+6. **Activate** — paste the token in Admin → Settings → 🔑 License Activation (or the lock screen, or the Setup Wizard step 3). The card changes to **License Valid** with the expiry date. It also writes `license.lic` next to the app.
+7. **Verify** — restart the app: it starts normally with no trial banner. A token made for another fingerprint, or an edited token, is rejected.
+
+**Going live (selling for real):**
+
+1. In `licensing\.env.vendor` fill `RAZORPAY_*`, `MAIL_*`, `VENDOR_ADMIN_PASSWORD` and **remove** (or set to `false`) `VENDOR_DEV_MODE`. Host the portal on an HTTPS domain ([section 15](#15--vendor-license-portal-selling-licenses)).
+2. Set the portal address in `licensing\trial_client.py` → `EMBEDDED_LICENSE_SERVER_URL` and in the customer `.env` → `LICENSE_PURCHASE_URL` / `LICENSE_SERVER_URL`. A packaged `.exe` **ignores** `.env` for the server URL, so embed it **before** building.
+3. Build the `.exe` + installer (`setup.bat` → option 2) and give customers only the installer.
+
+**Troubleshooting `license.bat`:**
+
+| Message | Fix |
+| --- | --- |
+| `venv not found` | Run `setup.bat` first |
+| `MISMATCH` from check-key | The `.pem` is not the one that made the embedded key. Restore the right `.pem`, or menu **6** (new key + rebuild + re-issue licenses) |
+| Portal stops with `ImportError ... payment_gateway` | `licensing\payment_gateway.py` is missing — restore it from this repository |
+| "License activation failed" | Wrong fingerprint, expired token, or the app was built before the key was created |
 
 ### 💾 Backups
 
@@ -1196,6 +1242,7 @@ Please read this before selling or deploying to a customer. The project is suita
 | `installer/` | Inno Setup script (`.iss`), `app_icon.ico`, six `wizard_*.bmp` images and icon instructions |
 | `scripts/` | `download_vendor_assets.py`, `prepare_deepface_weights.py`, `verify_icon.py`, `fix_cdn_links.py`, `update_contact_details.py` |
 | `attendance_app.spec` | PyInstaller build specification |
+| `license.bat` | **Vendor only.** Creates the signing key (`.pem`) and `customers.db` automatically, then a menu: start the vendor portal, issue a license, show the fingerprint, run the app, check / rotate the key |
 | `setup.bat` | One-click setup: installs Python 3.10.11 if missing, sets up the environment, then a menu to run the app or build the `.exe` and installer (installs Inno Setup 6 if missing) |
 | `templates/` · `static/` | Jinja2 views and CSS/JS/images (`static/vendor/` is filled by the download script) |
 | `instance/` · `dataset/` · `uploads/` · `backups/` · `trained_model/` · `logs/` | Runtime data (git-ignored). `trained_model/face_data.pkl` is the list of employees the recogniser knows; `embeddings_cache.pkl` is a speed-up cache |

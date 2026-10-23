@@ -5,6 +5,7 @@ This is the business logic behind the purchase portal, the payment webhook
 and the admin API. It ties together:
 
     plans.py                 what was bought, and when it expires
+    receipt_generator.py     the PDF payment receipt attached to the email
     customer_models.py       customers.db (customers + orders)
     keygen.py                Ed25519 token signing
     license_email_service.py instant delivery of the token
@@ -58,6 +59,7 @@ from .keygen import (
 )
 from .license_email_service import get_license_email_service
 from .plans import get_plan, PLAN_LIFETIME, TRIAL_DAYS, trial_days_remaining, trial_end
+from .receipt_generator import application_id, build_receipt_pdf, receipt_number
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +190,11 @@ class CustomerService:
             form.get("machine_fingerprint"), form.get("plan"))
         plan = get_plan(clean["plan"])
 
+        # Never take money from someone who already owns a lifetime license for
+        # this email + computer: a paid monthly/yearly order would be silently
+        # "kept as lifetime" (see _issue_for_customer) and they would get nothing new.
+        self._refuse_if_already_lifetime(clean["email"], clean["machine_fingerprint"])
+
         gateway_order_id = gateway.create_order(
             amount=plan.amount, currency=plan.currency,
             receipt=f"aiaps-{clean['machine_fingerprint'][:12]}-{int(datetime.now(timezone.utc).timestamp())}",
@@ -232,9 +239,12 @@ class CustomerService:
     # ------------------------------------------------------------------
     def fulfill_paid_order(self, gateway_order_id: str, gateway_payment_id: str,
                            paid_amount: Optional[int] = None,
-                           paid_currency: Optional[str] = None) -> FulfillmentResult:
+                           paid_currency: Optional[str] = None,
+                           paid_at: Optional[int] = None) -> FulfillmentResult:
         """
-        Turn a successful payment into a customer record + license + email.
+        Turn a successful payment into a customer record + license + email
+        (with the PDF payment receipt attached). `paid_at` is the gateway's
+        payment time as a Unix timestamp (Razorpay: payment.created_at).
         Idempotent - see module docstring. May raise: the caller (webhook)
         should then answer with a 5xx so the gateway retries.
         """
@@ -304,6 +314,9 @@ class CustomerService:
                 order.customer_id = customer.id
                 order.status = "paid"
                 order.fulfilled_at = _utcnow_naive()
+                order.paid_at = self._paid_at_naive(paid_at) or order.fulfilled_at
+                order.receipt_no = order.receipt_no or receipt_number(order.id, _to_aware_utc(order.paid_at))
+                receipt = self._receipt_data(order, customer, plan_code, expires_at)
 
                 customer_id = customer.id
                 name, email, fingerprint = customer.name, customer.email, customer.machine_fingerprint
@@ -316,7 +329,7 @@ class CustomerService:
 
         # ---- deliver (outside the DB transaction; SMTP can be slow) -----
         email_sent = self._send_and_record(order_pk, customer_id, name, email, token,
-                                           fingerprint, plan_code, expires_at)
+                                           fingerprint, plan_code, expires_at, receipt=receipt)
         return FulfillmentResult("fulfilled", gateway_order_id, customer_id, email_sent, "license issued")
 
     def _handle_unclaimed(self, order_pk: int, gateway_order_id: str) -> FulfillmentResult:
@@ -327,12 +340,15 @@ class CustomerService:
                 customer_id = order.customer_id
                 email_sent = order.email_sent_yn == "Y"
                 resend_args = None
+                resend_receipt = None
                 if not email_sent and customer_id:
                     customer = session.get(Customer, customer_id)
                     if customer and customer.soft_key:
                         resend_args = (customer.name, customer.email, customer.soft_key,
                                        customer.machine_fingerprint, customer.plan,
                                        _to_aware_utc(customer.plan_expires_at))
+                        resend_receipt = self._receipt_data(
+                            order, customer, customer.plan, _to_aware_utc(customer.plan_expires_at))
             elif order.status == "processing":
                 return FulfillmentResult("in_progress", gateway_order_id,
                                          detail="another worker is processing this order")
@@ -342,9 +358,55 @@ class CustomerService:
 
         if resend_args:
             logger.info("Order %s already paid but email unsent - retrying delivery", gateway_order_id)
-            email_sent = self._send_and_record(order_pk, customer_id, *resend_args)
+            email_sent = self._send_and_record(order_pk, customer_id, *resend_args,
+                                               receipt=resend_receipt)
         return FulfillmentResult("duplicate", gateway_order_id, customer_id, email_sent,
                                  "already fulfilled")
+
+    @staticmethod
+    def _paid_at_naive(epoch) -> Optional[datetime]:
+        """Gateway payment time (Unix seconds) -> naive UTC; None if missing or implausible."""
+        try:
+            value = datetime.fromtimestamp(int(epoch), tz=timezone.utc).replace(tzinfo=None)
+        except (TypeError, ValueError, OverflowError, OSError):
+            return None
+        return value if datetime(2020, 1, 1) < value <= _utcnow_naive() + timedelta(days=1) else None
+
+    @staticmethod
+    def _receipt_data(order: Order, customer: Customer, plan_code: Optional[str],
+                      expires_at: Optional[datetime]) -> Dict[str, object]:
+        """Everything the receipt shows, as a plain dict. Needs the rows loaded (open session)."""
+        plan = get_plan(plan_code) if plan_code else None
+        paid_at = _to_aware_utc(order.paid_at or order.fulfilled_at)
+        return {
+            "receipt_no": order.receipt_no or receipt_number(order.id, paid_at),
+            "issued_at": datetime.now(timezone.utc),
+            "application_id": application_id(customer.id),
+            "customer_name": order.name or customer.name,
+            "customer_email": order.email or customer.email,
+            "customer_phone": order.phone or customer.phone,
+            "plan_name": plan.name if plan else (plan_code or "-"),
+            "amount": order.amount,
+            "currency": order.currency,
+            "status": "Paid" if order.status == "paid" else str(order.status).title(),
+            "order_id": order.gateway_order_id,
+            "payment_id": order.gateway_payment_id,
+            "paid_at": paid_at,
+            "valid_until": _to_aware_utc(expires_at),
+            "machine_fingerprint": order.machine_fingerprint,
+        }
+
+    def get_receipt_pdf(self, gateway_order_id: str) -> Optional[bytes]:
+        """The PDF receipt of a PAID order (admin download), or None if unknown / not paid."""
+        with session_scope() as session:
+            order = session.query(Order).filter_by(gateway_order_id=gateway_order_id).first()
+            if order is None or order.status != "paid" or not order.customer_id:
+                return None
+            customer = session.get(Customer, order.customer_id)
+            if customer is None:
+                return None
+            data = self._receipt_data(order, customer, order.plan, _to_aware_utc(customer.plan_expires_at))
+        return build_receipt_pdf(data)
 
     @staticmethod
     def _release_claim(order_pk: int) -> None:
@@ -367,13 +429,36 @@ class CustomerService:
                 .filter(Customer.machine_fingerprint == fingerprint)
                 .order_by(Customer.id.asc()).first())
 
+    @classmethod
+    def _refuse_if_already_lifetime(cls, email: str, fingerprint: str) -> None:
+        """
+        Raise ValidationError (BEFORE any payment is started) when this email +
+        machine already holds a paid lifetime license. Monthly / yearly holders
+        - including expired ones - are NOT blocked: they can renew, or upgrade
+        to lifetime.
+        """
+        with session_scope() as session:
+            customer = cls._find_customer(session, email, fingerprint)
+            owns_lifetime = bool(
+                customer is not None and customer.payment_yn == "Y"
+                and customer.plan == PLAN_LIFETIME and customer.plan_expires_at is None)
+        if owns_lifetime:
+            raise ValidationError(
+                "This computer already has a lifetime license for this email address, so no "
+                "purchase is needed and you have not been charged. If you have lost your key, "
+                "contact support and we will send it again.")
+
     @staticmethod
     def _issue_for_customer(customer: Customer, requested_plan: str):
         """
         Sign a token for `customer`'s machine for `requested_plan`.
 
-        - A renewal stacks onto the existing expiry while it is still in the future.
-        - A customer who already owns a lifetime license is never downgraded.
+        - A renewal stacks onto the existing expiry while it is still in the future;
+          once the old license has expired the new period starts from today.
+        - A monthly / yearly customer may upgrade to lifetime (the lifetime plan has no expiry).
+        - A customer who already owns a lifetime license is never downgraded
+          (create_pending_order refuses such orders up front; this is the safety net
+          for a payment that was already in flight).
 
         Returns (token, effective_plan_code, expires_at_aware_or_None)
         """
@@ -381,6 +466,11 @@ class CustomerService:
         current_expiry = None
         if customer.payment_yn == "Y":
             if customer.plan == PLAN_LIFETIME and customer.plan_expires_at is None:
+                if requested_plan != PLAN_LIFETIME:
+                    logger.warning(
+                        "Customer %s already has a lifetime license but a '%s' order was paid - "
+                        "keeping lifetime; consider refunding that payment.",
+                        customer.id, requested_plan)
                 plan_code = PLAN_LIFETIME
             else:
                 current_expiry = _to_aware_utc(customer.plan_expires_at)
@@ -391,7 +481,7 @@ class CustomerService:
         return token, plan_code, expires_at
 
     def _send_and_record(self, order_pk, customer_id, name, email, token, fingerprint,
-                         plan_code, expires_at) -> bool:
+                         plan_code, expires_at, receipt=None) -> bool:
         # Atomically claim the right to send, so two concurrent workers (or a
         # webhook retry racing the original delivery) never email the same
         # license twice. 'S' = a worker is sending right now.
@@ -413,7 +503,8 @@ class CustomerService:
             sent = bool(self.email_service.send_license_key_email(
                 customer_name=name, customer_email=email, license_key=token,
                 machine_fingerprint=fingerprint,
-                plan_name=plan.name if plan else plan_code, expires_at=expires_at))
+                plan_name=plan.name if plan else plan_code, expires_at=expires_at,
+                receipt=receipt))
         except Exception as e:
             logger.error("License email for customer %s raised: %s", customer_id, e)
             sent = False
@@ -633,10 +724,16 @@ class CustomerService:
                 raise ValueError("Customer not found or no license has been issued yet")
             args = (customer.name, customer.email, customer.soft_key, customer.machine_fingerprint,
                     customer.plan, _to_aware_utc(customer.plan_expires_at))
+            # Attach the receipt of the latest paid order, if there is one
+            # (licenses added by hand have no payment, so no receipt).
+            latest = (session.query(Order).filter_by(customer_id=customer_id, status="paid")
+                      .order_by(Order.id.desc()).first())
+            receipt = self._receipt_data(latest, customer, customer.plan, args[5]) if latest else None
         plan = get_plan(args[4])
         sent = bool(self.email_service.send_license_key_email(
             customer_name=args[0], customer_email=args[1], license_key=args[2],
-            machine_fingerprint=args[3], plan_name=plan.name if plan else args[4], expires_at=args[5]))
+            machine_fingerprint=args[3], plan_name=plan.name if plan else args[4], expires_at=args[5],
+            receipt=receipt))
         if sent:
             with session_scope() as session:
                 session.get(Customer, customer_id).license_email_sent_yn = "Y"
@@ -661,12 +758,15 @@ class CustomerService:
             customer.license_email_sent_yn = "N"
             customer.updated_at = _utcnow_naive()
             args = (customer.name, customer.email, token, customer.machine_fingerprint, customer.plan)
+            latest = (session.query(Order).filter_by(customer_id=customer_id, status="paid")
+                      .order_by(Order.id.desc()).first())
+            receipt = self._receipt_data(latest, customer, customer.plan, expires_at) if latest else None
         plan = get_plan(args[4])
         try:
             sent = bool(self.email_service.send_license_key_email(
                 customer_name=args[0], customer_email=args[1], license_key=args[2],
                 machine_fingerprint=args[3], plan_name=plan.name if plan else args[4],
-                expires_at=expires_at))
+                expires_at=expires_at, receipt=receipt))
         except Exception as e:
             logger.error("Re-issued license email for customer %s raised: %s", customer_id, e)
             sent = False

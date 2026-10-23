@@ -470,6 +470,57 @@ class TestCheckoutApi:
         assert body["email"] == "a***@example.com"
         assert "soft_key" not in body and "license" not in json.dumps(body).lower()
 
+    # ---- lifetime owners are refused BEFORE paying; yearly/monthly holders can renew ----
+    def _paid_customer(self, client, plan, amount):
+        from licensing import customer_service
+        _make_order(customer_service.get_customer_service(), plan=plan)
+        assert _post_webhook(client, _event("order_TESTAAAA01", amount=amount)).status_code == 200
+
+    @pytest.mark.parametrize("plan", ["monthly", "yearly", "lifetime"])
+    def test_lifetime_owner_cannot_start_another_purchase(self, client, plan):
+        self._paid_customer(client, "lifetime", 2499900)
+        resp = client.post("/api/create-order", json=self._form(plan=plan, email="buyer@example.com"))
+        assert resp.status_code == 400
+        assert "lifetime" in resp.get_json()["error"].lower()
+        assert self.StubGateway.created == []          # the gateway was never asked for money
+
+    @pytest.mark.parametrize("override", [
+        {"email": "other@example.com"}, {"machine_fingerprint": "cd" * 32}])
+    def test_lifetime_block_only_applies_to_the_same_email_and_machine(self, client, override):
+        self._paid_customer(client, "lifetime", 2499900)
+        resp = client.post("/api/create-order", json=self._form(**{"email": "buyer@example.com", **override}))
+        assert resp.status_code == 200, resp.get_json()
+
+    @pytest.mark.parametrize("plan", ["monthly", "yearly", "lifetime"])
+    def test_yearly_customer_may_renew_or_upgrade(self, client, plan):
+        self._paid_customer(client, "yearly", 999900)
+        resp = client.post("/api/create-order", json=self._form(plan=plan, email="buyer@example.com"))
+        assert resp.status_code == 200, resp.get_json()
+
+    def test_expired_yearly_customer_renews_from_today(self, client):
+        from licensing import customer_service
+        from licensing.customer_models import Customer, session_scope
+        svc = customer_service.get_customer_service()
+        self._paid_customer(client, "yearly", 999900)
+        with session_scope() as s:                      # pretend the first year ended 10 days ago
+            s.query(Customer).update({"plan_expires_at": datetime.utcnow() - timedelta(days=10)})
+
+        _make_order(svc, plan="yearly", order_id="order_TESTAAAA02")
+        assert _post_webhook(client, _event("order_TESTAAAA02", payment_id="pay_TWO")).status_code == 200
+
+        (customer,) = _customers()                      # same email + machine => same row
+        assert customer.plan == "yearly"
+        assert 364 <= (customer.plan_expires_at - datetime.utcnow()).days <= 367
+
+    def test_yearly_customer_upgrading_to_lifetime_gets_a_perpetual_license(self, client):
+        from licensing import customer_service
+        self._paid_customer(client, "yearly", 999900)
+        _make_order(customer_service.get_customer_service(), plan="lifetime", order_id="order_TESTAAAA02")
+        assert _post_webhook(client, _event("order_TESTAAAA02", payment_id="pay_TWO",
+                                            amount=2499900)).status_code == 200
+        (customer,) = _customers()
+        assert customer.plan == "lifetime" and customer.plan_expires_at is None
+
     def test_pages_render(self, client):
         page = client.get("/")
         assert page.status_code == 200

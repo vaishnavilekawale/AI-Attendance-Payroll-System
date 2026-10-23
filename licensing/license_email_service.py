@@ -8,6 +8,9 @@ Features:
 - SMTP (STARTTLS on 587 by default, implicit SSL on 465)
 - Multipart plain-text + HTML body
 - The token is also attached as a ready-to-use `license.lic` file
+- A payment receipt (PDF, see receipt_generator.py) is attached too, and the
+  payment details (receipt no, application id, transaction / payment id,
+  status, date, amount) are written in the message body
 - Plan name and expiry date shown in the message
 - Every customer-supplied value is HTML-escaped and stripped of line breaks
   before it goes into the message (no HTML / header injection through the
@@ -29,7 +32,9 @@ from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
-from typing import Optional
+from typing import Dict, Optional
+
+from .receipt_generator import build_receipt_pdf, receipt_rows
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +77,11 @@ class LicenseEmailService:
     def send_license_key_email(self, customer_name: str, customer_email: str,
                                license_key: str, machine_fingerprint: str,
                                plan_name: Optional[str] = None,
-                               expires_at: Optional[datetime] = None) -> bool:
+                               expires_at: Optional[datetime] = None,
+                               receipt: Optional[Dict[str, object]] = None) -> bool:
         """
-        Send the license token to the customer.
+        Send the license token (and, when `receipt` is given, the payment
+        receipt PDF + payment details) to the customer.
 
         Args:
             customer_name: Customer's name
@@ -83,6 +90,9 @@ class LicenseEmailService:
             machine_fingerprint: the fingerprint the token is bound to
             plan_name: e.g. "Yearly Plan" (optional, shown in the email)
             expires_at: UTC expiry, or None for a lifetime license
+            receipt: payment details for the receipt (CustomerService._receipt_data).
+                If the PDF cannot be built the email is still sent without it -
+                the license must never be held back by a receipt problem.
 
         Returns:
             bool: True if the message was accepted by the SMTP server
@@ -104,7 +114,7 @@ class LicenseEmailService:
                 return False
 
             msg = self._build_message(customer_name, customer_email, license_key,
-                                      machine_fingerprint, plan_name, expires_at)
+                                      machine_fingerprint, plan_name, expires_at, receipt=receipt)
             self._deliver(msg)
             logger.info("License key email sent to %s", customer_email)
             return True
@@ -192,31 +202,65 @@ class LicenseEmailService:
         return expires_at.astimezone(timezone.utc).strftime('%d %B %Y (UTC)')
 
     def _build_message(self, customer_name, customer_email, license_key,
-                       machine_fingerprint, plan_name, expires_at):
+                       machine_fingerprint, plan_name, expires_at, receipt=None):
         msg = MIMEMultipart('mixed')
-        msg['Subject'] = f'Your License Key - {_one_line(self.company_name)}'
+        subject = 'Payment Receipt & License Key' if receipt else 'Your License Key'
+        msg['Subject'] = f'{subject} - {_one_line(self.company_name)}'
         msg['From'] = formataddr((_one_line(self.sender_name), self.sender_email))
         msg['To'] = formataddr((_one_line(customer_name), customer_email))
 
         alternative = MIMEMultipart('alternative')
         alternative.attach(MIMEText(
             self._create_plain_text(customer_name, license_key, machine_fingerprint,
-                                    plan_name, expires_at), 'plain', 'utf-8'))
+                                    plan_name, expires_at, receipt), 'plain', 'utf-8'))
         alternative.attach(MIMEText(
             self._create_email_template(customer_name, license_key, machine_fingerprint,
-                                        plan_name, expires_at), 'html', 'utf-8'))
+                                        plan_name, expires_at, receipt), 'html', 'utf-8'))
         msg.attach(alternative)
 
         attachment = MIMEApplication(license_key.strip().encode('utf-8'), Name='license.lic')
         attachment['Content-Disposition'] = 'attachment; filename="license.lic"'
         msg.attach(attachment)
+
+        if receipt:
+            try:
+                pdf = build_receipt_pdf(receipt)
+                number = re.sub(r"[^A-Za-z0-9_-]", "", str(receipt.get('receipt_no') or 'receipt'))
+                part = MIMEApplication(pdf, _subtype='pdf')
+                part.add_header('Content-Disposition', 'attachment', filename=f'Receipt-{number}.pdf')
+                msg.attach(part)
+            except Exception as e:  # never hold back the license over a receipt problem
+                logger.error("Could not build the payment receipt PDF: %s", e)
         return msg
 
+    @staticmethod
+    def _receipt_plain_text(receipt) -> str:
+        if not receipt:
+            return ""
+        lines = "".join(f"  {label + ':':<22}{value}\n" for label, value in receipt_rows(receipt))
+        return f"PAYMENT DETAILS (receipt PDF attached)\n{lines}\n"
+
+    @staticmethod
+    def _receipt_html(receipt) -> str:
+        if not receipt:
+            return ""
+        rows = "".join(
+            f'<tr><td style="padding:3px 14px 3px 0;"><strong>{_esc(label)}</strong></td>'
+            f'<td style="padding:3px 0;">{_esc(value)}</td></tr>'
+            for label, value in receipt_rows(receipt))
+        return (
+            '<div style="background:#fff;border-radius:8px;padding:12px 18px;margin:18px 0;">'
+            '<h3 style="margin:0 0 8px 0;color:#4f46e5;">Payment details</h3>'
+            f'<table style="font-size:14px;">{rows}</table>'
+            '<p style="margin:8px 0 0 0;font-size:12px;color:#64748b;">'
+            'A PDF copy of this receipt is attached.</p></div>')
+
     def _create_plain_text(self, customer_name, license_key, machine_fingerprint,
-                           plan_name, expires_at) -> str:
+                           plan_name, expires_at, receipt=None) -> str:
         return (
             f"Dear {_one_line(customer_name)},\n\n"
             f"Thank you for your purchase. Your payment was received and your license is ready.\n\n"
+            f"{self._receipt_plain_text(receipt)}"
             f"Plan:    {_one_line(plan_name) or 'Standard'}\n"
             f"Expires: {self._format_expiry(expires_at)}\n"
             f"Machine: {_one_line(machine_fingerprint)[:16]}... (the computer this license is bound to)\n\n"
@@ -238,8 +282,9 @@ class LicenseEmailService:
 
     def _create_email_template(self, customer_name: str, license_key: str,
                                machine_fingerprint: str, plan_name: Optional[str] = None,
-                               expires_at: Optional[datetime] = None) -> str:
+                               expires_at: Optional[datetime] = None, receipt=None) -> str:
         """HTML email body. Every interpolated value is escaped."""
+        receipt_block = self._receipt_html(receipt)
         current_date = datetime.now().strftime('%B %d, %Y')
         name = _esc(customer_name)
         plan = _esc(plan_name) or "Standard"
@@ -289,6 +334,8 @@ class LicenseEmailService:
     <tr><td><strong>Valid until</strong></td><td>{expiry}</td></tr>
     <tr><td><strong>Bound to machine</strong></td><td><code>{fingerprint_short}&hellip;</code></td></tr>
   </table>
+
+  {receipt_block}
 
   <div class="license-box">
     <h3 style="margin:0;">Your License Key</h3>

@@ -22,6 +22,7 @@ Routes:
 - DELETE /vendor/customers/<id>          delete
 - POST   /vendor/customers/<id>/resend   re-send the license email
 - POST   /vendor/customers/<id>/reissue  re-sign + email the current license (after a key rotation)
+- GET    /vendor/orders/<order_id>/receipt.pdf   the PDF payment receipt of a paid order
 - GET    /vendor/trials                  who is on a free trial: admin, email, company, started, days left
 - GET    /vendor/stats                   counts
 - POST   /vendor/activate                called by an installed app after activation (public)
@@ -30,6 +31,7 @@ Routes:
 import hmac
 import logging
 import os
+import re
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, Response
@@ -200,6 +202,26 @@ def reissue_license(customer_id):
         return _error(str(e), 400)
     except Exception as e:
         logger.error("Error re-issuing license for %s: %s", customer_id, e)
+        return _error(str(e), 500)
+
+
+_ORDER_ID_RE = re.compile(r"^order_[A-Za-z0-9_]{6,40}$")
+
+
+@vendor_bp.route('/orders/<order_id>/receipt.pdf', methods=['GET'])
+@admin_required
+def order_receipt(order_id):
+    """Download the PDF payment receipt of a PAID order (the same one emailed to the customer)."""
+    if not _ORDER_ID_RE.match(order_id):
+        return _error('Unknown order', 404)
+    try:
+        pdf = get_customer_service().get_receipt_pdf(order_id)
+        if pdf is None:
+            return _error('Order not found or not paid', 404)
+        return Response(pdf, mimetype='application/pdf',
+                        headers={'Content-Disposition': f'inline; filename="receipt-{order_id}.pdf"'})
+    except Exception as e:
+        logger.error("Error building receipt for %s: %s", order_id, e)
         return _error(str(e), 500)
 
 
