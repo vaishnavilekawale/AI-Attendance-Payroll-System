@@ -447,4 +447,8 @@ def test_login_form_url_and_tab_memory(client):
     html = client.get('/login?role=employee').data
     assert b'loginForm.action = loginUrl' in html          # role kept in form URL
     assert b"sessionStorage.setItem('loginRole'" in html   # tab remembered in the browser tab
-    assert b'const serverRole = ""' in html                # GET: no server override
+    assert b'const serverRole = "employee"' in html        # ?role= in the URL is honoured
+
+    # Plain GET /login: no server override, so the remembered tab can be used.
+    plain = client.get('/login').data
+    assert b'const serverRole = ""' in plain
