@@ -100,6 +100,9 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 - **Tamper-resistant 30-day trial** (stored in several places; winding the clock back revokes the trial)
 - **CSRF protection** on all state-changing routes
 - **Rate-limited login and password flows** (login: 10/minute and 50/hour; password/reset/setup routes: 5/minute)
+- **Login lockout** — 5 wrong passwords lock that username + IP for 15 min, then 30, then 60 min (locks expire by themselves; an admin can unlock an employee early). See [Login security](#-login-security)
+- **Login audit log** — every success / failure / lock / unlock is recorded; admins can filter it and **download it as a PDF**
+- **Generic login errors** (no hint whether an Employee ID or username exists), **idle timeout** (30 min by default) and session-fixation protection
 - Werkzeug password hashing
 
 ### 💾 Operations
@@ -181,6 +184,7 @@ Created automatically on first start (`db.create_all()` plus small, safe column 
 | `admins` | Admin accounts (hashed passwords, forced-password-change flag) |
 | `employees` · `employee_login` | Employee master data, salary structure, statutory numbers (PAN / UAN / PF), login credentials |
 | `biometric_consent_log` | Per-employee face-data consent record |
+| `login_lockouts` · `login_audit` | Failed-login counters / temporary locks, and the append-only login audit trail |
 | `attendance` · `attendance_activities` | One row per employee per day, plus every IN/OUT pair |
 | `logout_approval_requests` | Auto-logout requests awaiting manager/admin approval |
 | `attendance_settings_history` · `working_hours` · `settings` · `company_settings` | Versioned attendance rules, office hours, company details |
@@ -195,7 +199,7 @@ The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licen
 | **Kiosk** | `/` (public, auto-scan), `POST /api/auto-scan-attendance` |
 | **Auth** | `/login` (admin and employee tabs), `/logout`, `/forgot-password`, `/employee-forgot-password`, `/change-password`, `/employee-change-password` |
 | **Setup & license** | `/setup/` (admin → company → license → done), `/license` (lock screen), `/license/activate` |
-| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll`, `/payroll-settings`, `/reports`, `/settings`, `/admin/approvals`, `/admin/pending-manual-attendance` |
+| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll`, `/payroll-settings`, `/reports`, `/settings`, `/admin/approvals`, `/admin/pending-manual-attendance`, `/admin/login-audit` (+ `/admin/login-audit/pdf`), `POST /employees/<id>/unlock` |
 | **Manager** | `/manager/approvals`, `/manager/pending-manual-attendance`, `/manager/edit-attendance/<id>` |
 | **Employee** | `/employee-dashboard`, `/employee-attendance`, `/employee-payroll`, `/employee-reports`, `/employee-profile` |
 
@@ -439,6 +443,7 @@ SUPPORT_EMAIL=your@gmail.com
 | `MAIL_*` | Only for email | Without valid SMTP credentials payslip/reset emails fail and log an error; everything else still works. For Gmail use an **App Password**. |
 | `DATABASE_URL` | No | Default is SQLite — right for a single-site install. |
 | `WORKING_HOURS_PER_DAY`, `OVERTIME_*`, `LATE_DEDUCTION_*` | No | Default salary rules; also editable later in Settings. |
+| `SESSION_IDLE_MINUTES` | No | Logs an admin/employee out after this many minutes with no page request. Default `30`. The public kiosk page is not affected. |
 | `FACE_RECOGNITION_TOLERANCE` | No | Admin-tunable, but can only make matching **stricter** than the built-in `0.30` ceiling, never looser. |
 | `FACE_DATA_ENCRYPTION_KEY` | Auto | Managed by `crypto_utils.py`. **Back it up.** |
 | `LICENSE_PURCHASE_URL` | No | Address of your vendor portal; powers the **Buy a license** button on the lock screen (the machine fingerprint is appended automatically). |
@@ -550,6 +555,26 @@ On first run the app creates `instance/attendance.db`, `dataset/`, `uploads/` an
 2. **Employees** are marked present by the kiosk screen, or log in and use **My Attendance**.
 3. At **23:59** anyone who never punched out gets a logout approval request → **manager/admin** approves or rejects it.
 4. On the **1st of every month** payroll for the previous month is generated, payslip PDFs are created and emailed.
+
+### 🔒 Login security
+
+| Feature | How it behaves |
+| --- | --- |
+| **Lockout** | **5** wrong passwords for the same *role + username + IP* lock the login. The first lock lasts **15 min**, the next **30 min**, then **60 min** (60 repeats). The level resets after 24 hours without a failed attempt. |
+| **Always expires** | Nobody is locked out permanently. The lock is per username **and** IP, so someone guessing an admin's password only locks their own computer — the real admin can still log in from another PC. |
+| **Same counter everywhere** | `/login` and the public kiosk *manual attendance* login share one counter, so the kiosk can't be used to get around the lockout. |
+| **Unlock early** | Admin → **Employees** → **Unlock login** button next to a locked employee. |
+| **Generic errors** | Admin: *Invalid username or password.* Employee: *Invalid Employee ID or password.* The same text is shown for an unknown ID, a wrong password or an expired temporary password, so nobody can discover which IDs exist. After a failed attempt you **stay on the same tab** (Admin / Employee). |
+| **Idle timeout** | After `SESSION_IDLE_MINUTES` (default 30) without opening a page the user is signed out. The absolute session limit is 8 hours. |
+| **Session safety** | A fresh session is created at every login (no session fixation); the "Remember me" box and the hard-coded default-credentials hint were removed from the login page. |
+
+**Login Audit Log** — Admin → **Settings → Login Audit Log** (`/admin/login-audit`):
+
+- Shows who is **currently locked** and until when, then the recent events (`success`, `failed`, `locked`, `blocked`, `unlocked`) with time, role, username/ID and IP address.
+- Filter by **Date** (today by default, any day, or *All dates*), **Role** and **Event**.
+- **Download PDF** exports exactly what the filters show (company header, summary counts, event table; up to 5,000 newest rows). The PDF is built in memory and never saved on the server.
+
+> ℹ️ The lockout uses the address Flask sees as the client (`request.remote_addr`). If you ever put the app behind a reverse proxy, configure `ProxyFix` (see the notes in `config.py`), otherwise every user appears to come from the proxy's IP address.
 
 ---
 
@@ -1003,6 +1028,20 @@ The vendor portal found no Razorpay keys and `VENDOR_DEV_MODE` is not `true`, so
 
 `LICENSE_PURCHASE_URL` in the customer's `.env` must be the public HTTPS address of **your** portal. `http://127.0.0.1:8000` only works on the machine that runs the portal.
 
+### Login
+
+**⛔ "Too many failed attempts. Try again in N minutes."**
+
+That username was typed wrongly 5 times from this computer, so it is locked for 15 / 30 / 60 minutes (it unlocks by itself). An admin can clear an **employee** lock at once: **Employees → Unlock login**. For a locked **admin**, wait for the time shown, or sign in from another computer. Every event is listed under **Settings → Login Audit Log**.
+
+**⏱ "Your session expired due to inactivity"**
+
+You were signed out after `SESSION_IDLE_MINUTES` (default 30) without opening a page. Log in again, or raise the value in `.env`.
+
+**🙋 "Invalid Employee ID or password" although the ID exists**
+
+By design the message is the same for every failure. Check the password (the first one is the temporary password issued when the admin added the employee), use **Forgot Password** to get a new temporary one, and ask the admin to confirm the account is active.
+
 ### Files, camera and face recognition
 
 **👤 A registered employee suddenly "disappears" from face recognition (log says `Loaded face recognition data with N employees` with a smaller N)**
@@ -1081,7 +1120,7 @@ If the admin (or the employee, from the portal) set a custom payslip password, t
 
 ## 14. 🧪 Running the Tests
 
-The project ships with a pytest suite (about 600 tests: auth, employees, attendance rules, payroll maths, PDF payslips, scheduler, licensing and trial logic, rate limiting, face-matching logic and more).
+The project ships with a pytest suite (about 660 tests: auth, login lockout / audit log, employees, attendance rules, payroll maths, PDF payslips, scheduler, licensing and trial logic, rate limiting, face-matching logic and more).
 
 ```
 venv\Scripts\activate
@@ -1200,6 +1239,7 @@ Please read this before selling or deploying to a customer. The project is suita
 | **Payroll** | PF, ESIC, Professional Tax and TDS are configurable **percentages**. There are no Indian income-tax slabs, and statutory rules differ by state and year | Have an accountant / CA verify the payroll maths for every customer. The software is a calculation aid, not tax advice |
 | **Single machine** | Default setup is one PC with SQLite and a local face model | Use [MySQL](#16--using-mysql--phpmyadmin) and a proper server design for multi-site needs |
 | **Offline licensing** | A determined reverse-engineer of a packaged `.exe` can patch out any offline license check | Keep the private key safe; combine licensing with the EULA |
+| **Login lockout / audit** | Locks are per username + IP; behind a reverse proxy all users share the proxy's IP unless `ProxyFix` is configured. The audit log is not purged automatically | Configure `ProxyFix` when using a proxy; export the PDF and clear old rows if the table grows large |
 | **Scheduler** | Jobs run only while the app is running (missed ones are back-filled on next start) | Tell customers to keep the app running during office hours |
 | **Installer trust** | Without code signing Windows SmartScreen shows "unknown publisher" | Buy a code-signing certificate |
 | **Build verification** | `attendance_app.spec` documents that the packaged build must be verified on a clean PC | Do it (below) before every release |
@@ -1230,11 +1270,12 @@ Please read this before selling or deploying to a customer. The project is suita
 | `database.py` · `models.py` · `extensions.py` | DB init/migrations, ORM models (Admin, Employee, Attendance, AttendanceActivity, Payroll, Settings, LogoutApprovalRequest, BiometricConsentLog, …), Flask extensions |
 | `auth_routes.py` · `attendance_routes.py` · `payroll_routes.py` · `reports_routes.py` · `approvals_routes.py` · `settings_routes.py` · `employees.py` | Blueprints (every route lives in one of them) |
 | `auth_decorators.py` · `auth_helpers.py` · `file_helpers.py` | Login/role decorators, admin-creation helpers, safe file handling |
+| `login_security.py` | Failed-login lockout (15/30/60 min, auto-expiring), unlock, and login audit logging — shared by `/login` and the kiosk manual-attendance login |
 | `setup_wizard.py` | First-run admin / company / license setup |
 | `attendance.py` · `payroll.py` | Attendance-rule and payroll engines |
 | `ai_engine.py` · `face_recognition_singleton.py` | Face detection/recognition, strict matching, presence tracker, embedding cache |
 | `crypto_utils.py` | Encryption for face photos and stored payslip passwords |
-| `pdf_generator.py` · `email_service.py` | PDF payslips/reports (AES-256), SMTP delivery |
+| `pdf_generator.py` · `email_service.py` | PDF payslips, attendance/admin reports and the Login Audit PDF (payslips AES-256), SMTP delivery |
 | `scheduler_service.py` | APScheduler: monthly payroll, 23:59 auto-logout approvals, weekly backup, startup reconciliation and catch-up |
 | `backup_manager.py` | Backup creation, external copy, pruning and catch-up detection |
 | `services/` | `admin_reports_service`, `approval_service`, `attendance_calculator`, `attendance_stats`, `app_services` |
@@ -1248,7 +1289,7 @@ Please read this before selling or deploying to a customer. The project is suita
 | `instance/` · `dataset/` · `uploads/` · `backups/` · `trained_model/` · `logs/` | Runtime data (git-ignored). `trained_model/face_data.pkl` is the list of employees the recogniser knows; `embeddings_cache.pkl` is a speed-up cache |
 | `requirements.txt` · `requirements-packaging.txt` | Runtime vs build-only dependencies |
 | `.env.example` | Template for your `.env` settings file |
-| `tests/` · `conftest.py` | Pytest suite (about 600 tests) and shared fixtures; `conftest.py` isolates the database **and** face storage from your real data |
+| `tests/` · `conftest.py` | Pytest suite (about 660 tests) and shared fixtures; `conftest.py` isolates the database **and** face storage from your real data |
 | `.github/workflows/ci.yml` | GitHub Actions: installs dependencies and runs `pytest tests/` on every push / pull request |
 | `licensing/*.md` · `licensing/EULA.txt` | `VENDOR_PORTAL_SETUP.md`, `VENDOR_SYSTEM_GUIDE.md`, `USER_MANUAL.md`, `USER_MANUAL_OUTLINE.md`, and the end-user licence agreement |
 | `licensing/vendor_templates/` | Purchase page and thank-you page of the vendor portal |
