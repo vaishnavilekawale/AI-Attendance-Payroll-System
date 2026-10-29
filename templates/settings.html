@@ -412,10 +412,10 @@
                     </div>
                     <div class="card-body">
                         <p class="small text-muted">
-                            Add another administrator account. Existing admins are
-                            unaffected — this only creates a new one.
+                            See admin accounts, unlock a locked admin, or add another
+                            administrator. Existing admins are unaffected.
                         </p>
-                        <a href="{{ url_for('auth.create_admin') }}" class="btn btn-outline-primary btn-sm">
+                        <a href="{{ url_for('auth.manage_admins') }}" class="btn btn-outline-primary btn-sm">
                             <i class="bi bi-person-plus"></i> Manage Admins
                         </a>
                         <a href="{{ url_for('auth.login_audit') }}" class="btn btn-outline-secondary btn-sm ms-1">

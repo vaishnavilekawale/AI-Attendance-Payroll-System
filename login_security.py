@@ -14,20 +14,28 @@ Policy
 * The escalation level resets after 24 h without a failed attempt.
 * Locks are per username+IP, so an attacker only locks their own IP.
 * An admin can clear an employee's lock early (see employees.unlock_employee).
+* Another admin can unlock a locked admin (Manage Admins page), and a locked
+  admin can unlock themselves with a one-time link sent to their registered
+  email. Neither path touches the password, so neither is a way around it.
 """
+import hashlib
 import logging
+import secrets
 from datetime import timedelta
 
 from flask import request
 
 from database import db
-from models import LoginLockout, LoginAudit, now_ist
+from models import LoginLockout, LoginAudit, AdminUnlockToken, now_ist
 
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 5
 LOCK_MINUTES = (15, 30, 60)          # escalating; the last value repeats
 LEVEL_RESET_AFTER = timedelta(hours=24)
+
+UNLOCK_TOKEN_MINUTES = 30            # how long an "Unlock via email" link works
+UNLOCK_EMAIL_COOLDOWN_MINUTES = 5    # at most one unlock email per admin per 5 min
 
 
 def client_ip():
@@ -106,8 +114,80 @@ def record_success(role, username):
     log_event(role, username, 'success')
 
 
-def unlock(role, username):
-    """Clear every lock/counter for a username (all IPs). Used by the admin Unlock button."""
+def unlock(role, username, by=None):
+    """
+    Clear every lock/counter for a username (all IPs). Used by the admin
+    Unlock buttons and the email unlock link. `by` (e.g. "admin2" or "email")
+    is added to the audit log row so you can see who unlocked whom.
+    """
     LoginLockout.query.filter_by(role=role, username=_key(username)).delete()
     db.session.commit()
-    log_event(role, username, 'unlocked')
+    label = f"{username} (by {by})" if by else username
+    log_event(role, label, 'unlocked')
+
+
+def locked_until_by_username(role):
+    """{lower-cased username: latest locked_until} for every active lock of this role (any IP)."""
+    result = {}
+    now = now_ist()
+    for rec in LoginLockout.query.filter(LoginLockout.role == role,
+                                         LoginLockout.locked_until > now).all():
+        if rec.username not in result or rec.locked_until > result[rec.username]:
+            result[rec.username] = rec.locked_until
+    return result
+
+
+# ---------------------------------------------------------------- email unlock
+
+def _hash_token(raw):
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()
+
+
+def create_unlock_token(admin):
+    """
+    Create a one-time unlock token for this admin and return the raw token
+    (to put in the email link). Returns None when an unlock email was already
+    requested in the last UNLOCK_EMAIL_COOLDOWN_MINUTES (anti-spam).
+    """
+    now = now_ist()
+    recent = AdminUnlockToken.query.filter(
+        AdminUnlockToken.admin_id == admin.id,
+        AdminUnlockToken.created_at > now - timedelta(minutes=UNLOCK_EMAIL_COOLDOWN_MINUTES),
+    ).first()
+    if recent:
+        return None
+
+    raw = secrets.token_urlsafe(32)
+    db.session.add(AdminUnlockToken(
+        admin_id=admin.id,
+        token_hash=_hash_token(raw),
+        expires_at=now + timedelta(minutes=UNLOCK_TOKEN_MINUTES),
+    ))
+    db.session.commit()
+    return raw
+
+
+def discard_unlock_token(raw):
+    """Delete a token whose email could not be sent, so the cooldown does not block a retry."""
+    AdminUnlockToken.query.filter_by(token_hash=_hash_token(raw)).delete()
+    db.session.commit()
+
+
+def find_valid_unlock_token(raw):
+    """The AdminUnlockToken row if `raw` is known, unused and not expired; otherwise None."""
+    if not raw:
+        return None
+    tok = AdminUnlockToken.query.filter_by(token_hash=_hash_token(raw)).first()
+    if tok is None or tok.used_at is not None or tok.expires_at < now_ist():
+        return None
+    return tok
+
+
+def consume_unlock_token(tok):
+    """Mark a token as used (one-time) and drop any other tokens still open for that admin."""
+    tok.used_at = now_ist()
+    AdminUnlockToken.query.filter(
+        AdminUnlockToken.admin_id == tok.admin_id,
+        AdminUnlockToken.used_at.is_(None),
+    ).delete(synchronize_session=False)
+    db.session.commit()

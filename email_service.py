@@ -60,6 +60,177 @@ class EmailService:
             self.default_sender or "NOT SET"
         )
 
+    def is_configured(self):
+        """True when SMTP credentials are available (Admin Settings or .env)."""
+        self._load_config()
+        return bool(self.smtp_username and self.smtp_password)
+
+    def send_admin_unlock_link(self, to_email, admin_username, unlock_link, minutes):
+        """Send the one-time "unlock my login" link to a locked admin."""
+        from html import escape
+        subject = f"Unlock Your Admin Login - {self.company_name}"
+        safe_user = escape(admin_username)
+        safe_link = escape(unlock_link, quote=True)
+
+        # Plain-text version
+        text_body = f"""
+Unlock Your Admin Login
+
+Dear Administrator,
+
+Your {self.company_name} admin account was locked after too many wrong password attempts.
+
+Username: {admin_username}
+
+Open this link and press "Unlock my login":
+{unlock_link}
+
+Important Security Information:
+- This link can be used only once.
+- This link will expire in {minutes} minutes.
+- It only removes the login lock. Your password is NOT changed.
+- You still need to sign in with your normal password.
+
+If you did not request this, please ignore this email. If you keep receiving it, contact your system administrator.
+
+(c) {self.company_name}. All rights reserved.
+This is an automated email. Please do not reply.
+"""
+
+        # HTML version (same look as the other system emails)
+        html_body = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Unlock Your Admin Login</title>
+            <style>
+                body {{
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    background-color: #f4f4f4;
+                    margin: 0;
+                    padding: 20px;
+                }}
+                .container {{
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background-color: #ffffff;
+                    border-radius: 10px;
+                    overflow: hidden;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 30px;
+                    text-align: center;
+                }}
+                .header h1 {{
+                    margin: 0;
+                    font-size: 24px;
+                    font-weight: 600;
+                }}
+                .content {{
+                    padding: 30px;
+                }}
+                .content h2 {{
+                    color: #1e3c72;
+                    font-size: 20px;
+                    margin-top: 0;
+                }}
+                .info-box {{
+                    background-color: #f8f9fa;
+                    border-left: 4px solid #667eea;
+                    padding: 20px;
+                    margin: 20px 0;
+                    border-radius: 5px;
+                }}
+                .info-box p {{
+                    margin: 10px 0;
+                    font-size: 16px;
+                }}
+                .btn-wrap {{
+                    text-align: center;
+                    margin: 25px 0;
+                }}
+                .btn {{
+                    display: inline-block;
+                    background-color: #667eea;
+                    color: #ffffff !important;
+                    padding: 14px 32px;
+                    border-radius: 6px;
+                    text-decoration: none;
+                    font-size: 16px;
+                    font-weight: 600;
+                }}
+                .link-fallback {{
+                    font-size: 13px;
+                    color: #6c757d;
+                    word-break: break-all;
+                    text-align: center;
+                }}
+                .important {{
+                    background-color: #fff3cd;
+                    border-left: 4px solid #ffc107;
+                    padding: 15px;
+                    margin: 20px 0;
+                    border-radius: 5px;
+                }}
+                .footer {{
+                    background-color: #f8f9fa;
+                    padding: 20px;
+                    text-align: center;
+                    color: #6c757d;
+                    font-size: 14px;
+                    border-top: 1px solid #e9ecef;
+                }}
+                .footer p {{
+                    margin: 5px 0;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>{self.company_name}</h1>
+                </div>
+                <div class="content">
+                    <h2>Unlock Your Admin Login</h2>
+                    <p>Dear Administrator,</p>
+                    <p>Your {self.company_name} admin account was locked after too many wrong password attempts.</p>
+
+                    <div class="info-box">
+                        <p><strong>Username:</strong> {safe_user}</p>
+                    </div>
+
+                    <div class="btn-wrap">
+                        <a class="btn" href="{safe_link}">Unlock My Login</a>
+                    </div>
+                    <p class="link-fallback">If the button does not work, copy and paste this link into your browser:<br>{safe_link}</p>
+
+                    <div class="important">
+                        <p><strong>Important Security Information:</strong></p>
+                        - This link can be used <strong>only once</strong>.<br>
+                        - This link will expire in {minutes} minutes.<br>
+                        - It only removes the login lock. <strong>Your password is not changed.</strong><br>
+                        - You still need to sign in with your normal password.
+                    </div>
+
+                    <p>If you did not request this, please ignore this email. If you keep receiving it, contact your system administrator.</p>
+                </div>
+                <div class="footer">
+                    <p>&copy; {self.company_name}. All rights reserved.</p>
+                    <p>This is an automated email. Please do not reply.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(to_email, subject, html_body, text_body)
+
     def send_email(self, to_email, subject, html_body, text_body=None, attachments=None):
         """
         Send an email with a proper multipart/mixed + multipart/alternative

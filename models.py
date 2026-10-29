@@ -634,6 +634,25 @@ class LoginLockout(db.Model):
     __table_args__ = (db.UniqueConstraint('role', 'username', 'ip', name='uq_login_lockout'),)
 
 
+class AdminUnlockToken(db.Model):
+    """
+    One-time "Unlock via email" link for a locked admin.
+
+    Only a SHA-256 hash of the token is stored (the real token exists only in
+    the email). A token can be used once and expires after a short time.
+    Using it only clears the login lock - it never changes or bypasses the
+    password.
+    """
+    __tablename__ = 'admin_unlock_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    admin_id = db.Column(db.Integer, db.ForeignKey('admins.id'), nullable=False, index=True)
+    token_hash = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=now_ist, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime)
+
+
 class LoginAudit(db.Model):
     """Append-only record of login events (success / failed / locked / blocked / unlocked)."""
     __tablename__ = 'login_audit'

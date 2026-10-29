@@ -54,13 +54,30 @@ GENERIC_LOGIN_ERROR = GENERIC_LOGIN_ERRORS['admin']
 _DUMMY_HASH = generate_password_hash('not-a-real-password')
 
 
+def _locked_login_page(role, username):
+    """
+    Login page shown while this username+IP is locked. For admins it also
+    offers "Unlock via email", but only when SMTP is configured. The button
+    is shown for ANY locked admin username (existing or not), so it never
+    reveals which usernames exist.
+    """
+    email_ok = False
+    if role == 'admin':
+        try:
+            email_ok = EmailService().is_configured()
+        except Exception:
+            email_ok = False
+    return render_template('login.html', selected_role=role,
+                           unlock_username=username if email_ok else None)
+
+
 def _login_failed(role, username):
     """Count the failure (may lock the username+IP) and show the right message."""
     locked_for = ls.record_failure(role, username)
     if locked_for:
         flash(f'Too many failed attempts. Try again in {locked_for} minutes.', 'danger')
-    else:
-        flash(GENERIC_LOGIN_ERRORS.get(role, GENERIC_LOGIN_ERROR), 'danger')
+        return _locked_login_page(role, username)
+    flash(GENERIC_LOGIN_ERRORS.get(role, GENERIC_LOGIN_ERROR), 'danger')
     return render_template('login.html', selected_role=role)
 
 
@@ -104,7 +121,7 @@ def login():
         if wait:
             ls.log_event(role, username, 'blocked')
             flash(f'Too many failed attempts. Try again in {wait} minutes.', 'danger')
-            return render_template('login.html', selected_role=role)
+            return _locked_login_page(role, username)
 
         if role == 'admin':
             # Admin authentication
@@ -506,6 +523,102 @@ def create_admin():
             return redirect(url_for('settings.settings'))
 
     return render_template('register.html', creating_additional_admin=True)
+
+# ==================== MANAGE ADMINS / UNLOCK ====================
+
+@auth_bp.route('/admin/manage-admins')
+@login_required
+@admin_required
+def manage_admins():
+    """
+    List admin accounts with their lock status. Another admin can unlock a
+    locked admin from here (never themselves). With only one admin there is
+    nobody who could unlock them, so a hint asks for a second admin.
+    """
+    admins = Admin.query.order_by(Admin.username).all()
+    locks = ls.locked_until_by_username('admin')
+    rows = [{'admin': a, 'locked_until': locks.get(a.username.strip().lower())} for a in admins]
+    return render_template('manage_admins.html', rows=rows,
+                           admin_count=len(admins),
+                           current_admin_id=session.get('admin_id'))
+
+
+@auth_bp.route('/admin/<int:admin_id>/unlock', methods=['POST'])
+@login_required
+@admin_required
+def unlock_admin(admin_id):
+    """Clear another admin's failed-login lock early (it also expires by itself)."""
+    target = Admin.query.get_or_404(admin_id)
+    if target.id == session.get('admin_id'):
+        flash('You cannot unlock your own account. Ask another admin, or use '
+              '"Unlock via email" on the login page.', 'warning')
+        return redirect(url_for('auth.manage_admins'))
+    ls.unlock('admin', target.username, by=session.get('admin_username') or 'admin')
+    flash(f'Login unlocked for admin "{target.username}".', 'success')
+    return redirect(url_for('auth.manage_admins'))
+
+
+@auth_bp.route('/admin/unlock-request', methods=['POST'])
+@limiter.limit("3 per minute, 10 per hour")
+def admin_unlock_request():
+    """
+    "Unlock via email": send a one-time unlock link to the locked admin's
+    registered email. The reply is always the same, whether or not the
+    account exists, so it cannot be used to discover usernames.
+    """
+    username = request.form.get('username', '').strip()
+    generic = ('If this admin account exists and has a registered email, an unlock link '
+               f'has been sent. The link works once and expires in {ls.UNLOCK_TOKEN_MINUTES} minutes.')
+
+    # Only for a username+IP that is really locked right now.
+    if username and ls.minutes_left('admin', username):
+        admin = Admin.query.filter(func.lower(Admin.username) == username.lower()).first()
+        if admin and admin.email:
+            raw = ls.create_unlock_token(admin)     # None => one was sent recently
+            if raw:
+                link = url_for('auth.admin_unlock_confirm', token=raw, _external=True)
+                try:
+                    result = EmailService().send_admin_unlock_link(
+                        admin.email, admin.username, link, ls.UNLOCK_TOKEN_MINUTES)
+                    sent = bool(result.get('success'))
+                except Exception:
+                    sent = False
+                if not sent:
+                    ls.discard_unlock_token(raw)
+                    flash('Could not send the unlock email. Please wait for the lock '
+                          'to expire or ask another admin to unlock you.', 'danger')
+                    return redirect(url_for('auth.login'))
+                ls.log_event('admin', f'{admin.username} (unlock email)', 'unlock_email')
+    flash(generic, 'info')
+    return redirect(url_for('auth.login'))
+
+
+@auth_bp.route('/admin/unlock/<token>', methods=['GET', 'POST'])
+@limiter.limit("20 per minute")
+def admin_unlock_confirm(token):
+    """
+    Landing page of the emailed link. GET only shows a confirm button (mail
+    scanners often open links, which must not use up the one-time token);
+    POST clears the lock. The password is never changed.
+    """
+    tok = ls.find_valid_unlock_token(token)
+    if tok is None:
+        flash('This unlock link is invalid, already used, or expired.', 'danger')
+        return redirect(url_for('auth.login'))
+
+    admin = db.session.get(Admin, tok.admin_id)
+    if admin is None:
+        flash('This unlock link is invalid, already used, or expired.', 'danger')
+        return redirect(url_for('auth.login'))
+
+    if request.method == 'POST':
+        ls.unlock('admin', admin.username, by='email link')
+        ls.consume_unlock_token(tok)
+        flash('Your login is unlocked. Please sign in with your password.', 'success')
+        return redirect(url_for('auth.login'))
+
+    return render_template('admin_unlock.html', username=admin.username, token=token)
+
 
 # ==================== LOGIN AUDIT (ADMIN) ====================
 
