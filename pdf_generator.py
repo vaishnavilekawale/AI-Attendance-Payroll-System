@@ -1918,3 +1918,122 @@ class PDFGenerator:
         doc.build(story, canvasmaker=_make_numbered_canvas(company_name, 'Attendance Report', pagesize))
 
         return output_path
+
+    def generate_login_audit_report(self, entries, filters, output_path, company_settings=None,
+                                    total=None, limit=None, generated_by=''):
+        """Login Audit Log PDF (Settings > Login Audit Log > Download PDF).
+
+        Args:
+            entries: LoginAudit rows (already filtered, newest first)
+            filters: ordered {label: value} dict describing the applied filters
+            output_path: file path OR a file-like object (e.g. io.BytesIO) - the
+                         route uses BytesIO so audit data is never left on disk
+            company_settings: Optional Settings object (Config fallback if None)
+            total / limit: matching row count and the export cap, used to print a
+                           "showing newest N of M" note when the cap was hit
+            generated_by: admin username shown in the header card
+        """
+        pagesize = landscape(A4)
+        doc = SimpleDocTemplate(
+            output_path, pagesize=pagesize,
+            rightMargin=30, leftMargin=30, topMargin=40, bottomMargin=50
+        )
+        available_width = pagesize[0] - 60
+
+        if company_settings and hasattr(company_settings, 'company_name'):
+            company_name = company_settings.company_name
+            company_logo = company_settings.company_logo
+        else:
+            company_name = self.company_name
+            company_logo = self.company_logo
+
+        company_header_style = ParagraphStyle(
+            'CompanyHeader', parent=self.styles['Normal'], fontSize=18, leading=22,
+            fontName='Helvetica-Bold', textColor=_tc('ink'), alignment=TA_LEFT, spaceAfter=2)
+        report_title_style = ParagraphStyle(
+            'ReportTitle', parent=self.styles['Normal'], fontSize=9, leading=12,
+            fontName='Helvetica-Bold', textColor=_tc('accent'), alignment=TA_LEFT, spaceAfter=2)
+        sub_style = ParagraphStyle(
+            'ReportSub', parent=self.styles['Normal'], fontSize=8, leading=11,
+            fontName='Helvetica', textColor=_tc('muted'), alignment=TA_LEFT)
+        normal_style = ParagraphStyle(
+            'CustomNormal', parent=self.styles['Normal'], fontSize=9, spaceAfter=5)
+
+        generated = datetime.now().strftime('%d %b %Y, %H:%M')
+        company_content = [
+            Paragraph(company_name, company_header_style),
+            Paragraph("LOGIN AUDIT LOG", report_title_style),
+            Paragraph(f"Generated {generated}" + (f" by {generated_by}" if generated_by else ''), sub_style),
+        ]
+        logo_cell = ''
+        if company_logo and os.path.exists(company_logo):
+            try:
+                logo_cell = _logo_image(company_logo)
+            except Exception:
+                pass
+
+        header_table = Table([[company_content, logo_cell]],
+                             colWidths=[available_width * 0.8, available_width * 0.2])
+        header_table.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('LEFTPADDING', (0, 0), (0, 0), 0),
+            ('RIGHTPADDING', (1, 0), (1, 0), 0),
+            ('LINEBELOW', (0, 0), (-1, 0), 1.2, _tc('accent')),
+        ]))
+
+        story = [header_table, Spacer(1, 0.12 * inch)]
+        story.append(_info_card(list(filters.items()), available_width, cols=max(len(filters), 1)))
+        story.append(Spacer(1, 0.18 * inch))
+
+        # Summary KPIs (of the rows included in this PDF)
+        counts = {}
+        for e in entries:
+            counts[e.event] = counts.get(e.event, 0) + 1
+        story.append(_section_heading("Summary", available_width))
+        story.append(_kpi_cards([
+            ('Total Events', len(entries), None),
+            ('Successful', counts.get('success', 0), 'good'),
+            ('Failed', counts.get('failed', 0), 'warn'),
+            ('Locked', counts.get('locked', 0), 'bad'),
+            ('Blocked', counts.get('blocked', 0), 'bad'),
+            ('Unlocked', counts.get('unlocked', 0), None),
+        ], available_width))
+        if total is not None and limit is not None and total > limit:
+            story.append(Spacer(1, 0.08 * inch))
+            story.append(Paragraph(
+                f"Showing the newest {limit} of {total} matching records. "
+                f"Narrow the date filter to see the rest.", normal_style))
+        story.append(Spacer(1, 0.14 * inch))
+
+        events_heading = _section_heading("Login Events", available_width)
+        # A long table would otherwise be pushed whole onto page 2 (keepWithNext).
+        events_heading.keepWithNext = False
+        story.append(events_heading)
+        if entries:
+            data = [['Time', 'Role', 'Username / ID', 'IP Address', 'Event']]
+            for e in entries:
+                data.append([
+                    e.created_at.strftime('%d %b %Y, %I:%M:%S %p') if e.created_at else '',
+                    (e.role or '').capitalize(),
+                    e.username or '',
+                    e.ip or '',
+                    (e.event or '').capitalize(),
+                ])
+            table = Table(data, colWidths=_fit([2.2, 1.1, 2.4, 1.8, 1.2], available_width), repeatRows=1)
+            style = _pro_table_style(font_size=8, align='LEFT', left_cols=(0, 1, 2, 3, 4))
+            event_colors = {'success': 'good', 'failed': 'warn', 'locked': 'bad', 'blocked': 'bad'}
+            for i, e in enumerate(entries, start=1):
+                key = event_colors.get(e.event)
+                if key:
+                    style.add('TEXTCOLOR', (4, i), (4, i), _tc(key))
+                    style.add('FONTNAME', (4, i), (4, i), 'Helvetica-Bold')
+            table.setStyle(style)
+            story.append(table)
+        else:
+            story.append(Paragraph("No login events match these filters.", normal_style))
+
+        doc.build(story, canvasmaker=_make_numbered_canvas(company_name, 'Login Audit Log', pagesize))
+        return output_path

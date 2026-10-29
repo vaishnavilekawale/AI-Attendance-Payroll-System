@@ -3,8 +3,9 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
 
 import atexit
 import logging
+import time
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request, session, flash, redirect, url_for, jsonify
 
 from config import config, Config, BASE_DIR
 from database import db, init_db
@@ -171,6 +172,57 @@ app.register_blueprint(employees_bp)
 # creation. See auth_routes.py.
 from auth_routes import auth_bp
 app.register_blueprint(auth_bp)
+
+# ------------------------------------------------------------------
+# Inactivity timeout for logged-in admin/employee sessions.
+#
+# PERMANENT_SESSION_LIFETIME is an absolute cap (8 h from login); this
+# hook additionally logs the user out after SESSION_IDLE_MINUTES without
+# any request, so a dashboard left open on a shared/kiosk PC does not stay
+# signed in. The public kiosk attendance page has no session and is not
+# affected. 'last_active' is set at login in auth_routes._begin_session.
+# ------------------------------------------------------------------
+@app.before_request
+def _enforce_idle_timeout():
+    if request.endpoint == 'static':
+        return None
+    if 'admin_id' not in session and 'employee_id' not in session:
+        return None
+
+    now = time.time()
+    idle_limit = app.config.get('SESSION_IDLE_MINUTES', 30) * 60
+    if now - session.get('last_active', now) > idle_limit:
+        session.clear()
+        if request.is_json or request.path.startswith('/api'):
+            return jsonify({'success': False, 'message': 'Session expired. Please log in again.'}), 401
+        flash('Your session expired due to inactivity. Please log in again.', 'info')
+        return redirect(url_for('auth.login'))
+
+    # Only real page navigations (the browser asking for an HTML page) count
+    # as activity. Background requests - fetch()/XHR/API polling - must NOT
+    # write to the session: a page such as the dashboard fires several of
+    # them in parallel with the HTML request, and every response that
+    # modifies the session re-sends the whole cookie from a copy taken when
+    # ITS request started. A slower background response would then overwrite
+    # the cookie with a stale copy that still contains an already-shown flash
+    # message, so "Password changed successfully." kept reappearing on the
+    # next page. Side benefit: a dashboard left open and polling in the
+    # background no longer keeps the session alive forever.
+    if _is_page_navigation() and ('last_active' not in session
+                                  or now - session['last_active'] >= 60):
+        session['last_active'] = now
+    return None
+
+
+def _is_page_navigation():
+    return (
+        request.method == 'GET'
+        and not request.is_json
+        and not request.path.startswith('/api')
+        and request.headers.get('X-Requested-With') != 'XMLHttpRequest'
+        # Browsers navigating to a page prefer text/html; fetch() sends */*.
+        and request.accept_mimetypes.best == 'text/html'
+    )
 
 # Fourth migrated blueprint - admin payroll (list/calculate/payslip
 # generate+email), payroll automation settings, and employee-self-service

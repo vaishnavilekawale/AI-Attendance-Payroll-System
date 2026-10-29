@@ -303,6 +303,21 @@ class Config:
     # Session Configuration
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
 
+    # Log an admin/employee out after this many minutes with no requests
+    # (enforced by the before_request hook in app.py). Independent of, and
+    # shorter than, the absolute 8 h PERMANENT_SESSION_LIFETIME above. The
+    # public kiosk attendance page has no login session and is unaffected.
+    SESSION_IDLE_MINUTES = int(os.environ.get('SESSION_IDLE_MINUTES', '30'))
+
+    # Do NOT re-send the session cookie on every response. With permanent
+    # sessions Flask does that by default, and when a page (e.g. the
+    # dashboard) fires several background requests at once, a slower
+    # response can overwrite the cookie with a stale copy that still holds
+    # an already-shown flash message - so "Password changed successfully."
+    # reappeared on the next page. The cookie is now only written when the
+    # session actually changes (see the throttled last_active update in app.py).
+    SESSION_REFRESH_EACH_REQUEST = False
+
     # ------------------------------------------------------------------
     # SESSION COOKIE SECURITY - READ THIS BEFORE CHANGING SESSION_COOKIE_SECURE
     # ------------------------------------------------------------------

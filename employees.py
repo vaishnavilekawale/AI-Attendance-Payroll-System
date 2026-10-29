@@ -33,8 +33,9 @@ from config import Config
 from database import db
 from models import (
     Employee, EmployeeLogin, Settings, Attendance, Payroll,
-    LogoutApprovalRequest, AttendanceActivity,
+    LogoutApprovalRequest, AttendanceActivity, LoginLockout, now_ist,
 )
+import login_security as ls
 from auth_decorators import login_required, admin_required
 from auth_helpers import generate_secure_temp_password
 from face_recognition_singleton import get_face_recognizer
@@ -100,11 +101,21 @@ def employees():
     dataset_folder = Config.DATASET_FOLDER
     employee_image_counts = _employee_image_counts(dataset_folder, employees_page.items)
 
+    # Employee IDs currently locked out after too many failed logins, so the
+    # list can show an "Unlock" button next to them.
+    locked_usernames = {
+        lock.username for lock in LoginLockout.query.filter(
+            LoginLockout.role == 'employee',
+            LoginLockout.locked_until > now_ist(),
+        ).all()
+    }
+
     return render_template('add_employee.html',
                          employees=employees_page,
                          search=search,
                          min_face_images=min_face_images,
                          employee_image_counts=employee_image_counts,
+                         locked_usernames=locked_usernames,
                          form_prefill=_pop_form_prefill())
 
 
@@ -480,3 +491,14 @@ def view_employee(id):
                          current_face_images=current_count,
                          min_face_images=min_face_images,
                          employee_image_counts=employee_image_counts)
+
+
+@employees_bp.route('/employees/<int:id>/unlock', methods=['POST'])
+@login_required
+@admin_required
+def unlock_employee(id):
+    """Clear an employee's failed-login lock early (it also expires by itself)."""
+    employee = Employee.query.get_or_404(id)
+    ls.unlock('employee', employee.employee_id)
+    flash(f'Login unlocked for {employee.employee_id}.', 'success')
+    return redirect(request.referrer or url_for('employees.employees'))

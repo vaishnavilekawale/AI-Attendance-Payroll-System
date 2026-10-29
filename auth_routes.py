@@ -20,10 +20,16 @@ blueprints, auth_decorators.py, and the templates that referenced these
 employee_forgot_password, employee_change_password, register,
 create_admin) has been updated to match.
 """
-from flask import Blueprint, render_template, request, redirect, url_for, session, flash
+import time
+from datetime import datetime, timedelta
 
+from flask import Blueprint, Response, render_template, request, redirect, url_for, session, flash
+from sqlalchemy import func
+from werkzeug.security import generate_password_hash, check_password_hash
+
+import login_security as ls
 from database import db
-from models import Admin, Employee, EmployeeLogin, now_ist
+from models import Admin, Employee, EmployeeLogin, LoginAudit, LoginLockout, now_ist
 from auth_decorators import login_required, admin_required
 from auth_helpers import create_admin_from_request_form
 from email_service import EmailService
@@ -34,10 +40,52 @@ auth_bp = Blueprint('auth', __name__)
 
 # ==================== UNIFIED LOGIN / LOGOUT ====================
 
+# One message for every kind of login failure (unknown user, wrong password,
+# expired temporary password, no credentials provisioned). Separate messages
+# would tell an attacker which usernames / Employee IDs actually exist.
+GENERIC_LOGIN_ERRORS = {
+    'admin': 'Invalid username or password.',
+    'employee': 'Invalid Employee ID or password.',
+}
+GENERIC_LOGIN_ERROR = GENERIC_LOGIN_ERRORS['admin']
+
+# Used to burn the same hashing time when the username does not exist, so a
+# response-time difference cannot reveal valid usernames either.
+_DUMMY_HASH = generate_password_hash('not-a-real-password')
+
+
+def _login_failed(role, username):
+    """Count the failure (may lock the username+IP) and show the right message."""
+    locked_for = ls.record_failure(role, username)
+    if locked_for:
+        flash(f'Too many failed attempts. Try again in {locked_for} minutes.', 'danger')
+    else:
+        flash(GENERIC_LOGIN_ERRORS.get(role, GENERIC_LOGIN_ERROR), 'danger')
+    return render_template('login.html', selected_role=role)
+
+
+def _begin_session(role, username):
+    """
+    Start a fresh login session. Clearing first prevents session fixation
+    and stops an admin and an employee session from co-existing; marking it
+    permanent makes PERMANENT_SESSION_LIFETIME (8 h) actually apply;
+    last_active drives the inactivity timeout in app.py.
+    """
+    session.clear()
+    session.permanent = True
+    session['last_active'] = time.time()
+    ls.record_success(role, username)
+
+
 @auth_bp.route('/login', methods=['GET', 'POST'])
 @limiter.limit("10 per minute, 50 per hour")
 def login():
     """Unified login for both Admin and Employee"""
+    # Keep the Admin/Employee tab the user was on after a failed attempt
+    # (the page is re-rendered on POST, and the tab used to reset to Admin).
+    role = request.values.get('role', 'admin')
+    if role not in ('admin', 'employee'):
+        role = 'admin'
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
@@ -45,17 +93,29 @@ def login():
 
         if not username or not password:
             flash('Please provide both username and password', 'danger')
-            return render_template('login.html')
+            return render_template('login.html', selected_role=role)
+
+        if role not in ('admin', 'employee'):
+            flash('Invalid role selected', 'danger')
+            return render_template('login.html', selected_role=role)
+
+        # Refuse to even check the password while this username+IP is locked.
+        wait = ls.minutes_left(role, username)
+        if wait:
+            ls.log_event(role, username, 'blocked')
+            flash(f'Too many failed attempts. Try again in {wait} minutes.', 'danger')
+            return render_template('login.html', selected_role=role)
 
         if role == 'admin':
             # Admin authentication
             admin = Admin.query.filter_by(username=username).first()
 
             if not admin:
-                flash('Invalid Username', 'danger')
-                return render_template('login.html')
+                check_password_hash(_DUMMY_HASH, password)
+                return _login_failed('admin', username)
 
             if admin.check_password(password):
+                _begin_session('admin', username)
                 session['admin_id'] = admin.id
                 session['admin_username'] = admin.username
                 session['user_role'] = 'admin'
@@ -68,11 +128,12 @@ def login():
 
                 return redirect(url_for('attendance.dashboard'))
             elif admin.check_temporary_password(password):
-                # Check if temporary password is still valid (not expired)
+                # An expired temporary password is treated like any other
+                # wrong password (same message, counts toward the lockout).
                 if not admin.is_temporary_password_valid():
-                    flash('Temporary password has expired. Please request a new one.', 'danger')
-                    return render_template('login.html')
+                    return _login_failed('admin', username)
 
+                _begin_session('admin', username)
                 session['admin_id'] = admin.id
                 session['admin_username'] = admin.username
                 session['user_role'] = 'admin'
@@ -83,89 +144,63 @@ def login():
                 flash('You must change your temporary password before continuing.', 'info')
                 return redirect(url_for('auth.change_password'))
             else:
-                flash('Invalid Password', 'danger')
-                return render_template('login.html')
+                return _login_failed('admin', username)
 
-        elif role == 'employee':
-            # Employee authentication using EmployeeLogin table
-            employee = Employee.query.filter_by(employee_id=username).first()
+        # role == 'employee' - authentication using the EmployeeLogin table
+        employee = Employee.query.filter_by(employee_id=username).first()
+        login_creds = (
+            EmployeeLogin.query.filter_by(employee_id=employee.id).first()
+            if employee else None
+        )
 
-            if not employee:
-                flash('Invalid Employee ID', 'danger')
-                return render_template('login.html')
+        # Unknown Employee ID, or no login provisioned yet: same generic
+        # error as a wrong password. (This used to say "No login has been
+        # set up for this Employee ID", which confirmed the ID exists.
+        # Employee accounts are only ever created by the administrator with
+        # a random temporary password - see employees.py.)
+        if not employee or not login_creds:
+            check_password_hash(_DUMMY_HASH, password)
+            return _login_failed('employee', username)
 
-            login_creds = EmployeeLogin.query.filter_by(employee_id=employee.id).first()
-
-            if not login_creds:
-                # No login credentials provisioned yet for this employee.
-                #
-                # This used to silently create one here, seeded with the
-                # employee's own phone number as the password - which meant
-                # anyone who knew (or guessed) a coworker's phone number
-                # could log in as them, on the very first attempt, with no
-                # prior account ever having existed. Employee accounts are
-                # now only ever created with a securely random temporary
-                # password (see employees.py / auth_helpers.generate_secure_temp_password
-                # and the migration backfill in database.py), so reaching
-                # this branch means the employee genuinely has no account
-                # yet - direct them to the administrator rather than
-                # fabricating one with a guessable password at login time.
-                flash(
-                    'No login has been set up for this Employee ID yet. '
-                    'Please contact your administrator.',
-                    'danger'
-                )
-                return render_template('login.html')
-
-            # Check if account is active
-            if not login_creds.is_active:
-                flash('Your account is inactive. Please contact administrator.', 'danger')
-                return render_template('login.html')
-
-            # Verify password
-            main_password_check = login_creds.check_password(password)
-
-            if main_password_check:
-                session['employee_id'] = employee.id
-                session['employee_username'] = employee.employee_id
-                session['user_role'] = 'employee'
-                login_creds.previous_login = login_creds.last_login  # remember the login before this one
-                login_creds.last_login = now_ist()
-                employee.last_login = login_creds.last_login
-                db.session.commit()
-
-                # Check if first login or force password change - redirect to change password
-                if login_creds.first_login or login_creds.force_password_change:
-                    flash('Please change your default password before continuing.', 'info')
-                    return redirect(url_for('auth.employee_change_password'))
-
-                return redirect(url_for('attendance.employee_dashboard'))
-            elif login_creds.check_temporary_password(password):
-                # Check if temporary password is still valid (not expired)
-                if not login_creds.is_temporary_password_valid():
-                    flash('Temporary password has expired. Please request a new one.', 'danger')
-                    return render_template('login.html')
-
-                session['employee_id'] = employee.id
-                session['employee_username'] = employee.employee_id
-                session['user_role'] = 'employee'
-                login_creds.previous_login = login_creds.last_login  # remember the login before this one
-                login_creds.last_login = now_ist()
-                employee.last_login = login_creds.last_login
-                db.session.commit()
-
-                # Redirect to change password
-                flash('You must change your temporary password before continuing.', 'info')
-                return redirect(url_for('auth.employee_change_password'))
+        # Verify the password FIRST. The inactive-account message below is
+        # only shown to someone who already proved they know the password,
+        # so it cannot be used to probe which Employee IDs exist.
+        used_temporary = False
+        if not login_creds.check_password(password):
+            if login_creds.check_temporary_password(password) \
+                    and login_creds.is_temporary_password_valid():
+                used_temporary = True
             else:
-                flash('Invalid Password', 'danger')
-                return render_template('login.html')
+                return _login_failed('employee', username)
 
-        else:
-            flash('Invalid role selected', 'danger')
-            return render_template('login.html')
+        if not login_creds.is_active:
+            ls.log_event('employee', username, 'blocked')
+            flash('Your account is inactive. Please contact administrator.', 'danger')
+            return render_template('login.html', selected_role=role)
 
-    return render_template('login.html')
+        _begin_session('employee', username)
+        session['employee_id'] = employee.id
+        session['employee_username'] = employee.employee_id
+        session['user_role'] = 'employee'
+        login_creds.previous_login = login_creds.last_login  # remember the login before this one
+        login_creds.last_login = now_ist()
+        employee.last_login = login_creds.last_login
+        db.session.commit()
+
+        if used_temporary:
+            flash('You must change your temporary password before continuing.', 'info')
+            return redirect(url_for('auth.employee_change_password'))
+
+        # Check if first login or force password change - redirect to change password
+        if login_creds.first_login or login_creds.force_password_change:
+            flash('Please change your default password before continuing.', 'info')
+            return redirect(url_for('auth.employee_change_password'))
+
+        return redirect(url_for('attendance.employee_dashboard'))
+
+    # Plain GET: no server override, so the page can use ?role= in the URL or
+    # the tab last used in this browser tab (see login.html).
+    return render_template('login.html', selected_role=request.args.get('role', ''))
 
 
 @auth_bp.route('/logout')
@@ -191,10 +226,14 @@ def forgot_password():
             flash('Please provide your registered email address', 'danger')
             return render_template('forgot_password.html')
 
-        admin = Admin.query.filter_by(email=email).first()
+        # Case-insensitive match (same as the employee flow): an admin who
+        # registered "Name@Gmail.com" must still be found when typing
+        # "name@gmail.com".
+        admin = Admin.query.filter(func.lower(Admin.email) == email.lower()).first()
 
         if not admin:
-            flash('No account found with this email address', 'danger')
+            flash('No account found with this email address. '
+                  'Please enter the email you registered with.', 'danger')
             return render_template('forgot_password.html')
 
         # Generate secure temporary password (8-12 characters with uppercase, lowercase, numbers, and special characters)
@@ -270,8 +309,10 @@ def change_password():
             admin.force_password_change = False
             db.session.commit()
 
-            flash('Password changed successfully.', 'success')
-            return redirect(url_for('attendance.dashboard'))
+            # The success message travels in the URL (not the session flash),
+            # so it is shown on the dashboard we land on and can never
+            # reappear on some later page.
+            return redirect(url_for('attendance.dashboard', pw_changed=1))
 
         elif 'employee_id' in session:
             # Employee password change using EmployeeLogin table
@@ -295,8 +336,7 @@ def change_password():
                 login_creds.first_login = False
                 login_creds.force_password_change = False
                 db.session.commit()
-                flash('Password changed successfully.', 'success')
-                return redirect(url_for('attendance.employee_dashboard'))
+                return redirect(url_for('attendance.employee_dashboard', pw_changed=1))
 
     return render_template('change_password.html')
 
@@ -399,8 +439,7 @@ def employee_change_password():
                 login_creds.force_password_change = False
                 login_creds.clear_temporary_password()
                 db.session.commit()
-                flash('Password changed successfully', 'success')
-                return redirect(url_for('attendance.employee_dashboard'))
+                return redirect(url_for('attendance.employee_dashboard', pw_changed=1))
         else:
             # Normal password change - require current password
             if not login_creds.check_password(current_password) and not login_creds.check_temporary_password(current_password):
@@ -415,8 +454,7 @@ def employee_change_password():
                 login_creds.force_password_change = False
                 login_creds.clear_temporary_password()
                 db.session.commit()
-                flash('Password changed successfully', 'success')
-                return redirect(url_for('attendance.employee_dashboard'))
+                return redirect(url_for('attendance.employee_dashboard', pw_changed=1))
 
     return render_template('change_password.html', first_login=login_creds.first_login)
 
@@ -468,3 +506,100 @@ def create_admin():
             return redirect(url_for('settings.settings'))
 
     return render_template('register.html', creating_additional_admin=True)
+
+# ==================== LOGIN AUDIT (ADMIN) ====================
+
+def _audit_filters():
+    """Read the Date / Role / Event filters from the query string (shared by page + PDF)."""
+    event = request.args.get('event', '').strip()
+    role = request.args.get('role', '').strip()
+    date_arg = request.args.get('date', '').strip()
+
+    today = now_ist().date()
+    selected = None            # None => all dates
+    if date_arg != 'all':
+        try:
+            selected = datetime.strptime(date_arg, '%Y-%m-%d').date() if date_arg else today
+        except ValueError:
+            selected = today
+
+    query = LoginAudit.query
+    if selected is not None:
+        day_start = datetime.combine(selected, datetime.min.time())
+        query = query.filter(LoginAudit.created_at >= day_start,
+                             LoginAudit.created_at < day_start + timedelta(days=1))
+    if event in ('success', 'failed', 'locked', 'blocked', 'unlocked'):
+        query = query.filter_by(event=event)
+    else:
+        event = ''
+    if role in ('admin', 'employee'):
+        query = query.filter_by(role=role)
+    else:
+        role = ''
+    return query, event, role, selected, today
+
+
+@auth_bp.route('/admin/login-audit')
+@login_required
+@admin_required
+def login_audit():
+    """
+    Read-only view of login events and currently locked accounts.
+
+    By default only TODAY's events are listed. Pick another day with
+    ?date=YYYY-MM-DD, or show every record with ?date=all.
+    The same filters can be downloaded as a PDF (see login_audit_pdf).
+    """
+    page = request.args.get('page', 1, type=int)
+    query, event, role, selected, today = _audit_filters()
+
+    entries = query.order_by(LoginAudit.created_at.desc(), LoginAudit.id.desc()).paginate(
+        page=page, per_page=50, error_out=False
+    )
+    active_locks = LoginLockout.query.filter(
+        LoginLockout.locked_until > now_ist()
+    ).order_by(LoginLockout.locked_until.desc()).all()
+
+    return render_template(
+        'login_audit.html', entries=entries, active_locks=active_locks,
+        event=event, role=role,
+        date_value=selected.isoformat() if selected else '',
+        date_param='all' if selected is None else selected.isoformat(),
+        selected_date=selected, is_today=(selected == today),
+    )
+
+
+PDF_MAX_ROWS = 5000
+
+
+@auth_bp.route('/admin/login-audit/pdf')
+@login_required
+@admin_required
+def login_audit_pdf():
+    """Download the login audit events matching the current filters as a PDF."""
+    import io
+    from services.app_services import get_services
+    from models import Settings
+
+    query, event, role, selected, _today = _audit_filters()
+    total = query.count()
+    rows = query.order_by(LoginAudit.created_at.desc(), LoginAudit.id.desc()).limit(PDF_MAX_ROWS).all()
+
+    filters = {
+        'Date': selected.strftime('%d %b %Y') if selected else 'All dates',
+        'Role': role.capitalize() if role else 'All roles',
+        'Event': event.capitalize() if event else 'All events',
+    }
+    # Same shared generator as every other report (company header, theme, page
+    # numbers). Built in memory so audit data is never left on disk.
+    _, _, _, pg = get_services()
+    buf = io.BytesIO()
+    pg.generate_login_audit_report(rows, filters, buf, company_settings=Settings.get_settings(),
+                                   total=total, limit=PDF_MAX_ROWS,
+                                   generated_by=session.get('admin_username', ''))
+    pdf_bytes = buf.getvalue()
+    filename = 'login_audit_%s.pdf' % (selected.isoformat() if selected else 'all')
+    return Response(pdf_bytes, mimetype='application/pdf', headers={
+        'Content-Disposition': f'attachment; filename="{filename}"',
+        'Cache-Control': 'no-store',
+    })

@@ -73,6 +73,36 @@
     </nav>
 
     <div class="container mt-4">
+        {% if request.args.get('pw_changed') == '1' %}
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            Password changed successfully.
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <script>
+            // Drop ?pw_changed=1 so a page refresh does not show it again.
+            if (window.history && history.replaceState) { history.replaceState(null, '', location.pathname); }
+            // Auto-hide the alert after 5 seconds (same as the rest of the app).
+            window.addEventListener('load', function () {
+                setTimeout(function () {
+                    document.querySelectorAll('.alert').forEach(function (el) {
+                        if (window.bootstrap && bootstrap.Alert) { bootstrap.Alert.getOrCreateInstance(el).close(); }
+                        else { el.remove(); }
+                    });
+                }, 5000);
+            });
+        </script>
+        {% endif %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
         <div class="row">
             <div class="col-md-12">
                 <h2><i class="bi bi-speedometer2"></i> Welcome, {{ employee.name }}</h2>

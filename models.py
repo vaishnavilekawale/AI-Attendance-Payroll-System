@@ -608,3 +608,39 @@ class CompanySettings(db.Model):
             db.session.add(settings)
             db.session.commit()
         return settings
+
+
+class LoginLockout(db.Model):
+    """
+    Failed-login counter + temporary lock, keyed by (role, username, ip).
+
+    Locking the username+IP *pair* (not the account) means an attacker
+    hammering an admin's username only locks out their own IP - the real
+    admin can still log in from another computer. Unknown usernames are
+    tracked too, so the lock behaviour never reveals which usernames exist.
+    Locks expire automatically (see login_security.py).
+    """
+    __tablename__ = 'login_lockouts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    role = db.Column(db.String(10), nullable=False)        # 'admin' / 'employee'
+    username = db.Column(db.String(80), nullable=False)    # lower-cased, as typed
+    ip = db.Column(db.String(45), nullable=False)
+    failed_count = db.Column(db.Integer, default=0)
+    lock_level = db.Column(db.Integer, default=0)          # 0,1,2.. -> 15/30/60 min
+    locked_until = db.Column(db.DateTime)
+    last_failed_at = db.Column(db.DateTime)
+
+    __table_args__ = (db.UniqueConstraint('role', 'username', 'ip', name='uq_login_lockout'),)
+
+
+class LoginAudit(db.Model):
+    """Append-only record of login events (success / failed / locked / blocked / unlocked)."""
+    __tablename__ = 'login_audit'
+
+    id = db.Column(db.Integer, primary_key=True)
+    role = db.Column(db.String(10))
+    username = db.Column(db.String(80))
+    ip = db.Column(db.String(45))
+    event = db.Column(db.String(20))
+    created_at = db.Column(db.DateTime, default=now_ist, index=True)

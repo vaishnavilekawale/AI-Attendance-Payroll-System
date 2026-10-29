@@ -323,11 +323,6 @@
                     </div>
                 </div>
                 
-                <div class="mb-3 form-check">
-                    <input type="checkbox" class="form-check-input" id="remember" name="remember">
-                    <label class="form-check-label" for="remember">Remember me</label>
-                </div>
-                
                 <button type="submit" class="btn btn-primary w-100">
                     <i class="bi bi-box-arrow-in-right me-2"></i> Login
                 </button>
@@ -343,11 +338,6 @@
                 <small class="text-muted">Don't have an admin account? <a href="{{ url_for('auth.register') }}" class="text-decoration-none">Register</a></small>
             </div>
             
-            <div class="text-center mt-4">
-                <small class="text-muted" id="defaultCredentials">
-                    Default: admin / admin123
-                </small>
-            </div>
         </div>
     </div>
     
@@ -364,10 +354,16 @@
         const forgotPasswordSection = document.getElementById('forgotPasswordSection');
         const forgotPasswordLink = document.getElementById('forgotPasswordLink');
         const registerSection = document.getElementById('registerSection');
-        const defaultCredentials = document.getElementById('defaultCredentials');
         
+        const loginForm = document.getElementById('loginForm');
+        const loginUrl = "{{ url_for('auth.login') }}";
+
         function updateFormForRole(role) {
-            console.log('Updating form for role:', role);
+            // Put the role in the form's URL too: after a failed login the
+            // address bar shows /login?role=employee, so a refresh (F5 or
+            // Enter in the address bar) stays on the Employee tab.
+            loginForm.action = loginUrl + '?role=' + encodeURIComponent(role);
+            try { sessionStorage.setItem('loginRole', role); } catch (e) {}
             
             if (role === 'admin') {
                 btnAdmin.classList.add('active');
@@ -380,7 +376,6 @@
                 forgotPasswordSection.style.display = 'block';
                 forgotPasswordLink.href = "{{ url_for('auth.forgot_password') }}";
                 registerSection.style.display = 'block';
-                defaultCredentials.textContent = 'Default: admin / admin123';
             } else {
                 btnEmployee.classList.add('active');
                 btnAdmin.classList.remove('active');
@@ -392,7 +387,6 @@
                 forgotPasswordSection.style.display = 'block';
                 forgotPasswordLink.href = "{{ url_for('auth.employee_forgot_password') }}";
                 registerSection.style.display = 'none';
-                defaultCredentials.textContent = 'Default: Your Employee ID (e.g., EMP0001)';
             }
         }
         
@@ -412,7 +406,14 @@
         // otherwise default to admin.
         (function initRoleFromQuery() {
             const params = new URLSearchParams(window.location.search);
-            const requestedRole = params.get('role');
+            // selected_role comes from the server: after a failed login the
+            // page is re-rendered, and the user must stay on the same tab.
+            const serverRole = "{{ selected_role|default('', true) }}";
+            // Priority: server (after a failed login) > ?role= in the URL >
+            // the tab last used in this browser tab > Admin.
+            let storedRole = '';
+            try { storedRole = sessionStorage.getItem('loginRole') || ''; } catch (e) {}
+            const requestedRole = serverRole || params.get('role') || storedRole;
             updateFormForRole(requestedRole === 'employee' ? 'employee' : 'admin');
         })();
         

@@ -73,6 +73,7 @@ import numpy as np
 
 import crypto_utils
 from auth_decorators import login_required, admin_required, employee_required
+import login_security as ls
 from config import Config
 from database import db
 from models import (
@@ -1465,26 +1466,38 @@ def mark_manual_attendance():
     if not employee_id_str or not password:
         return jsonify({'success': False, 'message': 'Employee ID and password are required'}), 400
 
+    # Same lockout as the /login page (shared counter per Employee ID + IP).
+    # Without this, this public endpoint would let someone guess passwords
+    # without ever being slowed down.
+    wait = ls.minutes_left('employee', employee_id_str)
+    if wait:
+        ls.log_event('employee', employee_id_str, 'blocked')
+        return jsonify({
+            'success': False,
+            'message': f'Too many failed attempts. Try again in {wait} minutes.'
+        })
+
     employee = Employee.query.filter_by(employee_id=employee_id_str).first()
 
-    # Deliberately return the SAME generic message whether the Employee ID
-    # doesn't exist, the account has no credentials, or the password is
-    # wrong - this endpoint must not let someone probe which Employee IDs
-    # are valid.
-    invalid_credentials_response = jsonify({
-        'success': False,
-        'message': 'Invalid Employee ID or password'
-    })
+    def _invalid_credentials():
+        # Deliberately the SAME generic message whether the Employee ID
+        # doesn't exist, the account has no credentials, or the password is
+        # wrong - this endpoint must not let someone probe which Employee
+        # IDs are valid. Every failure counts toward the lockout.
+        locked_for = ls.record_failure('employee', employee_id_str)
+        if locked_for:
+            return jsonify({
+                'success': False,
+                'message': f'Too many failed attempts. Try again in {locked_for} minutes.'
+            })
+        return jsonify({'success': False, 'message': 'Invalid Employee ID or password'})
 
     if not employee:
-        return invalid_credentials_response
-
-    if employee.status != 'active':
-        return jsonify({'success': False, 'message': 'This employee account is not active'})
+        return _invalid_credentials()
 
     login_creds = EmployeeLogin.query.filter_by(employee_id=employee.id).first()
     if not login_creds or not login_creds.is_active:
-        return invalid_credentials_response
+        return _invalid_credentials()
 
     # Validate against the LIVE password hash. EmployeeLogin.check_password()
     # wraps werkzeug.security.check_password_hash() against whatever
@@ -1499,7 +1512,14 @@ def mark_manual_attendance():
         password_ok = login_creds.is_temporary_password_valid()
 
     if not password_ok:
-        return invalid_credentials_response
+        return _invalid_credentials()
+
+    # Only after the password is proven correct do we reveal the account
+    # status (checking it earlier confirmed that an Employee ID exists).
+    if employee.status != 'active':
+        return jsonify({'success': False, 'message': 'This employee account is not active'})
+
+    ls.record_success('employee', employee_id_str)
 
     # Same anti-abuse safeguards used by the rest of the attendance system.
     from services.approval_service import approval_service

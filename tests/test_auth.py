@@ -38,7 +38,7 @@ def test_admin_login_wrong_password_fails(client, make_admin):
     })
 
     assert response.status_code == 200
-    assert b'Invalid Password' in response.data
+    assert b'Invalid username or password' in response.data
 
     with client.session_transaction() as sess:
         assert sess.get('admin_id') is None
@@ -54,7 +54,7 @@ def test_admin_login_unknown_username_fails(client, make_admin):
     })
 
     assert response.status_code == 200
-    assert b'Invalid Username' in response.data
+    assert b'Invalid username or password' in response.data
 
     with client.session_transaction() as sess:
         assert sess.get('admin_id') is None
@@ -107,12 +107,13 @@ def test_admin_login_without_force_flag_goes_straight_to_dashboard(client, make_
     assert '/dashboard' in response.headers['Location']
 
 
-def test_employee_login_without_login_creds_redirects_to_contact_admin(client, make_employee):
+def test_employee_login_without_login_creds_gets_generic_error(client, make_employee):
     """
-    Employee portal login now requires EmployeeLogin credentials to be provisioned
-    by the administrator. If no login credentials exist, the employee is directed
-    to contact their administrator instead of auto-provisioning with phone number
-    (which was a security vulnerability).
+    Employee portal login requires EmployeeLogin credentials to be provisioned
+    by the administrator (no auto-provisioning with the phone number - that
+    was a security vulnerability). An employee with no credentials gets the
+    SAME generic error as a wrong password, so the form cannot be used to
+    discover which Employee IDs exist.
     """
     make_employee(employee_id='EMP0099', phone='9876543210')
 
@@ -123,7 +124,8 @@ def test_employee_login_without_login_creds_redirects_to_contact_admin(client, m
     }, follow_redirects=False)
 
     assert response.status_code == 200
-    assert b'No login has been set up for this Employee ID yet' in response.data
+    assert b'Invalid Employee ID or password' in response.data
+    assert b'No login has been set up' not in response.data
 
 
 def test_employee_login_unknown_id_fails(client):
@@ -133,4 +135,4 @@ def test_employee_login_unknown_id_fails(client):
         'role': 'employee',
     })
     assert response.status_code == 200
-    assert b'Invalid Employee ID' in response.data
+    assert b'Invalid Employee ID or password' in response.data

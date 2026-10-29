@@ -161,6 +161,14 @@
                                                     <i class="bi bi-trash"></i>
                                                 </a>
                                             </div>
+                                            {% if emp.employee_id|lower in (locked_usernames or []) %}
+                                            <form method="POST" action="{{ url_for('employees.unlock_employee', id=emp.id) }}" class="d-inline ms-1">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Login is locked after too many failed attempts">
+                                                    <i class="bi bi-unlock"></i> Unlock login
+                                                </button>
+                                            </form>
+                                            {% endif %}
                                         </td>
                                     </tr>
                                     {% endfor %}
