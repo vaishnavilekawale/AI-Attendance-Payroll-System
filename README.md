@@ -100,7 +100,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 - **Tamper-resistant 30-day trial** (stored in several places; winding the clock back revokes the trial)
 - **CSRF protection** on all state-changing routes
 - **Rate-limited login and password flows** (login: 10/minute and 50/hour; password/reset/setup routes: 5/minute)
-- **Login lockout** — 5 wrong passwords lock that username + IP for 15 min, then 30, then 60 min (locks expire by themselves; an admin can unlock an employee early). See [Login security](#-login-security)
+- **Login lockout** — 5 wrong passwords lock that username + IP for 15 min, then 30, then 60 min (locks expire by themselves; an admin can unlock an employee or another admin early, and a locked admin can unlock themselves with a one-time e-mail link). See [Login security](#-login-security)
 - **Login audit log** — every success / failure / lock / unlock is recorded; admins can filter it and **download it as a PDF**
 - **Generic login errors** (no hint whether an Employee ID or username exists), **idle timeout** (30 min by default) and session-fixation protection
 - Werkzeug password hashing
@@ -185,6 +185,7 @@ Created automatically on first start (`db.create_all()` plus small, safe column 
 | `employees` · `employee_login` | Employee master data, salary structure, statutory numbers (PAN / UAN / PF), login credentials |
 | `biometric_consent_log` | Per-employee face-data consent record |
 | `login_lockouts` · `login_audit` | Failed-login counters / temporary locks, and the append-only login audit trail |
+| `admin_unlock_tokens` | One-time "Unlock via email" links for locked admins (only a hash of the token is stored) |
 | `attendance` · `attendance_activities` | One row per employee per day, plus every IN/OUT pair |
 | `logout_approval_requests` | Auto-logout requests awaiting manager/admin approval |
 | `attendance_settings_history` · `working_hours` · `settings` · `company_settings` | Versioned attendance rules, office hours, company details |
@@ -199,7 +200,7 @@ The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licen
 | **Kiosk** | `/` (public, auto-scan), `POST /api/auto-scan-attendance` |
 | **Auth** | `/login` (admin and employee tabs), `/logout`, `/forgot-password`, `/employee-forgot-password`, `/change-password`, `/employee-change-password` |
 | **Setup & license** | `/setup/` (admin → company → license → done), `/license` (lock screen), `/license/activate` |
-| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll`, `/payroll-settings`, `/reports`, `/settings`, `/admin/approvals`, `/admin/pending-manual-attendance`, `/admin/login-audit` (+ `/admin/login-audit/pdf`), `POST /employees/<id>/unlock` |
+| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll`, `/payroll-settings`, `/reports`, `/settings`, `/admin/approvals`, `/admin/pending-manual-attendance`, `/admin/login-audit` (+ `/admin/login-audit/pdf`), `POST /employees/<id>/unlock`, `/admin/manage-admins`, `POST /admin/<id>/unlock`, `POST /admin/unlock-request`, `/admin/unlock/<token>` |
 | **Manager** | `/manager/approvals`, `/manager/pending-manual-attendance`, `/manager/edit-attendance/<id>` |
 | **Employee** | `/employee-dashboard`, `/employee-attendance`, `/employee-payroll`, `/employee-reports`, `/employee-profile` |
 
@@ -563,10 +564,39 @@ On first run the app creates `instance/attendance.db`, `dataset/`, `uploads/` an
 | **Lockout** | **5** wrong passwords for the same *role + username + IP* lock the login. The first lock lasts **15 min**, the next **30 min**, then **60 min** (60 repeats). The level resets after 24 hours without a failed attempt. |
 | **Always expires** | Nobody is locked out permanently. The lock is per username **and** IP, so someone guessing an admin's password only locks their own computer — the real admin can still log in from another PC. |
 | **Same counter everywhere** | `/login` and the public kiosk *manual attendance* login share one counter, so the kiosk can't be used to get around the lockout. |
-| **Unlock early** | Admin → **Employees** → **Unlock login** button next to a locked employee. |
+| **Unlock early (employee)** | Admin → **Employees** → **Unlock login** button next to a locked employee. |
+| **Unlock early (admin)** | Two ways, see [Unlocking a locked admin](#unlocking-a-locked-admin) below. |
 | **Generic errors** | Admin: *Invalid username or password.* Employee: *Invalid Employee ID or password.* The same text is shown for an unknown ID, a wrong password or an expired temporary password, so nobody can discover which IDs exist. After a failed attempt you **stay on the same tab** (Admin / Employee). |
 | **Idle timeout** | After `SESSION_IDLE_MINUTES` (default 30) without opening a page the user is signed out. The absolute session limit is 8 hours. |
 | **Session safety** | A fresh session is created at every login (no session fixation); the "Remember me" box and the hard-coded default-credentials hint were removed from the login page. |
+
+#### Unlocking a locked admin
+
+A lock always ends by itself (15 / 30 / 60 min). To get in sooner there are two ways, and neither of them touches the password:
+
+| Way | Where | Works when |
+| --- | --- | --- |
+| **1. Another admin unlocks you** | Settings → **Manage Admins** (`/admin/manage-admins`) lists every admin with *Active* / *Locked until …*. A locked admin has an **Unlock** button. You cannot unlock your own account. | There are **2 or more** admins. |
+| **2. Unlock via email** | On the login page, after the lock message, press **Unlock via email**. A one-time link is sent to the admin's registered email. Open it and press **Unlock my login**. | SMTP is configured (Settings → Email, or `.env`) and the admin has a registered email. The button is hidden when SMTP is not configured. |
+
+What if there is only **one** admin?
+
+| Situation | Result |
+| --- | --- |
+| 1 admin, SMTP configured | Use **Unlock via email**. |
+| 1 admin, no SMTP | Nobody can unlock early. Wait for the lock to expire (15 / 30 / 60 min). |
+
+Because of this, **Manage Admins** shows a warning while only one admin exists: *add a second admin so admins can unlock each other.*
+
+Email link rules:
+
+- It can be used **once** and expires after **30 minutes**.
+- Opening the link only shows a confirm button (so mail scanners that pre-open links cannot use it up). The lock is removed when you press **Unlock my login**.
+- At most **one** unlock email per admin every **5 minutes**; the request route is also rate-limited.
+- The reply to "Unlock via email" is always the same, whether or not the username exists, so it cannot be used to find usernames.
+- It only removes the lock. It does **not** reset the password or log you in. Forgot Password is deliberately *not* a way to clear a lock, because that would let an attacker bypass the lockout.
+- The link is built from the address you used to open the app (for example `http://127.0.0.1:5000/...`), so it only opens on a device that can reach that address.
+- The audit log records who unlocked whom, e.g. `owner (by admin2)` or `owner (by email link)`, plus an `unlock_email` event when a link is sent.
 
 **Login Audit Log** — Admin → **Settings → Login Audit Log** (`/admin/login-audit`):
 
@@ -1032,7 +1062,7 @@ The vendor portal found no Razorpay keys and `VENDOR_DEV_MODE` is not `true`, so
 
 **⛔ "Too many failed attempts. Try again in N minutes."**
 
-That username was typed wrongly 5 times from this computer, so it is locked for 15 / 30 / 60 minutes (it unlocks by itself). An admin can clear an **employee** lock at once: **Employees → Unlock login**. For a locked **admin**, wait for the time shown, or sign in from another computer. Every event is listed under **Settings → Login Audit Log**.
+That username was typed wrongly 5 times from this computer, so it is locked for 15 / 30 / 60 minutes (it unlocks by itself). An admin can clear an **employee** lock at once: **Employees → Unlock login**. A locked **admin** can be unlocked by another admin (**Settings → Manage Admins → Unlock**) or with **Unlock via email** on the login page (needs SMTP) — see [Unlocking a locked admin](#unlocking-a-locked-admin). Otherwise wait for the time shown, or sign in from another computer. Every event is listed under **Settings → Login Audit Log**.
 
 **⏱ "Your session expired due to inactivity"**
 
