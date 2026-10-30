@@ -37,10 +37,8 @@ trained_model/*
 
 backups/
 
-
-
 # Log Files
-*.log
+logs/
 
 # Licensing secrets - see licensing/license_manager.py and licensing/keygen.py.
 # vendor_private_key.pem can SIGN new licenses; it must never leave the
