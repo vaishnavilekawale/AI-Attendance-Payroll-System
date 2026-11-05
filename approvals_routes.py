@@ -727,7 +727,15 @@ def admin_edit_attendance(attendance_id):
             # normally punched attendance - NOT from first IN to last OUT.
             # Falls back to the raw IN..OUT span only if the day has no activities.
             db.session.flush()
-            am.calculator.recalculate_attendance(attendance, is_final_calculation=True, use_activities=True)
+            # Finalize the status only when the day is really over for this
+            # record: an OUT time exists, or the date is already in the past.
+            # If the admin only corrected the IN time of TODAY (employee is
+            # still working, no OUT yet) the status must stay the temporary
+            # 'present' - exactly like a normal face-recognition IN - and is
+            # finalized later when the employee punches OUT (or at midnight
+            # auto-checkout). Finalizing here used to store 0 hours -> 'absent'.
+            is_final = bool(attendance.out_time) or attendance.date < now_ist().date()
+            am.calculator.recalculate_attendance(attendance, is_final_calculation=is_final, use_activities=True)
 
             current_app.logger.info(f"NEW STATUS: {attendance.status}")
             current_app.logger.info(f"NEW TOTAL HOURS: {attendance.total_hours}")

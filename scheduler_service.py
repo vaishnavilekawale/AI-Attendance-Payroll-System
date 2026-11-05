@@ -15,8 +15,14 @@ from email_service import EmailService
 from database import db
 from config import Config, BASE_DIR
 import os
+import threading
 
 logger = logging.getLogger(__name__)
+
+# Serialises payroll generation so the 1st-of-month cron job and the startup
+# reconciliation can never process the same period at the same time
+# (which would send duplicate payslip emails).
+_payroll_run_lock = threading.RLock()
 
 # Module-level flag to prevent duplicate scheduler initialization
 # This persists across Flask debug reloader restarts
@@ -250,7 +256,46 @@ class PayrollScheduler:
         """Reschedule payroll generation when settings change"""
         self.schedule_payroll_generation()
     
-    def generate_monthly_payroll(self):
+    def generate_monthly_payroll(self, month=None, year=None):
+        """Thread-safe entry point. With no arguments it pays out the previous
+        (just-completed) month; reconcile_missed_payroll passes an explicit
+        (month, year) to catch up on a period that was missed or only
+        partially (mid-month) calculated."""
+        with _payroll_run_lock:
+            return self._generate_monthly_payroll(month, year)
+
+    @staticmethod
+    def _is_payroll_final(payroll, month, year, auto_send_email):
+        """
+        True when this employee's payslip for (month, year) needs no more work.
+
+        Rule (one payslip email per employee per month):
+        - Payslip already EMAILED  -> final. Never recalculated, never re-sent.
+        - Not emailed yet          -> NOT final: recalculate for the full month,
+                                      regenerate the PDF and email it. This is
+                                      what catches up employees after the
+                                      server was off on the 1st (or a mail failed).
+        - Auto email is OFF        -> nothing will ever be emailed, so a record
+                                      calculated after the month ended with a
+                                      generated PDF counts as final (otherwise
+                                      it would be redone on every startup).
+        """
+        if payroll is None:
+            return False
+        if payroll.email_sent:
+            return True
+        if auto_send_email:
+            return False
+        next_month, next_year = (1, year + 1) if month == 12 else (month + 1, year)
+        month_end = datetime(next_year, next_month, 1)
+        last_calc = payroll.updated_at or payroll.created_at
+        return bool(
+            payroll.payslip_generated
+            and last_calc is not None
+            and last_calc >= month_end
+        )
+
+    def _generate_monthly_payroll(self, month=None, year=None):
         """Generate payroll for all active employees
         
         Runs automatically on the 1st of every month (at the configured
@@ -281,11 +326,12 @@ class PayrollScheduler:
                 # current month and clip off its last day.
                 from datetime import timedelta
                 now = datetime.now()
-                prev_month_date = now.replace(day=1) - timedelta(days=1)
-                month = prev_month_date.month
-                year = prev_month_date.year
+                if month is None or year is None:
+                    prev_month_date = now.replace(day=1) - timedelta(days=1)
+                    month = prev_month_date.month
+                    year = prev_month_date.year
                 
-                logger.info(f"Generating payroll for {month}/{year} (previous month, triggered on {now.date()})")
+                logger.info(f"Generating payroll for {month}/{year} (triggered on {now.date()})")
                 
                 # Get settings
                 company_settings = CompanySettings.get_settings()
@@ -307,19 +353,22 @@ class PayrollScheduler:
                             year=year
                         ).first()
 
-                        if existing_payroll and existing_payroll.email_sent:
-                            # Already finalized: payslip was generated AND emailed
-                            # to the employee, so never overwrite it.
+                        if self._is_payroll_final(
+                            existing_payroll, month, year,
+                            payroll_settings.auto_send_payslip_email,
+                        ):
+                            # Already finalized (payslip emailed once) - never
+                            # overwrite or re-send it.
                             logger.info(
                                 f"Payroll for {employee.name} for {month}/{year} already "
-                                f"finalized (payslip emailed) - skipping"
+                                f"finalized - skipping"
                             )
                             continue
 
                         if existing_payroll:
-                            # A record exists but was never finalized (e.g. an admin
-                            # ran a manual MID-MONTH "Calculate Payroll" earlier,
-                            # which only covers the days up to that point). The
+                            # A record exists but is not final (e.g. a MID-MONTH
+                            # calculation, possibly already emailed, which only
+                            # covers the days up to that point). The
                             # month has now fully ended, so recalculate it over the
                             # whole month and regenerate the payslip below instead
                             # of keeping the stale partial-month figures.
@@ -600,103 +649,45 @@ class PayrollScheduler:
                     logger.info(f"Payroll Period: {period}")
                     logger.info(f"Scheduled Date/Time: {scheduled_datetime_check}")
                     
-                    # Check if any payroll records exist for this period
-                    existing_payroll_count = Payroll.query.filter_by(
-                        month=check_month,
-                        year=check_year
-                    ).count()
-                    
                     should_have_payroll = now >= scheduled_datetime_check
-                    
-                    if existing_payroll_count > 0:
-                        logger.info(f"PAYROLL ALREADY GENERATED")
-                        logger.info(f"Payroll Period: {period}")
-                        logger.info(f"Action: SKIPPED ({existing_payroll_count} records exist)")
-                        continue
                     
                     if not should_have_payroll:
                         logger.info(f"Payroll period {period} not yet due - skipping")
                         continue
                     
-                    # Payroll should exist but doesn't - generate it
-                    logger.info(f"MISSED PAYROLL DETECTED")
-                    logger.info(f"Payroll Period: {period}")
-                    logger.info(f"Scheduled Date/Time: {scheduled_datetime_check}")
+                    # A period needs processing when ANY active, eligible
+                    # employee has no record or has not been emailed yet.
+                    # Employees already emailed are left alone.
+                    pending = []
+                    for emp in Employee.query.filter_by(status='active').all():
+                        if not is_payroll_eligible(emp, check_month, check_year):
+                            continue
+                        record = Payroll.query.filter_by(
+                            employee_id=emp.id, month=check_month, year=check_year
+                        ).first()
+                        if not self._is_payroll_final(
+                            record, check_month, check_year, settings.auto_send_payslip_email
+                        ):
+                            pending.append(emp.name)
+                    
+                    if not pending:
+                        logger.info(f"PAYROLL ALREADY FINALIZED for {period} - Action: SKIPPED")
+                        continue
+                    
+                    logger.info(f"MISSED/PARTIAL PAYROLL DETECTED for {period}: {len(pending)} employee(s) pending {pending}")
                     
                     try:
-                        # Use existing payroll generation function
-                        # This has built-in duplicate protection
-                        payrolls = self.payroll_calculator.calculate_monthly_payroll(
-                            year=check_year,
-                            month=check_month
-                        )
-                        
-                        ifpayrolls = payrolls if payrolls else []
-                        
-                        logger.info(f"MISSED PAYROLL GENERATED")
-                        logger.info(f"Payroll Period: {period}")
-                        logger.info(f"Records generated: {len(ifpayrolls)}")
-                        
-                        # Generate payslips and send emails if enabled
-                        company_settings = CompanySettings.get_settings()
-                        
-                        for payroll in ifpayrolls:
-                            employee = payroll.employee
-                            if not employee:
-                                continue
-                            
-                            # Generate payslip PDF
-                            payslip_filename = f"payslip_{employee.employee_id}_{check_year}_{check_month}.pdf"
-                            payslip_path = self._get_payslip_path(check_year, check_month, payslip_filename)
-                            
-                            import os
-                            os.makedirs(os.path.dirname(payslip_path), exist_ok=True)
-                            
-                            # Password-protect the payslip PDF - same
-                            # deterministic rule used everywhere else. See
-                            # pdf_generator.generate_payslip_password().
-                            payslip_password = generate_payslip_password(employee)
-
-                            self.pdf_generator.generate_payslip(
-                                payroll=payroll,
-                                employee=employee,
-                                company_settings=company_settings,
-                                output_path=payslip_path,
-                                password=payslip_password
-                            )
-                            
-                            payroll.payslip_generated = True
-                            payroll.payslip_path = payslip_path
-                            
-                            logger.info(f"Payslip generated for {employee.name}: {payslip_path}")
-                            
-                            # Send email if enabled
-                            if settings.auto_send_payslip_email:
-                                month_name = self._get_month_name(check_month)
-                                result = self.email_service.send_payslip(
-                                    employee_email=employee.email,
-                                    employee_name=employee.name,
-                                    payslip_path=payslip_path,
-                                    month=month_name,
-                                    year=check_year,
-                                    pdf_password=payslip_password
-                                )
-                                
-                                if result['success']:
-                                    payroll.email_sent = True
-                                    logger.info(f"Payslip email sent to {employee.email}")
-                                else:
-                                    logger.error(f"Failed to send payslip email to {employee.email}: {result['message']}")
-                        
-                        db.session.commit()
-                        
+                        # Same code path as the 1st-of-month job: recalculates
+                        # non-final records for the FULL month, regenerates the
+                        # payslip PDF and emails it.
+                        self.generate_monthly_payroll(month=check_month, year=check_year)
+                        logger.info(f"MISSED PAYROLL PROCESSED for {period}")
                     except Exception as e:
                         logger.error(f"MISSED PAYROLL GENERATION FAILED")
                         logger.error(f"Payroll Period: {period}")
                         logger.error(f"Error: {e}")
                         import traceback
                         logger.error(traceback.format_exc())
-                        # Continue to next month - don't stop entire reconciliation
                         continue
                 
                 logger.info("PAYROLL RECONCILIATION COMPLETED")
