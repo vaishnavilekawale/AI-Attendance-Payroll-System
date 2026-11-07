@@ -1296,6 +1296,91 @@ Best regards,
         
         return result
     
+    def send_logout_approval_decision_notification(self, to_email, employee_name, date, approved,
+                                                   decided_by=None, remarks=None, in_time=None, out_time=None):
+        """Send email to employee when their logout approval request is approved or rejected.
+
+        For a rejection, the reason (remarks) entered by the approver is included.
+        """
+        from html import escape
+        status_text = "Approved" if approved else "Rejected"
+        status_color = "#28a745" if approved else "#dc3545"
+        subject = f"Logout Request {status_text} - {self.company_name}"
+        decided_by_name = decided_by or "your Manager"
+        reason = (remarks or "").strip() or "No reason provided"
+
+        if approved:
+            outcome_text = (f"Your logout request for {date} has been APPROVED by {decided_by_name}. "
+                            f"Your OUT time has been recorded as {out_time or '23:59'} and your attendance has been finalized.")
+        else:
+            outcome_text = (f"Your logout request for {date} has been REJECTED by {decided_by_name}. "
+                            f"Your attendance for this day has been marked as Absent.")
+
+        text_body = f"""
+Logout Request {status_text}
+
+Hello {employee_name},
+
+{outcome_text}
+
+Date: {date}
+IN Time: {in_time or '-'}
+Decision: {status_text}
+Decided by: {decided_by_name}
+""" + ("" if approved else f"Reason: {reason}\n") + f"""
+Please contact your Manager if you have any questions.
+
+Regards,
+{self.company_name}
+"""
+
+        reason_html = "" if approved else f"""
+                        <p><strong>Reason:</strong> {escape(reason)}</p>"""
+        html_body = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Logout Request {status_text}</title>
+            <style>
+                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; background-color: #f4f4f4; margin: 0; padding: 20px; }}
+                .container {{ max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+                .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }}
+                .header h1 {{ margin: 0; font-size: 24px; font-weight: 600; }}
+                .content {{ padding: 30px; }}
+                .content h2 {{ color: {status_color}; font-size: 20px; margin-top: 0; }}
+                .status-box {{ background-color: #f8f9fa; border-left: 4px solid {status_color}; padding: 20px; margin: 20px 0; border-radius: 5px; }}
+                .footer {{ background-color: #f8f9fa; padding: 20px; text-align: center; color: #6c757d; font-size: 14px; border-top: 1px solid #e9ecef; }}
+                .footer p {{ margin: 5px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header"><h1>{escape(self.company_name)}</h1></div>
+                <div class="content">
+                    <h2>Logout Request {status_text}</h2>
+                    <p>Dear {escape(employee_name)},</p>
+                    <p>{escape(outcome_text)}</p>
+                    <div class="status-box">
+                        <p><strong>Date:</strong> {date}</p>
+                        <p><strong>IN Time:</strong> {in_time or '-'}</p>
+                        <p><strong>Decision:</strong> <span style="color:{status_color};font-weight:bold;">{status_text}</span></p>
+                        <p><strong>Decided by:</strong> {escape(decided_by_name)}</p>{reason_html}
+                    </div>
+                    <p>Please contact your Manager if you have any questions.</p>
+                    <p>Regards,<br>{escape(self.company_name)} HR Team</p>
+                </div>
+                <div class="footer">
+                    <p>&copy; {escape(self.company_name)}. All rights reserved.</p>
+                    <p>This is an automated email. Please do not reply.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return self.send_email(to_email, subject, html_body, text_body)
+
     def test_email_connection(self):
         """Test email connection"""
         self._load_config()

@@ -175,6 +175,35 @@ class ApprovalService:
             import traceback
             logger.error(traceback.format_exc())
     
+    def _send_logout_decision_notification(self, request, approved, decided_by_name=None, remarks=None):
+        """Email the employee that their logout request was approved/rejected.
+
+        Never raises: a mail failure must not undo or block the approval decision.
+        """
+        try:
+            employee = db.session.get(Employee, request.employee_id)
+            attendance = db.session.get(Attendance, request.attendance_id)
+            if not employee or not employee.email:
+                logger.warning(f"No email for employee on logout request {request.id}; decision email skipped")
+                return
+            from email_service import EmailService
+            result = EmailService().send_logout_approval_decision_notification(
+                to_email=employee.email,
+                employee_name=employee.name,
+                date=attendance.date.strftime('%Y-%m-%d') if attendance and attendance.date else 'N/A',
+                approved=approved,
+                decided_by=decided_by_name,
+                remarks=remarks,
+                in_time=attendance.in_time.strftime('%H:%M') if attendance and attendance.in_time else None,
+                out_time='23:59' if approved else None,
+            )
+            if result and not result.get('success', True):
+                logger.error(f"Logout decision email failed: {result.get('message')}")
+            else:
+                logger.info(f"Logout {'approved' if approved else 'rejected'} email sent to {employee.email}")
+        except Exception as e:
+            logger.error(f"Failed to send logout decision email: {e}")
+
     def approve_logout_request(self, request_id, approver_id):
         """
         Approve a logout approval request
@@ -248,6 +277,9 @@ class ApprovalService:
             
             logger.info(f"Approval request approved - Request ID: {request_id}, Attendance ID: {attendance.id}, OUT Time: 23:59")
             
+            mgr = db.session.get(Employee, approver_id)
+            self._send_logout_decision_notification(request, True, mgr.name if mgr else None)
+
             return {'success': True, 'message': 'Logout approved successfully'}
             
         except Exception as e:
@@ -303,6 +335,9 @@ class ApprovalService:
             
             logger.info(f"Approval request rejected - Request ID: {request_id}, Remarks: {remarks}")
             
+            mgr = db.session.get(Employee, approver_id)
+            self._send_logout_decision_notification(request, False, mgr.name if mgr else None, remarks)
+
             return {'success': True, 'message': 'Logout rejected successfully'}
             
         except Exception as e:
@@ -430,6 +465,9 @@ class ApprovalService:
             
             logger.info(f"Approval request approved by Admin - Request ID: {request_id}, Attendance ID: {attendance.id}, OUT Time: 23:59")
             
+            adm = db.session.get(Admin, admin_id)
+            self._send_logout_decision_notification(request, True, f"Admin ({adm.username})" if adm else "Admin")
+
             return {'success': True, 'message': 'Logout approved successfully'}
             
         except Exception as e:
@@ -477,6 +515,9 @@ class ApprovalService:
             
             logger.info(f"Approval request rejected by Admin - Request ID: {request_id}, Remarks: {remarks}")
             
+            adm = db.session.get(Admin, admin_id)
+            self._send_logout_decision_notification(request, False, f"Admin ({adm.username})" if adm else "Admin", remarks)
+
             return {'success': True, 'message': 'Logout rejected successfully'}
             
         except Exception as e:
@@ -979,4 +1020,3 @@ Best regards,
 
 # Global approval service instance
 approval_service = ApprovalService()
-

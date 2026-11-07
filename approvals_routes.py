@@ -407,6 +407,12 @@ def reject_logout_request(request_id):
             f"Attendance ID: {approval_request.attendance_id}"
         )
 
+        # Email the employee the rejection + reason (never blocks the response)
+        from services.approval_service import approval_service
+        approval_service._send_logout_decision_notification(
+            approval_request, False, manager.name, remarks
+        )
+
         # ============================================================
         # RETURN JSON
         # ============================================================
