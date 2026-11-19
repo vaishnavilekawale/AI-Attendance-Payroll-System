@@ -48,7 +48,6 @@ alembic==1.13.3
 # .env.example) — SQLite (the default) needs no driver, it's in the
 # Python standard library. Harmless to leave installed either way.
 PyMySQL==1.1.1
-psycopg2-binary==2.9.9
 
 # ---------------------------------------------------------------------------
 # Security / forms / rate limiting
