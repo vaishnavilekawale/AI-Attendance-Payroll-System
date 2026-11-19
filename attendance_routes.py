@@ -350,7 +350,13 @@ def dashboard():
     dept_stats = am.get_department_stats(today, today)
     
     from holiday_utils import off_day_reason
+    try:
+        import backup_manager
+        backup_warning = backup_manager.backup_health() if 'admin_id' in session else None
+    except Exception:
+        backup_warning = None
     return render_template('dashboard.html',
+                         backup_warning=backup_warning,
                          today_off_reason=off_day_reason(today),
                          present=present,
                          absent=absent,

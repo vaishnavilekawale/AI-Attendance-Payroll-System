@@ -1495,81 +1495,37 @@ The dashboard provides a quick overview of your organization's status:
 
 ## 15. Backup and Restore
 
-### 15.1 Automated Backups
+All backup options are in **Settings → Data Backup & Restore**.
 
-**Configuring Backup Schedule:**
-- Access: Settings → Backup Settings
-- Set backup frequency (daily, weekly)
-- Set backup time
-- Set backup location
+### 15.1 Automatic Daily Backup
 
-**Backup Location:**
-- Local folder (default)
-- Network drive
-- Cloud storage (if configured)
-- External drive
+- A backup runs **every day at the time you choose** (default 02:00). Set it under *Backup time*.
+- If the computer was switched off at that time, the missed backup runs about a minute after the application is next started.
+- The newest **7** backups are kept (change *Backups to keep*, 1–60); older ones are deleted automatically.
+- Backups are saved in the `backups` folder of the installation. A second copy is saved on another drive/folder when one is available (set `BACKUP_DIR` in the `.env` file, e.g. `D:\AIAPS_Backups`).
+- Each backup contains the database, uploads/payslips, captured face images, the licence file and the `.env` file (which holds the face-data encryption key).
+- Every backup is checked after it is created. A backup that fails the check is discarded and the Dashboard shows a warning.
 
-**Backup Encryption:**
-- Backups encrypted by default
-- AES-256 encryption
-- Backup password required
-- Secure key management
+**Backup encryption:** enter a **backup password** (at least 8 characters) and every new automatic backup is AES-256 encrypted (`.zip.enc`). Write the password down: it cannot be recovered, and an encrypted backup cannot be restored without it. Leave the password empty to create plain `.zip` backups (not recommended).
 
-**Retention Policy:**
-- Set number of backups to retain
-- Old backups automatically deleted
-- Configurable retention period
-- Compliance requirements
+### 15.2 Run Backup Now / Download
 
-### 15.2 Manual Backup
+- **Run backup now** creates the same checked backup immediately in the `backups` folder.
+- **Download backup** sends a `.zip` to your browser so you can keep it on a USB drive or cloud storage. The download does not include the `.env` file; keep your `.env` safe separately.
 
-**Creating On-Demand Backup:**
-- Access: Settings → Backup
-- Click "Create Backup"
-- Select backup location
-- Enter backup password
-- Wait for backup to complete
+### 15.3 Restore
 
-**Selecting Data to Backup:**
-- Database (required)
-- Face data (optional)
-- Payslips (optional)
-- Uploads (optional)
+**In the application (Settings → Restore from a backup):**
 
-**Backup Verification:**
-- Verify backup file exists
-- Check backup file_SIZE
-- Test restore (optional)
-- Log backup completion
+1. If the backup is a downloaded file, copy it into the installation's `backups` folder.
+2. Choose the backup from the list. Enter the backup password if it is marked 🔒.
+3. Keep *Also restore the .env file* ticked on a new computer.
+4. Type `RESTORE` and click **Restore this backup**.
+5. Your current data is saved first as `pre_restore_<date>`. Restart the application afterwards.
 
-### 15.3 Restore Process
+**Command line (application closed):** `python restore_backup.py --list`, then `python restore_backup.py <backup file>`.
 
-**Restoring from Backup:**
-- Access: Settings → Restore
-- Select backup file
-- Enter backup password
-- Select restore options
-- Click "Restore"
-
-**Data Integrity Check:**
-- Automatic integrity check
-- Verify database consistency
-- Check file completeness
-- Report any errors
-
-**Rollback Procedures:**
-- Select backup to restore
-- Current data backed up before restore
-- Restore process logged
-- Confirm restore completion
-
-**Emergency Recovery:**
-- Use latest backup
-- Contact support if needed
-- Provide backup file
-- Support can assist with recovery
-
----
+A licence is tied to the computer. After restoring on a new computer, request a re-issued licence from your vendor.
 
 ## 16. Troubleshooting
 

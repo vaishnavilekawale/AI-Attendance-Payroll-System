@@ -162,25 +162,14 @@ class PayrollScheduler:
                 # Schedule payroll generation job
                 self.schedule_payroll_generation()
 
-                # Schedule automated weekly backup (every Sunday at 2 AM)
-                self.scheduler.add_job(
-                    func=self.run_automated_backup,
-                    trigger=CronTrigger(day_of_week='sun', hour=2, minute=0),
-                    id='automated_backup',
-                    name='Weekly Automated Backup',
-                    replace_existing=True
-                )
+                # Schedule the automated DAILY backup at the time the admin
+                # chose in Settings -> Data Backup (default 02:00).
+                self.schedule_backup_job()
 
-                backup_job = self.scheduler.get_job("automated_backup")
-                if backup_job:
-                    logger.info("AUTOMATED BACKUP SCHEDULER REGISTERED - Every Sunday at 2:00 AM")
-                    logger.info(f"Automated Backup Job: {backup_job}")
-                    logger.info(f"Automated Backup Next Run: {backup_job.next_run_time}")
-
-                # Catch-up backup: if the PC was off at the Sunday 02:00 slot
-                # (or this is the first run), back up shortly after startup
-                # when the newest successful backup is older than
-                # BACKUP_CATCHUP_DAYS (default 7). Runs once, in the
+                # Catch-up backup: if the PC/server was off at the scheduled
+                # backup time (or this is the first run), back up shortly
+                # after startup when the newest successful backup is older
+                # than the most recent scheduled slot. Runs once, in the
                 # background, after a short delay so startup is not slowed.
                 self.scheduler.add_job(
                     func=self.run_catchup_backup_if_overdue,
@@ -489,24 +478,49 @@ class PayrollScheduler:
         ]
         return months[month - 1]
 
+    def schedule_backup_job(self):
+        """(Re)register the daily backup job at the admin-chosen time."""
+        import backup_manager
+
+        hour, minute = backup_manager.schedule_hm()
+        self.scheduler.add_job(
+            func=self.run_automated_backup,
+            trigger=CronTrigger(hour=hour, minute=minute),
+            id='automated_backup',
+            name='Daily Automated Backup',
+            replace_existing=True,
+            # If the machine was asleep/busy at the exact time, still run it
+            # when it wakes up within 3 hours; the startup catch-up covers
+            # anything longer.
+            misfire_grace_time=3 * 3600,
+            coalesce=True,
+            max_instances=1,
+        )
+        backup_job = self.scheduler.get_job("automated_backup")
+        logger.info("AUTOMATED BACKUP SCHEDULER REGISTERED - Every day at %02d:%02d", hour, minute)
+        if backup_job:
+            logger.info("Automated Backup Next Run: %s", getattr(backup_job, 'next_run_time', None))
+
+    def reschedule_backup(self):
+        """Apply a changed backup time immediately (called from the Settings page)."""
+        if self.scheduler is not None and getattr(self.scheduler, 'running', False):
+            self.schedule_backup_job()
+            return True
+        return False
+
     def run_automated_backup(self):
         """
-        Run automated weekly backup of critical data.
+        Run the automated daily backup of critical data.
 
-        Creates a zip file containing:
-        - instance/attendance.db (SQLite database)
-        - uploads/ (profile photos, generated payslips) - EXCLUDING the
-          backup folders, so backups never contain other backups
-        - dataset/ (captured face images)
-        - .env (configuration and encryption keys)
+        Creates a verified zip (encrypted when the admin set a backup
+        password) containing instance/attendance.db, uploads/, dataset/,
+        license.lic and .env. It is saved to <install folder>/backups/ and,
+        when available, copied to an external location (BACKUP_DIR in .env,
+        or a second fixed drive). The newest 7 backups are kept per folder
+        (configurable in Settings).
 
-        The zip is saved to the dedicated <install folder>/backups/ folder
-        (outside uploads/) and, when available, copied to an external
-        location (BACKUP_DIR in .env, or a second fixed drive). Only the
-        last 4 backups are kept per folder (BACKUP_KEEP).
-
-        All of the logic lives in backup_manager.py so the weekly job, the
-        startup catch-up and the admin "Backup Now" button share one
+        All of the logic lives in backup_manager.py so the daily job, the
+        startup catch-up and the Settings "Run backup now" button share one
         implementation.
         """
         logger.info("Starting automated backup...")
@@ -528,9 +542,10 @@ class PayrollScheduler:
 
     def run_catchup_backup_if_overdue(self):
         """
-        Startup catch-up: if the newest successful backup is older than
-        BACKUP_CATCHUP_DAYS (default 7) - or none exists - run a backup now
-        so a missed Sunday slot never leaves data unprotected.
+        Startup catch-up: if the scheduled backup time passed while the
+        PC/server was off (the newest successful backup is older than the
+        most recent scheduled slot, or none exists), run a backup now so a
+        missed day never leaves data unprotected.
         """
         import sys
 
@@ -550,8 +565,8 @@ class PayrollScheduler:
                 logger.info("Catch-up backup not needed - last backup: %s", last)
                 return
 
-            logger.info("Last successful backup is older than %d day(s) or missing - "
-                        "running catch-up backup now", backup_manager.catchup_days())
+            logger.info("Scheduled backup was missed (last backup: %s) - "
+                        "running catch-up backup now", backup_manager.last_backup_time())
             self.run_automated_backup()
         except Exception as e:
             logger.error(f"Error in catch-up backup check: {e}")

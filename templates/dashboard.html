@@ -103,6 +103,13 @@
             {% endif %}
         {% endwith %}
 
+        {% if backup_warning %}
+        <div class="alert alert-{{ backup_warning.level }} d-flex align-items-center justify-content-between" role="alert">
+            <span><i class="bi bi-shield-exclamation"></i> <strong>Backup:</strong> {{ backup_warning.message }}</span>
+            <a href="{{ url_for('settings.settings') }}#backup" class="btn btn-sm btn-outline-dark ms-3">Open backup settings</a>
+        </div>
+        {% endif %}
+
         <div class="row">
             <div class="col-12">
                 <h2 class="mb-4">Dashboard</h2>

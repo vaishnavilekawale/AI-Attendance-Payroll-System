@@ -49,7 +49,7 @@ The **AI Attendance & Payroll System** is a full-stack Flask application that:
 - 💰 runs a complete **payroll pipeline** (allowances, deductions, overtime, net pay),
 - 📄 generates **AES-256 password-protected PDF payslips** and emails them automatically,
 - 🔑 protects the product with **Ed25519-signed, machine-bound licenses** (30-day trial, then a license lock screen), and
-- 💾 protects customer data with **automated weekly backups** (plus a catch-up backup if the PC was off).
+- 💾 protects customer data with **automated daily backups** at a time you choose (verified, optionally encrypted, plus a catch-up backup if the PC was off) and a one-click **restore**.
 
 It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Setup, so a non-technical client just installs and double-clicks — **no Python, no `pip`, no server setup** on their machine.
 
@@ -113,9 +113,10 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 
 ### 💾 Operations
 
-- **Automated weekly backups** every Sunday at 02:00 — saved to a dedicated `backups\` folder **and** copied to an external location when one is available (see [Backups](#-backups)); last 4 kept per folder
-- **Startup catch-up backup** if the newest backup is older than 7 days
-- One-click **manual backup download** from Admin → Settings
+- **Automated daily backups** at an admin-chosen time (default 02:00) — verified, optionally AES-256 encrypted, saved to a dedicated `backups\` folder **and** copied to an external location when one is available (see [Backups](#-backups)); last 7 kept per folder
+- **Startup catch-up backup** if the scheduled backup was missed while the PC was off
+- **Restore** from Settings (or `restore_backup.py`) with an automatic pre-restore safety copy
+- **Run backup now** and **manual backup download** from Admin → Settings
 - **Role-based access:** Admin, Manager, Employee
 - **First-run Setup Wizard** — admin account, company details, license (optional) — no manual database or admin seeding
 - **License lock screen** when the trial has ended and no valid license exists
@@ -166,7 +167,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 │     ├─ Flask blueprints: setup · auth · employees · attendance │
 │     │                    payroll · reports · approvals · settings
 │     ├─ APScheduler: monthly payroll · 23:59 auto-logout        │
-│     │               approvals · Sunday 02:00 backup            │
+│     │               approvals · daily backup               │
 │     │                                                          │
 │     ├─ instance/attendance.db      (SQLite)                    │
 │     ├─ dataset/                    (encrypted face photos)     │
@@ -460,7 +461,7 @@ SUPPORT_EMAIL=your@gmail.com
 | `SUPPORT_EMAIL` | No | Shown on the license lock screen. |
 | `LICENSE_SERVER_URL` | No | If set, successful activations are reported to your vendor portal (best effort, never blocks activation). |
 | `LICENSE_TOKEN` / `LICENSE_PUBLIC_KEY_HEX` | No | Optional overrides for development (see [License Management](#11--license--backup-management)). The public-key override is **ignored in packaged builds**. |
-| `BACKUP_DIR`, `BACKUP_AUTO_EXTERNAL`, `BACKUP_KEEP`, `BACKUP_CATCHUP_DAYS` | No | Backup behaviour (see [Backups](#-backups)). |
+| `BACKUP_DIR`, `BACKUP_AUTO_EXTERNAL`, `BACKUP_TIME`, `BACKUP_KEEP` | No | Backup behaviour (see [Backups](#-backups)). Time/keep/password are normally set in Settings. |
 | `DISABLE_CATCHUP_BACKUP` | No | `true` disables the startup catch-up backup. |
 | `SKIP_BROWSER_AUTOLAUNCH` | No | `true` stops the app from opening the browser on start. |
 | `RATELIMIT_STORAGE_URI` | No | Rate-limit storage; default `memory://`. |
@@ -667,7 +668,7 @@ Do this once after setup (and again on a clean PC before delivering to a client)
 - [ ] You can run **payroll** for a month
 - [ ] You can **download a payslip PDF** (it asks for a password)
 - [ ] You can download an **admin or employee report PDF**
-- [ ] A **manual backup** downloads from Admin → Settings → Data Backup
+- [ ] A **manual backup** downloads from Admin → Settings → Data Backup, **Run backup now** succeeds, and a test **restore** works on a copy
 
 ---
 
@@ -909,23 +910,31 @@ The `licensing/` folder also contains the vendor-side customer database, email d
 
 ### 💾 Backups
 
-All backup logic lives in `backup_manager.py` and is shared by the weekly job, the startup catch-up and the admin **Backup Now** button.
+All backup logic lives in `backup_manager.py` and is shared by the daily job, the startup catch-up and the Settings buttons. Everything below is managed in **Admin → Settings → Data Backup & Restore**.
 
 | Type | When | Where |
 | --- | --- | --- |
-| ⏰ **Automated weekly backup** | Every **Sunday at 02:00** while the app is running | `backups\automated_backup_<YYYYMMDD_HHMMSS>.zip` in the install folder **plus** a second copy in an external location when available |
-| 🔁 **Startup catch-up backup** | About 60 seconds after startup, if the newest successful backup is older than `BACKUP_CATCHUP_DAYS` (default 7) or none exists | Same as above |
-| 🖱 **Manual backup** | Any time: **Admin → Settings → Data Backup → Backup Now** | Downloaded through the browser as `attendance_backup_<timestamp>.zip` |
+| ⏰ **Automatic daily backup** | Every day at the time the admin picks (default **02:00**) while the app is running | `backups\automated_backup_<YYYYMMDD_HHMMSS>.zip` (or `.zip.enc` when encrypted) in the install folder **plus** a second copy in an external location when available |
+| 🔁 **Startup catch-up backup** | About 60 seconds after startup, if the scheduled time passed while the PC/server was off (newest backup is older than the latest scheduled slot) or none exists | Same as above |
+| ▶️ **Run backup now** | Any time, from Settings | Same verified backup, saved in the backups folder |
+| 🖱 **Download backup** | Any time, from Settings | Browser download `attendance_backup_<timestamp>.zip` (no `.env` inside) |
 
-- **External copy:** the folder in `BACKUP_DIR` if set; otherwise (unless `BACKUP_AUTO_EXTERNAL=false`) the first usable non-system **fixed** drive such as `D:\`, in an `AttendancePayrollSystem_Backups` folder. Removable USB drives are **never** chosen automatically. A failed external copy only logs a warning — the local copy already succeeded.
-- Only the **last 4** backups are kept per folder (`BACKUP_KEEP`).
-- Each zip contains: `instance/attendance.db`, `uploads/`, `dataset/` (encrypted face photos) and `.env` (secrets + encryption key). Backups never contain other backups.
-- Older versions saved backups in `uploads/backups/`; those files are moved to `backups\` the first time a backup runs.
-- Look for `AUTOMATED BACKUP SCHEDULER REGISTERED - Every Sunday at 2:00 AM` and `Catch-up backup not needed - last backup: ...` in the logs.
+- **Retention:** the newest **7** automated backups are kept per folder (one week of daily backups). Change it (1–60) in Settings.
+- **Encryption:** set a **backup password** in Settings and every new automatic backup is encrypted (AES-256-GCM, key derived with PBKDF2-SHA256) and saved as `.zip.enc`. The password cannot be recovered — write it down. Without a password, backups are plain `.zip` files (the Settings page warns about this).
+- **Verification:** every backup is re-opened before it counts as a success (zip CRC check, database integrity check, full decrypt check for encrypted files). A backup that fails verification is deleted and shown as a failure.
+- **Warnings:** the admin **Dashboard** shows a banner when the last backup failed, none exists, or the newest one is more than 2 days old.
+- **External copy:** the folder in `BACKUP_DIR` if set; otherwise (unless `BACKUP_AUTO_EXTERNAL=false`) the first usable non-system **fixed** drive such as `D:\`, in an `AttendancePayrollSystem_Backups` folder. Removable USB drives are **never** chosen automatically. A failed external copy is reported in Settings — the local copy already succeeded.
+- Each automatic backup contains: `instance/attendance.db`, `uploads/`, `dataset/` (encrypted face photos), `license.lic` and `.env` (secrets + face-encryption key). Backups never contain other backups.
+- Backup settings live in `instance\backup_settings.json` (not inside backups). Optional `.env` fallbacks: `BACKUP_TIME`, `BACKUP_KEEP`, `BACKUP_DIR`, `BACKUP_AUTO_EXTERNAL`.
+- Look for `AUTOMATED BACKUP SCHEDULER REGISTERED - Every day at HH:MM` and `Catch-up backup not needed - last backup: ...` in the logs.
 
-> ⚠️ A same-disk copy does not protect against disk failure or theft. Point `BACKUP_DIR` at an external drive or synced cloud folder, or copy the zips away regularly. Treat backup zips like passwords: they contain `.env` and the face-encryption key.
+> ⚠️ A same-disk copy does not protect against disk failure or theft. Point `BACKUP_DIR` at an external drive or synced cloud folder, or copy the files away regularly. Backups contain `.env` and the face-encryption key — set a backup password, and treat the files like passwords.
 
-**Restoring:** stop the app, extract the zip over the install folder (keeping the same `.env`), and start the app again.
+**Restoring**
+
+- **From the app:** Settings → Data Backup & Restore → *Restore from a backup*. Pick a backup (copy a downloaded file into the `backups\` folder first), enter the backup password if it is 🔒 encrypted, type `RESTORE`. Your current data is saved first as `pre_restore_<timestamp>`; then restart the app.
+- **From the command line** (app closed, e.g. new PC): `python restore_backup.py --list` then `python restore_backup.py <file> [--password ...] [--no-env]`.
+- On a **new PC** keep *restore .env* ticked: without the original `.env` the encrypted face photos cannot be read. `license.lic` is restored only when the install has none; a licence is tied to the machine, so a new PC needs a re-issued licence.
 
 ---
 

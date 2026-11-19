@@ -41,7 +41,8 @@ from auth_decorators import login_required, admin_required
 from file_helpers import allowed_file
 from services.app_services import get_services
 from licensing.license_manager import get_license_manager
-from backup_manager import write_backup_zip
+import backup_manager
+from backup_manager import write_backup_zip, BackupError
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -185,7 +186,14 @@ def settings():
     except Exception:
         db.session.rollback()
         pending_leave_requests = 0
+    try:
+        backup_info = backup_manager.backup_status()
+        backup_files = backup_manager.list_backups()
+    except Exception as exc:  # never let the backup card break the Settings page
+        current_app.logger.error("Could not read backup status: %s", exc)
+        backup_info, backup_files = None, []
     return render_template('settings.html', settings=settings, email_test=email_test,
+                           backup_info=backup_info, backup_files=backup_files,
                            mail_status=_email_config_status(settings),
                            pending_leave_requests=pending_leave_requests,
                            holidays=holidays, holidays_json=holidays_json,
@@ -755,6 +763,118 @@ def admin_backup():
         as_attachment=True,
         download_name=download_name,
     )
+
+
+# ---- Backup schedule / run now / restore -------------------------------------
+
+def _backup_redirect():
+    return redirect(url_for('settings.settings') + '#backup')
+
+
+@settings_bp.route('/admin/backup/settings', methods=['POST'])
+@login_required
+@admin_required
+def admin_backup_settings():
+    """Save the daily backup time, how many backups to keep and the optional
+    backup password (turns encryption on/off), then re-arm the scheduler."""
+    password = request.form.get('backup_password', '')
+    confirm = request.form.get('backup_password_confirm', '')
+    clear_password = request.form.get('clear_backup_password') == 'on'
+
+    try:
+        if password and password != confirm:
+            raise BackupError('The two backup passwords do not match.')
+        backup_manager.save_backup_settings(
+            time_str=request.form.get('backup_time', ''),
+            keep=request.form.get('backup_keep', ''),
+            new_password=password or None,
+            clear_password=clear_password,
+        )
+    except BackupError as exc:
+        flash(str(exc), 'danger')
+        return _backup_redirect()
+
+    try:
+        from scheduler_service import payroll_scheduler
+        payroll_scheduler.reschedule_backup()
+    except Exception as exc:
+        current_app.logger.error("Could not re-arm the backup schedule: %s", exc)
+        flash('Settings saved, but the schedule could not be updated until the app restarts.', 'warning')
+        return _backup_redirect()
+
+    current_app.logger.info("Backup settings changed by admin %s (time=%s, keep=%s, encrypted=%s)",
+                            session.get('admin_id'), backup_manager.schedule_time_str(),
+                            backup_manager.backup_keep_count(),
+                            backup_manager.get_backup_password() is not None)
+    msg = (f"Backup settings saved. A backup will run every day at "
+           f"{backup_manager.schedule_time_str()}.")
+    if password:
+        msg += " New backups are now encrypted - keep the password safe, it cannot be recovered."
+    flash(msg, 'success')
+    return _backup_redirect()
+
+
+@settings_bp.route('/admin/backup/run-now', methods=['POST'])
+@login_required
+@admin_required
+def admin_backup_run_now():
+    """Run the same verified backup as the daily job, right now (saved in the
+    backups folder - not downloaded)."""
+    result = backup_manager.run_backup(now_stamp=now_ist().strftime('%Y%m%d_%H%M%S'))
+    if result['success']:
+        extra = ' (a copy was also saved to the external location)' if result['external_path'] else ''
+        flash(f"Backup completed and verified: {os.path.basename(result['path'])}{extra}.", 'success')
+        if result.get('external_error'):
+            flash(f"The external copy failed: {result['external_error']}", 'warning')
+    else:
+        flash(f"Backup FAILED: {result['error']}", 'danger')
+    return _backup_redirect()
+
+
+@settings_bp.route('/admin/backup/restore', methods=['POST'])
+@login_required
+@admin_required
+def admin_backup_restore():
+    """Restore a backup that is in the backups folder. Requires typing RESTORE.
+    The current data is saved as a pre_restore_* backup first."""
+    if (request.form.get('confirm_text') or '').strip() != 'RESTORE':
+        flash('Restore cancelled: type RESTORE in the confirmation box to continue.', 'warning')
+        return _backup_redirect()
+    try:
+        path = backup_manager.resolve_backup(request.form.get('backup_ref', ''))
+    except BackupError as exc:
+        flash(str(exc), 'danger')
+        return _backup_redirect()
+
+    result = backup_manager.restore_backup(
+        path,
+        password=request.form.get('restore_password') or None,
+        restore_env=request.form.get('restore_env') == 'on',
+    )
+
+    # The database file content changed underneath SQLAlchemy: drop pooled connections.
+    try:
+        db.session.remove()
+        db.engine.dispose()
+    except Exception:
+        pass
+
+    if not result['success']:
+        flash(f"Restore failed: {result['error']}", 'danger')
+        return _backup_redirect()
+
+    current_app.logger.warning("Admin %s restored backup %s", session.get('admin_id'), os.path.basename(path))
+    notes = [f"Restore complete from {os.path.basename(path)}."]
+    if result['safety_backup']:
+        notes.append(f"Your previous data was saved first as {os.path.basename(result['safety_backup'])}.")
+    if result['env_restored']:
+        notes.append("The .env file was restored (old copy kept as .env.before_restore).")
+    if result['license_restored']:
+        notes.append("license.lic was restored.")
+    notes.append("Please CLOSE AND RESTART the application now, then run Train AI if face "
+                 "recognition looks off. You may need to log in again.")
+    flash(' '.join(notes), 'success')
+    return _backup_redirect()
 
 
 # ==================== LICENSE ACTIVATION ====================

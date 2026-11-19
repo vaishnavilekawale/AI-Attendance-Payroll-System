@@ -469,36 +469,6 @@
                     </div>
                 </div>
 
-                <!-- Data Backup -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="card-title mb-0"><i class="bi bi-shield-check"></i> Data Backup</h5>
-                    </div>
-                    <div class="card-body">
-                        <p class="small text-muted mb-2">
-                            Download a complete backup of your attendance database,
-                            employee documents, and captured face images as a single
-                            .zip file. Store it somewhere safe — a USB drive, network
-                            share, or cloud storage — separate from this computer.
-                        </p>
-                        <p class="small text-muted">
-                            The backup includes: <code>instance/attendance.db</code>
-                            (all attendance, payroll &amp; employee records),
-                            <code>uploads/</code> (profile photos, generated payslips),
-                            and <code>dataset/</code> (captured face images). Trained
-                            face-recognition encodings are not included since they can
-                            always be regenerated from <code>dataset/</code> via
-                            "Train AI" if ever needed.
-                        </p>
-                        <form method="POST" action="{{ url_for('settings.admin_backup') }}" id="backupForm">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-outline-primary btn-sm" id="backupBtn">
-                                <i class="bi bi-download"></i> Backup Now
-                            </button>
-                        </form>
-                    </div>
-                </div>
-
                 <!-- Admin Management -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -563,6 +533,151 @@
                 </div>
             </div>
         </div>
+
+        <!-- Data Backup & Restore (full width, so it no longer stretches the Holidays card) -->
+        <div class="row">
+            <div class="col-12">
+                <!-- Data Backup -->
+                <div class="card mb-4" id="backup">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-shield-check"></i> Data Backup &amp; Restore</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-4">
+                            <div class="col-lg-6">
+                        {% if backup_info %}
+                        <!-- Status -->
+                        <div class="small mb-3">
+                            <div><strong>Last successful backup:</strong>
+                                {% if backup_info.last_success %}{{ backup_info.last_success.strftime('%d %b %Y, %I:%M %p') }}{% else %}<span class="text-danger">none yet</span>{% endif %}
+                                {% if backup_info.overdue and backup_info.last_success %}<span class="badge bg-warning text-dark">due</span>{% endif %}
+                            </div>
+                            <div><strong>Next automatic backup:</strong> {{ backup_info.next_run.strftime('%d %b %Y, %I:%M %p') }} (daily at {{ backup_info.time }})</div>
+                            <div><strong>Stored in:</strong> <code>{{ backup_info.local_dir }}</code></div>
+                            <div><strong>Second copy (other drive/folder):</strong>
+                                {% if backup_info.external_dir %}<span class="text-success">{{ backup_info.external_dir }}</span>
+                                {% else %}<span class="text-warning">none &ndash; set <code>BACKUP_DIR</code> in .env to an external drive or synced folder</span>{% endif %}
+                            </div>
+                            <div><strong>Encryption:</strong>
+                                {% if backup_info.encrypted %}<span class="text-success">ON (backup password set)</span>
+                                {% else %}<span class="text-warning">OFF &ndash; backups contain the .env key in plain form; set a backup password below</span>{% endif %}
+                            </div>
+                            {% if backup_info.last_error %}
+                            <div class="text-danger mt-1"><strong>Last error:</strong> {{ backup_info.last_error }}</div>
+                            {% endif %}
+                            {% if backup_info.last_external_error %}
+                            <div class="text-warning mt-1"><strong>External copy problem:</strong> {{ backup_info.last_external_error }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Schedule / retention / password -->
+                        <form method="POST" action="{{ url_for('settings.admin_backup_settings') }}" class="border rounded p-3 mb-3">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <h6 class="mb-2">Automatic daily backup</h6>
+                            <div class="row g-2">
+                                <div class="col-sm-6">
+                                    <label class="form-label small mb-1" for="backup_time">Backup time (every day)</label>
+                                    <input type="time" class="form-control form-control-sm" id="backup_time" name="backup_time" value="{{ backup_info.time }}" required>
+                                </div>
+                                <div class="col-sm-6">
+                                    <label class="form-label small mb-1" for="backup_keep">Backups to keep</label>
+                                    <input type="number" class="form-control form-control-sm" id="backup_keep" name="backup_keep" min="1" max="60" value="{{ backup_info.keep }}" required>
+                                </div>
+                                <div class="col-sm-6">
+                                    <label class="form-label small mb-1" for="backup_password">Backup password {% if backup_info.encrypted %}(leave empty to keep current){% else %}(optional, encrypts backups){% endif %}</label>
+                                    <input type="password" class="form-control form-control-sm" id="backup_password" name="backup_password" autocomplete="new-password" minlength="8">
+                                </div>
+                                <div class="col-sm-6">
+                                    <label class="form-label small mb-1" for="backup_password_confirm">Repeat password</label>
+                                    <input type="password" class="form-control form-control-sm" id="backup_password_confirm" name="backup_password_confirm" autocomplete="new-password" minlength="8">
+                                </div>
+                            </div>
+                            {% if backup_info.encrypted %}
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="clear_backup_password" name="clear_backup_password">
+                                <label class="form-check-label small" for="clear_backup_password">Turn encryption off (new backups will be plain .zip)</label>
+                            </div>
+                            {% endif %}
+                            <p class="small text-muted mt-2 mb-2">
+                                If the computer is off at that time, the missed backup runs about a minute after the
+                                app is next started. The newest {{ backup_info.keep }} backups are kept; older ones are
+                                deleted. <strong>Write the backup password down</strong> &ndash; it cannot be recovered,
+                                and without it an encrypted backup cannot be restored.
+                            </p>
+                            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-save"></i> Save backup settings</button>
+                        </form>
+
+                        {% endif %}
+                            </div>
+                            <div class="col-lg-6">
+                        {% if backup_info %}
+                        <!-- Run now -->
+                        <form method="POST" action="{{ url_for('settings.admin_backup_run_now') }}" class="mb-3">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-outline-success btn-sm"><i class="bi bi-play-circle"></i> Run backup now</button>
+                            <span class="small text-muted ms-2">Same verified backup as the daily one, saved in the backups folder.</span>
+                        </form>
+                        {% endif %}
+
+                        <!-- Download -->
+                        <p class="small text-muted mb-2">
+                            Or download a copy to keep somewhere else (USB drive, cloud): attendance database,
+                            payslips/uploads, captured face images and the licence. The download does
+                            <strong>not</strong> include the <code>.env</code> encryption key &ndash; keep your
+                            <code>.env</code> safe separately, or use the automatic backups.
+                        </p>
+                        <form method="POST" action="{{ url_for('settings.admin_backup') }}" id="backupForm" class="mb-3">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-outline-primary btn-sm" id="backupBtn">
+                                <i class="bi bi-download"></i> Download backup
+                            </button>
+                        </form>
+
+                        <!-- Restore -->
+                        <details class="border rounded p-3">
+                            <summary class="fw-semibold"><i class="bi bi-arrow-counterclockwise"></i> Restore from a backup</summary>
+                            <div class="alert alert-warning small mt-3 mb-2">
+                                Restore <strong>replaces the current database, photos and face images</strong> with the
+                                backup. Your current data is saved first as a <code>pre_restore_*</code> backup. Restart
+                                the app afterwards. To restore a downloaded backup, copy the file into
+                                <code>{{ backup_info.local_dir if backup_info else 'the backups folder' }}</code> first.
+                            </div>
+                            {% if backup_files %}
+                            <form method="POST" action="{{ url_for('settings.admin_backup_restore') }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1" for="backup_ref">Backup to restore</label>
+                                    <select class="form-select form-select-sm" id="backup_ref" name="backup_ref" required>
+                                        {% for b in backup_files %}
+                                        <option value="{{ b.ref }}">{{ b.modified.strftime('%d %b %Y %I:%M %p') }} &ndash; {{ b.name }} ({{ '%.1f' % (b.size / 1048576) }} MB){% if b.encrypted %} &#128274;{% endif %}{% if b.is_safety_copy %} [safety copy]{% endif %}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1" for="restore_password">Backup password (only for &#128274; encrypted backups)</label>
+                                    <input type="password" class="form-control form-control-sm" id="restore_password" name="restore_password" autocomplete="off">
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="restore_env" name="restore_env" checked>
+                                    <label class="form-check-label small" for="restore_env">Also restore the <code>.env</code> file (needed on a new PC so face images can be decrypted)</label>
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small mb-1" for="confirm_text">Type <code>RESTORE</code> to confirm</label>
+                                    <input type="text" class="form-control form-control-sm" id="confirm_text" name="confirm_text" autocomplete="off" required>
+                                </div>
+                                <button type="submit" class="btn btn-danger btn-sm"><i class="bi bi-arrow-counterclockwise"></i> Restore this backup</button>
+                            </form>
+                            {% else %}
+                            <p class="small text-muted mb-0">No backup files found yet.</p>
+                            {% endif %}
+                        </details>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
     </div>
 
     <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
@@ -578,7 +693,7 @@
                     // Reset button state after 3 seconds since file download response keeps page active
                     setTimeout(function() {
                         backupBtn.disabled = false;
-                        backupBtn.innerHTML = '<i class="bi bi-download"></i> Backup Now';
+                        backupBtn.innerHTML = '<i class="bi bi-download"></i> Download backup';
                     }, 3000);
                 });
             }
