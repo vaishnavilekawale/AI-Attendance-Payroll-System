@@ -459,7 +459,8 @@ class ApprovalService:
             # Update the approval request
             request.status = 'approved'
             request.approved_at = now_ist()
-            request.approved_by = admin_id
+            request.approved_by = None            # not a manager
+            request.approved_by_admin_id = admin_id
             
             db.session.commit()
             
@@ -500,7 +501,8 @@ class ApprovalService:
             # Update the approval request
             request.status = 'rejected'
             request.approved_at = now_ist()
-            request.approved_by = admin_id
+            request.approved_by = None            # not a manager
+            request.approved_by_admin_id = admin_id
             request.remarks = remarks
             
             # Get related attendance record

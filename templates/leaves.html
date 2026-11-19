@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Leaves - AI Attendance System</title>
+    <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .leave-scroll { max-height: 320px; overflow-y: auto; }
+        .leave-scroll thead th { position: sticky; top: 0; z-index: 1; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('attendance.dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance.dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('employees.employees') }}">
+                            <i class="bi bi-people"></i> Employees
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance.attendance') }}">
+                            <i class="bi bi-calendar-check"></i> Attendance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('payroll.payroll') }}">
+                            <i class="bi bi-cash"></i> Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('reports.reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('settings.settings') }}">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('approvals.admin_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.admin_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}">Change Password</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid py-4 mb-5">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+            <h2 class="mb-0">Employee Leaves</h2>
+            <a href="{{ url_for('settings.settings') }}" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> Back to Settings
+            </a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="row">
+            <!-- Left: add leave + records -->
+            <div class="col-lg-7 d-flex flex-column">
+                {% if pending_requests or recent_requests %}
+                <div class="card mb-4" id="leave-requests">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0"><i class="bi bi-inbox"></i> Leave Requests</h5>
+                        {% if pending_requests %}<span class="badge bg-warning text-dark">{{ pending_requests|length }} pending</span>{% endif %}
+                    </div>
+                    <div class="card-body">
+                        {% for r in pending_requests %}
+                        {% set info = request_info[r.id] %}
+                        <div class="border rounded p-2 mb-2">
+                            <div class="d-flex flex-wrap justify-content-between gap-1">
+                                <div>
+                                    <strong>{{ r.employee.name }}</strong>
+                                    <span class="badge bg-info text-dark">{{ r.leave_type }}</span>
+                                    <div class="small">{{ r.from_date.strftime('%d %b %Y') }}{% if r.to_date != r.from_date %} &ndash; {{ r.to_date.strftime('%d %b %Y') }}{% endif %}
+                                        &middot; {{ info.days }} working day(s)</div>
+                                    {% if r.reason %}<div class="text-muted small">{{ r.reason }}</div>{% endif %}
+                                </div>
+                                <div class="small {{ 'text-danger fw-semibold' if info.days > info.balance else 'text-muted' }}">
+                                    {{ r.leave_type }} balance: {{ '%g'|format(info.balance) }} of {{ '%g'|format(info.quota) }}
+                                    {% if info.days > info.balance %}<br>Not enough: extra days stay Absent / LOP{% endif %}
+                                </div>
+                            </div>
+                            <form method="POST" class="d-flex flex-wrap gap-2 mt-2">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="text" class="form-control form-control-sm" name="note" maxlength="200" placeholder="Note (shown to employee if rejected)" style="flex:1 1 180px">
+                                <button type="submit" formaction="{{ url_for('settings.approve_leave_request', request_id=r.id) }}" class="btn btn-sm btn-success"><i class="bi bi-check-lg"></i> Approve</button>
+                                <button type="submit" formaction="{{ url_for('settings.reject_leave_request', request_id=r.id) }}" class="btn btn-sm btn-outline-danger"
+                                        onclick="return confirm('Reject this request?');"><i class="bi bi-x-lg"></i> Reject</button>
+                            </form>
+                        </div>
+                        {% else %}
+                        <p class="text-muted small mb-2">No pending requests.</p>
+                        {% endfor %}
+                        {% if recent_requests %}
+                        <div class="small text-muted mt-3 mb-1">Recently decided</div>
+                        <div class="table-responsive border rounded" style="max-height: 180px; overflow-y: auto;">
+                            <table class="table table-sm mb-0 align-middle">
+                                <tbody>
+                                {% for r in recent_requests %}
+                                    <tr>
+                                        <td>{{ r.employee.name }}</td>
+                                        <td class="text-nowrap small">{{ r.from_date.strftime('%d %b') }}{% if r.to_date != r.from_date %} &ndash; {{ r.to_date.strftime('%d %b') }}{% endif %}</td>
+                                        <td><span class="badge bg-info text-dark">{{ r.leave_type }}</span></td>
+                                        <td>{% if r.status == 'approved' %}<span class="badge bg-success">Approved</span>{% elif r.status == 'rejected' %}<span class="badge bg-danger">Rejected</span>{% else %}<span class="badge bg-secondary">Cancelled</span>{% endif %}</td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-calendar2-plus"></i> Add Paid Leave</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">
+                            Paid leave (CL / SL / EL) is not marked Absent and no salary is deducted.
+                            Sundays and holidays are skipped automatically. If the yearly quota of that type
+                            is used up, the remaining days are <strong>not</strong> recorded and stay Absent / LOP.
+                        </p>
+                        <form method="POST" action="{{ url_for('settings.add_leave') }}" id="leaveForm" class="row g-2">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="col-md-6">
+                                <label class="form-label mb-1" for="lvEmployee">Employee</label>
+                                <select class="form-select" name="employee_id" id="lvEmployee" required>
+                                    <option value="">Select employee…</option>
+                                    {% for e in employees %}
+                                    <option value="{{ e.id }}" {{ 'selected' if employee_id == e.id else '' }}>{{ e.name }} ({{ e.employee_id }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label mb-1" for="lvType">Leave type</label>
+                                <select class="form-select" name="leave_type" id="lvType" required>
+                                    {% for code, label in leave_types %}
+                                    <option value="{{ code }}">{{ code }} - {{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label mb-1" for="lvFrom">From</label>
+                                <input type="date" class="form-control" name="from_date" id="lvFrom" required>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label mb-1" for="lvTo">To <span class="text-muted small">(optional)</span></label>
+                                <input type="date" class="form-control" name="to_date" id="lvTo">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label mb-1" for="lvReason">Reason <span class="text-muted small">(optional)</span></label>
+                                <input type="text" class="form-control" name="reason" id="lvReason" maxlength="200" placeholder="e.g. Family function">
+                                <div class="form-text" id="lvBalanceInfo">Select an employee to see the balance for {{ year }}.</div>
+                            </div>
+                            <div class="col-12">
+                                <button type="submit" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Add Leave</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mb-4 flex-grow-1">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-journal-text"></i> Leave Records</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="GET" action="{{ url_for('settings.leaves') }}" class="d-flex flex-wrap gap-2 align-items-center mb-2" id="lvFilter">
+                            <select class="form-select form-select-sm" name="year" style="width:auto" aria-label="Year" onchange="this.form.submit()">
+                                {% for y in years %}<option value="{{ y }}" {{ 'selected' if y == year else '' }}>{{ y }}</option>{% endfor %}
+                            </select>
+                            <select class="form-select form-select-sm" name="employee_id" style="width:auto; max-width:60%" aria-label="Employee" onchange="this.form.submit()">
+                                <option value="">All employees</option>
+                                {% for e in employees %}<option value="{{ e.id }}" {{ 'selected' if employee_id == e.id else '' }}>{{ e.name }}</option>{% endfor %}
+                            </select>
+                            <span class="badge bg-secondary">{{ records|length }}</span>
+                            <a class="btn btn-sm btn-outline-primary ms-auto"
+                               href="{{ url_for('settings.download_leaves_pdf', year=year, employee_id=employee_id) if employee_id else url_for('settings.download_leaves_pdf', year=year) }}">
+                                <i class="bi bi-file-earmark-pdf"></i> PDF
+                            </a>
+                        </form>
+                        {% if records %}
+                        <div class="table-responsive border rounded leave-scroll">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light"><tr><th>Date</th><th>Employee</th><th>Type</th><th class="d-none d-md-table-cell">Reason</th><th class="text-end">Action</th></tr></thead>
+                                <tbody>
+                                {% for r in records %}
+                                    <tr>
+                                        <td class="text-nowrap">{{ r.date.strftime('%d %b %Y') }}<div class="text-muted small">{{ r.date.strftime('%A') }}</div></td>
+                                        <td>{{ r.employee.name if r.employee else '' }}</td>
+                                        <td><span class="badge bg-info text-dark">{{ r.leave_type }}</span></td>
+                                        <td class="d-none d-md-table-cell small">{{ r.reason or '' }}</td>
+                                        <td class="text-end">
+                                            <form method="POST" action="{{ url_for('settings.delete_leave', leave_id=r.id) }}" class="d-inline"
+                                                  onsubmit="return confirm('Remove this leave day?');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted small mb-0">No leave recorded for {{ year }}.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: quotas + balances -->
+            <div class="col-lg-5 d-flex flex-column">
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-sliders"></i> Yearly Quota (all employees)</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small">Days of paid leave every employee gets per calendar year.</p>
+                        <form method="POST" action="{{ url_for('settings.save_leave_quotas') }}" class="row g-2 align-items-end">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="year" value="{{ year }}">
+                            {% for code, label in leave_types %}
+                            <div class="col-4">
+                                <label class="form-label small mb-1" for="dq{{ code }}">{{ code }} <span class="text-muted">{{ label }}</span></label>
+                                <input type="number" step="0.5" min="0" max="366" class="form-control" id="dq{{ code }}" name="quota_{{ code }}" value="{{ '%g'|format(defaults[code]) }}">
+                            </div>
+                            {% endfor %}
+                            <div class="col-12"><button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-save"></i> Save default quota</button></div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-person-gear"></i> Quota for one employee</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small">Give one employee a different quota. Leave a box empty to use the default, or press <strong>Reset to default</strong> to remove the custom quota completely.</p>
+                        <form method="POST" action="{{ url_for('settings.save_leave_quotas') }}" class="row g-2 align-items-end" id="empQuotaForm">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="year" value="{{ year }}">
+                            <div class="col-12">
+                                <select class="form-select" name="employee_id" id="eqEmployee" required aria-label="Employee">
+                                    <option value="">Select employee…</option>
+                                    {% for e in employees %}<option value="{{ e.id }}">{{ e.name }} ({{ e.employee_id }}){{ ' *' if overrides_json[e.id|string] else '' }}</option>{% endfor %}
+                                </select>
+                            </div>
+                            {% for code, label in leave_types %}
+                            <div class="col-4">
+                                <label class="form-label small mb-1" for="eq{{ code }}">{{ code }}</label>
+                                <input type="number" step="0.5" min="0" max="366" class="form-control" id="eq{{ code }}" name="quota_{{ code }}" placeholder="default">
+                            </div>
+                            {% endfor %}
+                            <div class="col-12 d-flex flex-wrap gap-2">
+                                <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-save"></i> Save for employee</button>
+                                <button type="submit" name="reset" value="1" class="btn btn-outline-secondary btn-sm" id="eqReset" disabled
+                                        formnovalidate onclick="return confirm('Remove the custom quota and use the default again?');">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Reset to default
+                                </button>
+                            </div>
+                            <div class="form-text" id="eqHint">* = employee already has a custom quota.</div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mb-4 flex-grow-1">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-pie-chart"></i> Balance {{ year }}</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if balances %}
+                        <div class="table-responsive border rounded leave-scroll">
+                            <table class="table table-sm align-middle mb-0 text-center">
+                                <thead class="table-light"><tr><th class="text-start">Employee</th>{% for code, label in leave_types %}<th>{{ code }}</th>{% endfor %}</tr></thead>
+                                <tbody>
+                                {% for b in balances %}
+                                    <tr>
+                                        <td class="text-start">{{ b.employee.name }}</td>
+                                        {% for code, label in leave_types %}
+                                        {% set v = b.balance[code] %}
+                                        <td title="{{ label }}: used {{ '%g'|format(v.used) }} of {{ '%g'|format(v.quota) }}{{ ' (custom quota)' if v.has_override else '' }}"
+                                            class="{{ 'text-danger fw-semibold' if v.balance <= 0 and v.quota > 0 else '' }}">
+                                            {{ '%g'|format(v.balance) }}<span class="text-muted small"> / {{ '%g'|format(v.quota) }}{{ '*' if v.has_override else '' }}</span>
+                                        </td>
+                                        {% endfor %}
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-muted small mt-2 mb-0">Remaining / yearly quota. * = custom quota for that employee.</p>
+                        {% else %}
+                        <p class="text-muted small mb-0">No active employees.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+    <footer class="app-footer">
+        AI Attendance &amp; Payroll System &middot; v{{ app_version }}
+    </footer>
+    <script>
+        (function () {
+            var balances = {{ balances_json|tojson }};
+            var overrides = {{ overrides_json|tojson }};
+            var eqEmp = document.getElementById('eqEmployee'), eqReset = document.getElementById('eqReset');
+            function fillQuota() {
+                var o = overrides[eqEmp.value] || {};
+                ['CL', 'SL', 'EL'].forEach(function (c) {
+                    document.getElementById('eq' + c).value = (o[c] !== undefined) ? o[c] : '';
+                });
+                eqReset.disabled = Object.keys(o).length === 0;
+            }
+            eqEmp.addEventListener('change', fillQuota); fillQuota();
+            var emp = document.getElementById('lvEmployee');
+            var info = document.getElementById('lvBalanceInfo');
+            var from = document.getElementById('lvFrom'), to = document.getElementById('lvTo');
+            function showBalance() {
+                var b = balances[emp.value];
+                if (!b) { info.textContent = 'Select an employee to see the balance for {{ year }}.'; return; }
+                info.textContent = 'Balance {{ year }}: ' + ['CL', 'SL', 'EL'].map(function (c) {
+                    return c + ' ' + b[c].balance + ' of ' + b[c].quota;
+                }).join('  |  ');
+            }
+            emp.addEventListener('change', showBalance); showBalance();
+            from.addEventListener('change', function () { if (!to.value || to.value < from.value) { to.value = from.value; } to.min = from.value; });
+        })();
+        document.addEventListener('DOMContentLoaded', function () {
+            setTimeout(function () {
+                document.querySelectorAll('.alert-dismissible').forEach(function (el) {
+                    bootstrap.Alert.getOrCreateInstance(el).close();
+                });
+            }, 8000);
+        });
+    </script>
+</body>
+</html>

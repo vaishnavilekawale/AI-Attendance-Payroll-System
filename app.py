@@ -241,6 +241,10 @@ app.register_blueprint(reports_bp)
 from settings_routes import settings_bp
 app.register_blueprint(settings_bp)
 
+# Employee paid-leave self-service (My Leaves)
+from leave_routes import leave_bp
+app.register_blueprint(leave_bp)
+
 # Seventh migrated blueprint - manager/admin logout-approval workflow,
 # manual-attendance approve/reject, attendance edit reached from the
 # approvals dashboards, and the two dev-only manual-trigger endpoints.
@@ -298,6 +302,59 @@ def month_name_filter(month_num):
         9: 'September', 10: 'October', 11: 'November', 12: 'December'
     }
     return months.get(month_num, 'Unknown')
+
+@app.context_processor
+def inject_holiday_helpers():
+    """Make today's off-day reason and holiday lookups available to every template."""
+    from datetime import date as _date, datetime as _datetime
+    from calendar import monthrange as _monthrange
+    try:
+        from holiday_utils import off_day_reason, get_holidays
+    except Exception:  # never break page rendering over holiday display
+        return {'today_off_reason': None,
+                'holidays_between': lambda *a, **k: [],
+                'holidays_in_month': lambda *a, **k: []}
+
+    def _to_date(value):
+        if isinstance(value, _datetime):
+            return value.date()
+        if isinstance(value, _date):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                return _datetime.strptime(value.strip()[:10], '%Y-%m-%d').date()
+            except ValueError:
+                return None
+        return None
+
+    def holidays_between(start=None, end=None):
+        """Sorted [(date, name)] between start and end; defaults to the current month."""
+        try:
+            s, e = _to_date(start), _to_date(end)
+            if not s or not e:
+                t = _date.today()
+                s, e = t.replace(day=1), t.replace(day=_monthrange(t.year, t.month)[1])
+            if e < s:
+                return []
+            return sorted(get_holidays(s, e).items())
+        except Exception:
+            return []
+
+    def holidays_in_month(year, month):
+        try:
+            y, m = int(year), int(month)
+            return sorted(get_holidays(_date(y, m, 1), _date(y, m, _monthrange(y, m)[1])).items())
+        except Exception:
+            return []
+
+    try:
+        reason = off_day_reason(_date.today())
+    except Exception:
+        reason = None
+    return {'today_off_reason': reason,
+            'holidays_between': holidays_between,
+            'holidays_in_month': holidays_in_month}
+
 
 @app.errorhandler(404)
 def not_found(error):

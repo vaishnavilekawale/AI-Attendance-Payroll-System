@@ -2037,3 +2037,152 @@ class PDFGenerator:
 
         doc.build(story, canvasmaker=_make_numbered_canvas(company_name, 'Login Audit Log', pagesize))
         return output_path
+
+    def generate_holiday_list_pdf(self, holidays, company_name, year_label):
+        """Holiday list (Settings -> Holiday Calendar) as PDF bytes.
+
+        holidays: iterable of objects with .date and .name
+        year_label: '2026' or 'All years' (title only)
+        """
+        from collections import OrderedDict
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                        CondPageBreak)
+
+        def esc(text):
+            return (text or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+        holidays = sorted(holidays, key=lambda h: h.date)
+        pagesize = A4
+        margin = 30
+        width = pagesize[0] - 2 * margin
+
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=margin, rightMargin=margin,
+                                topMargin=34, bottomMargin=48,
+                                title=f"Holiday List - {year_label}", author=company_name or '')
+
+        title_st = ParagraphStyle('HolTitle', fontName='Helvetica-Bold', fontSize=18,
+                                  leading=22, textColor=_tc('ink'))
+        sub_st = ParagraphStyle('HolSub', fontName='Helvetica', fontSize=9,
+                                leading=12, textColor=_tc('muted'))
+        cell_st = ParagraphStyle('HolCell', fontName='Helvetica', fontSize=9,
+                                 leading=11, textColor=_tc('ink'))
+
+        story = [
+            Paragraph(f"Holiday List &mdash; {year_label}", title_st),
+            Paragraph(f"{esc(company_name)}  |  Paid holidays (treated like Sundays: "
+                      f"no attendance, no deduction)", sub_st),
+            Spacer(1, 6),
+        ]
+
+        if not holidays:
+            story.append(Spacer(1, 12))
+            story.append(Paragraph("No holidays are configured for this period.", sub_st))
+        else:
+            by_year = OrderedDict()
+            for h in holidays:
+                by_year.setdefault(h.date.year, []).append(h)
+
+            for yr, items in by_year.items():
+                story.append(CondPageBreak(90))
+                heading = _section_heading(
+                    f"{yr}  ({len(items)} holiday{'s' if len(items) != 1 else ''})", width)
+                heading.keepWithNext = False  # keeping it with a long table pushes the table to the next page
+                story.append(heading)
+                data = [['#', 'Date', 'Day', 'Holiday']]
+                for i, h in enumerate(items, 1):
+                    data.append([str(i), h.date.strftime('%d %b %Y'), h.date.strftime('%A'),
+                                 Paragraph(esc(h.name), cell_st)])
+                t = Table(data, colWidths=_fit([24, 80, 80, 260], width), repeatRows=1, hAlign='LEFT')
+                t.setStyle(_pro_table_style(font_size=9, align='LEFT', left_cols=(0, 1, 2, 3), pad=6))
+                story.append(t)
+
+            story.append(Spacer(1, 10))
+            story.append(Paragraph(
+                f"Total: <b>{len(holidays)}</b> holiday{'s' if len(holidays) != 1 else ''}", sub_st))
+
+        doc.build(story, canvasmaker=_make_numbered_canvas(company_name or '', 'Holiday List', pagesize))
+        return buf.getvalue()
+
+    def generate_leave_report_pdf(self, year, company_name, balances, records, scope=''):
+        """Paid-leave report (balances + every leave day) as PDF bytes.
+
+        balances: list of {'employee': Employee, 'balance': {type: {quota, used, balance}}}
+        records : EmployeeLeave rows (newest first is fine, sorted here)
+        scope   : employee name when the report is for a single employee
+        """
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                        CondPageBreak)
+        from leave_utils import LEAVE_TYPES, LEAVE_TYPE_NAMES
+
+        def esc(text):
+            return (text or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+        def num(v):
+            return str(int(v)) if float(v).is_integer() else f"{v:.1f}"
+
+        pagesize = A4
+        margin = 30
+        width = pagesize[0] - 2 * margin
+        buf = io.BytesIO()
+        title = f"Leave Report - {year}"
+        doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=margin, rightMargin=margin,
+                                topMargin=34, bottomMargin=48, title=title, author=company_name or '')
+        title_st = ParagraphStyle('LvTitle', fontName='Helvetica-Bold', fontSize=18,
+                                  leading=22, textColor=_tc('ink'))
+        sub_st = ParagraphStyle('LvSub', fontName='Helvetica', fontSize=9,
+                                leading=12, textColor=_tc('muted'))
+        cell_st = ParagraphStyle('LvCell', fontName='Helvetica', fontSize=8.5,
+                                 leading=10.5, textColor=_tc('ink'))
+
+        subtitle = "  |  ".join(x for x in (
+            esc(company_name), "Paid leave (CL / SL / EL) - leave days are paid, no deduction",
+            f"Employee: {esc(scope)}" if scope else "") if x)
+        story = [Paragraph(f"Leave Report &mdash; {year}", title_st),
+                 Paragraph(subtitle, sub_st), Spacer(1, 6)]
+
+        # --- balances ---
+        story.append(_section_heading("Leave balance (used / quota)", width))
+        head = ['Emp ID', 'Name'] + [f"{c}" for c, _ in LEAVE_TYPES] + ['Total used']
+        data = [head]
+        for b in balances:
+            emp = b['employee']
+            row = [emp.employee_id, Paragraph(esc(emp.name), cell_st)]
+            total_used = 0.0
+            for code, _ in LEAVE_TYPES:
+                v = b['balance'][code]
+                total_used += v['used']
+                row.append(f"{num(v['used'])} / {num(v['quota'])}")
+            row.append(num(total_used))
+            data.append(row)
+        if len(data) == 1:
+            story.append(Paragraph("No employees.", sub_st))
+        else:
+            t = Table(data, colWidths=_fit([55, 150, 70, 70, 70, 60], width), repeatRows=1, hAlign='LEFT')
+            t.setStyle(_pro_table_style(font_size=8.5, align='LEFT', left_cols=(0, 1, 2, 3, 4, 5), pad=5))
+            story.append(t)
+
+        # --- records ---
+        story.append(CondPageBreak(90))
+        story.append(_section_heading(f"Leave records ({len(records)})", width))
+        recs = sorted(records, key=lambda r: (r.date, r.employee_id))
+        if not recs:
+            story.append(Paragraph("No leave recorded for this period.", sub_st))
+        else:
+            data = [['Date', 'Day', 'Employee', 'Type', 'Reason']]
+            for r in recs:
+                emp = r.employee
+                data.append([r.date.strftime('%d %b %Y'), r.date.strftime('%a'),
+                             Paragraph(esc(f"{emp.name} ({emp.employee_id})" if emp else ''), cell_st),
+                             f"{r.leave_type} - {LEAVE_TYPE_NAMES.get(r.leave_type, '')}",
+                             Paragraph(esc(r.reason or ''), cell_st)])
+            t = Table(data, colWidths=_fit([62, 32, 130, 85, 150], width), repeatRows=1, hAlign='LEFT')
+            t.setStyle(_pro_table_style(font_size=8.5, align='LEFT', left_cols=(0, 1, 2, 3, 4), pad=5))
+            story.append(t)
+
+        doc.build(story, canvasmaker=_make_numbered_canvas(company_name or '', 'Leave Report', pagesize))
+        return buf.getvalue()

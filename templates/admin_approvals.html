@@ -354,7 +354,7 @@
                                         <td>{{ request.attendance.in_time.strftime('%H:%M:%S') if request.attendance.in_time else '-' }}</td>
                                         <td>{{ request.attendance.out_time.strftime('%H:%M:%S') if request.attendance.out_time else '-' }}</td>
                                         <td>{{ request.manager.name if request.manager else '-' }}</td>
-                                        <td>{{ request.approver.name if request.approver else '-' }}</td>
+                                        <td>{{ request.approver_name }}</td>
                                         <td>{{ request.approved_at.strftime('%Y-%m-%d %H:%M') if request.approved_at else '-' }}</td>
                                     </tr>
                                     {% endfor %}
@@ -404,7 +404,7 @@
                                         <td>{{ request.attendance.in_time.strftime('%H:%M:%S') if request.attendance.in_time else '-' }}</td>
                                         <td class="text-danger">-</td>
                                         <td>{{ request.manager.name if request.manager else '-' }}</td>
-                                        <td>{{ request.approver.name if request.approver else '-' }}</td>
+                                        <td>{{ request.approver_name }}</td>
                                         <td>{{ request.approved_at.strftime('%Y-%m-%d %H:%M') if request.approved_at else '-' }}</td>
                                         <td>{{ request.remarks or '-' }}</td>
                                     </tr>
@@ -519,7 +519,7 @@
                                                 {{ request.status|title }}
                                             </span>
                                         </td>
-                                        <td>{{ request.approver.name if request.approver else '-' }}</td>
+                                        <td>{{ request.approver_name }}</td>
                                         <td>{{ request.approved_at.strftime('%Y-%m-%d %H:%M') if request.approved_at else '-' }}</td>
                                         <td>{{ request.remarks or '-' }}</td>
                                     </tr>

@@ -80,6 +80,8 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 | **Admin / manager attendance edit** | Managers and admins can correct IN/OUT times; calculations are re-run from the edited times |
 | **Full audit trail** | `attendance_type`, `approval_status`, `submission_timestamp` on every record |
 | **One shared rule engine** | Present / Late / Half-Day / Absent / Overtime computed in one place (`services/attendance_calculator.py`) for face *and* manual punches |
+| **Paid holidays** | Admin adds company holidays (e.g. Diwali) in **Settings → Holiday Calendar**. A holiday behaves exactly like a Sunday: attendance is blocked, nobody is marked absent, and no salary is deducted. Dashboards, attendance and payroll pages show the holiday name (`holiday_utils.py`) |
+| **Employee paid leave (CL / SL / EL)** | Admin records paid leave per employee in **Settings → Employee Leaves**, with a yearly quota per leave type (company default, optionally different for one employee) and a live balance. A paid-leave day is **not** marked Absent and costs no salary; it is shown as *Paid Leave Days* on the payslip. When the quota is used up, extra days are not recorded and stay Absent / LOP (`leave_utils.py`) |
 | **Versioned settings** | Past attendance is always evaluated against the rules in force *on that date* (`AttendanceSettingsHistory`) |
 
 ### 💰 Payroll & Reports
@@ -87,6 +89,10 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 - Configurable **allowances** (HRA, DA, Medical, Travel, Special, Other) and **deductions** (PF, ESIC, TDS, Professional Tax, LOP, Late, Transport)
 - **Overtime** and **late-entry deduction** rules (configurable in Settings / `.env`)
 - Payroll eligibility follows each employee's **joining date**
+- **Paid holidays** are excluded from payroll working days, so no pay is deducted for them
+- **Holiday list PDF** — download the configured holidays for one year or all years from Settings
+- **Paid leave** days count as paid days (never LOP) and appear as *Paid Leave Days* on the payslip; employees without leave get exactly the same numbers as before
+- **Leave report PDF** — leave balances and every leave day, for all employees or one, per year
 - **Automated monthly payroll** via APScheduler (1st of every month, 12:01, for the month just completed), with a startup **reconciliation pass** that backfills any period missed while the PC was off
 - **AES-256 password-protected PDF payslips** (ReportLab + pikepdf) with automated email delivery. Admins or employees can set a **custom payslip password**; otherwise a default formula derived from the employee's own details is used
 - Admin dashboard analytics, department-wise stats, and PDF export for admin and employee reports
@@ -190,6 +196,9 @@ Created automatically on first start (`db.create_all()` plus small, safe column 
 | `logout_approval_requests` | Auto-logout requests awaiting manager/admin approval |
 | `attendance_settings_history` · `working_hours` · `settings` · `company_settings` | Versioned attendance rules, office hours, company details |
 | `payroll` · `payroll_settings` | Generated payslip rows and payroll rules |
+| `holidays` | Company paid holidays (one row per date, with a name) |
+| `employee_leaves` · `leave_quotas` | Paid leave days (one row per employee per day: CL / SL / EL) and the yearly quotas (company default, or per employee) |
+| `leave_requests` | Employee leave applications and the admin's decision (pending / approved / rejected / cancelled) |
 
 The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licenses)) has its **own separate** SQLite file with `customers`, `orders` and `trials` tables. It is never part of a customer build.
 
@@ -200,7 +209,7 @@ The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licen
 | **Kiosk** | `/` (public, auto-scan), `POST /api/auto-scan-attendance` |
 | **Auth** | `/login` (admin and employee tabs), `/logout`, `/forgot-password`, `/employee-forgot-password`, `/change-password`, `/employee-change-password` |
 | **Setup & license** | `/setup/` (admin → company → license → done), `/license` (lock screen), `/license/activate` |
-| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll`, `/payroll-settings`, `/reports`, `/settings`, `/admin/approvals`, `/admin/pending-manual-attendance`, `/admin/login-audit` (+ `/admin/login-audit/pdf`), `POST /employees/<id>/unlock`, `/admin/manage-admins`, `POST /admin/<id>/unlock`, `POST /admin/unlock-request`, `/admin/unlock/<token>` |
+| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll`, `/payroll-settings`, `/reports`, `/settings` (+ `POST /settings/holidays/add`, `POST /settings/holidays/<id>/delete`, `/settings/holidays/pdf?year=2026\|all`), `/settings/leaves` (+ `POST /settings/leaves/add`, `POST /settings/leaves/<id>/delete`, `POST /settings/leaves/quotas`, `/settings/leaves/pdf?year=2026`, `POST /settings/leaves/requests/<id>/approve\|reject`), `/my-leaves` (+ `POST /my-leaves/apply`, `POST /my-leaves/<id>/cancel`), `/admin/approvals`, `/admin/pending-manual-attendance`, `/admin/login-audit` (+ `/admin/login-audit/pdf`), `POST /employees/<id>/unlock`, `/admin/manage-admins`, `POST /admin/<id>/unlock`, `POST /admin/unlock-request`, `/admin/unlock/<token>` |
 | **Manager** | `/manager/approvals`, `/manager/pending-manual-attendance`, `/manager/edit-attendance/<id>` |
 | **Employee** | `/employee-dashboard`, `/employee-attendance`, `/employee-payroll`, `/employee-reports`, `/employee-profile` |
 
@@ -550,9 +559,42 @@ Stop the app any time with **Ctrl + C**.
 
 On first run the app creates `instance/attendance.db`, `dataset/`, `uploads/` and `trained_model/` automatically. Logs go to `logs/` (rotating).
 
+### 🗓 Holiday Calendar (Settings)
+
+1. Open **Settings → Holiday Calendar (Paid Holidays)**.
+2. Click one or more dates on the calendar (they turn blue), type a name (e.g. *Diwali*) and press **Add Holiday**. Dates that already have a holiday are renamed instead of duplicated.
+3. **Configured holidays** is a fixed-height scrolling list, so the Settings page never grows longer as holidays are added. Use the **year dropdown** to browse a year (the current year is shown first) or *All years*. The 🗑 button removes a holiday.
+4. Press **PDF** to download the list for the selected year (or all years) — handy as a yearly holiday record.
+
+Sundays stay the weekly off. The Settings page is responsive: on a phone the two columns stack (settings and holidays first, then email, backup and license).
+
+### 🏖 Employee paid leave (Settings → Employee Leaves)
+
+1. **Quota** — set how many days of **CL** (Casual), **SL** (Sick) and **EL** (Earned) every employee gets per calendar year (built-in defaults: 12 / 6 / 15). To give one employee a different quota use **Quota for one employee** (selecting an employee fills in their current custom quota; employees with one are marked `*`). Leave a box empty, or press **Reset to default**, to remove the custom quota so the company default applies again.
+2. **Add leave** — pick the employee, leave type, *From* and optional *To* date (and a reason). Sundays and holidays inside the range are skipped automatically and never use up the balance.
+3. **Quota used up** — days beyond the remaining balance are **not** recorded; the message tells you which days, and they stay Absent / LOP. Record them again under another leave type if you want them paid.
+4. **Effect** — on a paid-leave day that employee is neither Present nor Absent (like a Sunday, for that one person) and is **paid in full**. Everyone else is unaffected. If the employee still punches in on a leave day, the real attendance is used.
+5. **Payroll** — leave days are counted as *Paid Days*, never LOP, and the payslip shows an extra **Paid Leave Days** figure (only when there was leave). Payroll that was already generated does not change by itself: after adding or removing leave for a past month, press **Calculate** on the Payroll page again (the app reminds you).
+6. **Records & PDF** — **Leave Records** lists every leave day (filter by year / employee, 🗑 removes a day and gives the balance back). **PDF** downloads balances plus all leave days.
+
+#### Employees: My Leaves (apply → admin approves)
+
+Every employee has a **My Leaves** page in the employee menu (and a leave-balance line on the dashboard):
+
+- **Balance** of CL / SL / EL for the year, the leave days already taken, and the status of every request (*Pending / Approved / Rejected / Cancelled*, with the admin's note).
+- **Request Leave** — type, *From*, optional *To*, reason. Sundays and holidays are not counted; a request that needs more days than the balance, overlaps another pending request, is older than 30 days or longer than 60 days is refused with a clear message. A pending request can be **cancelled** by the employee.
+- Employees see **only their own** leaves and requests.
+- A request changes **nothing** (attendance, balance, salary) until it is approved.
+
+The admin sees pending requests at the top of **Settings → Employee Leaves** (a badge on the Settings card shows how many are waiting), with the employee's balance next to each request, and presses **Approve** or **Reject** (optional note for the employee). Approving records the leave days exactly like *Add Paid Leave* does (Sundays/holidays skipped, quota enforced, a warning if that month's payroll already exists). If the quota was reduced meanwhile and only some days still fit, the fitting days are approved and the rest stay Absent / LOP (the note says which); if no day fits the request stays pending. On the day itself the employee's dashboard and attendance page show *You are on paid leave today*.
+
+Deleting an employee also removes their leave days, leave requests and custom quota.
+
+Not included yet: half-day leave, e-mail notifications about requests, and a Manager role approving/recommending.
+
 ### 👩‍💼 Typical daily workflow
 
-1. **Admin** adds employees and registers their faces (at least `MIN_FACE_IMAGES_REQUIRED` photos each), then trains/refreshes the face model.
+1. **Admin** adds employees and registers their faces (at least `MIN_FACE_IMAGES_REQUIRED` photos each), then trains/refreshes the face model. Company holidays are added once in **Settings → Holiday Calendar**.
 2. **Employees** are marked present by the kiosk screen, or log in and use **My Attendance**.
 3. At **23:59** anyone who never punched out gets a logout approval request → **manager/admin** approves or rejects it.
 4. On the **1st of every month** payroll for the previous month is generated, payslip PDFs are created and emailed.
@@ -746,7 +788,7 @@ installer\Output\AttendancePayrollSystem-Setup-1.0.0.exe
 
 > ❌ Do **not** switch the install path to `Program Files` without also changing where the app stores data (`BASE_DIR` in `config.py`) — first launch would fail with permission errors. The `.iss` header explains how.
 
-To bump the version, edit `MyAppVersion` (currently `1.0.0`) in the `.iss` file.
+To bump the version, edit `MyAppVersion` (currently `1.0.0`) in the `.iss` file, and `APP_VERSION` in `settings_routes.py` (shown under **Settings → System Info** and in the page footer).
 
 ---
 
@@ -1303,9 +1345,11 @@ Please read this before selling or deploying to a customer. The project is suita
 | `login_security.py` | Failed-login lockout (15/30/60 min, auto-expiring), unlock, and login audit logging — shared by `/login` and the kiosk manual-attendance login |
 | `setup_wizard.py` | First-run admin / company / license setup |
 | `attendance.py` · `payroll.py` | Attendance-rule and payroll engines |
+| `leave_utils.py` · `leave_routes.py` | Paid-leave helpers (quota/balance, `grant_leave()`, `validate_leave_request()`, the never-raising lookups used by attendance and payroll) and the employee **My Leaves** pages |
+| `holiday_utils.py` · `templates/_holiday_macros.html` | Weekly-off / paid-holiday helpers (`is_off_day()`, holiday lookups) and the badge macros used by the templates |
 | `ai_engine.py` · `face_recognition_singleton.py` | Face detection/recognition, strict matching, presence tracker, embedding cache |
 | `crypto_utils.py` | Encryption for face photos and stored payslip passwords |
-| `pdf_generator.py` · `email_service.py` | PDF payslips, attendance/admin reports and the Login Audit PDF (payslips AES-256), SMTP delivery |
+| `pdf_generator.py` · `email_service.py` | PDF payslips, attendance/admin reports, the Login Audit PDF the Holiday List PDF and the Leave Report PDF (payslips AES-256), SMTP delivery |
 | `scheduler_service.py` | APScheduler: monthly payroll, 23:59 auto-logout approvals, weekly backup, startup reconciliation and catch-up |
 | `backup_manager.py` | Backup creation, external copy, pruning and catch-up detection |
 | `services/` | `admin_reports_service`, `approval_service`, `attendance_calculator`, `attendance_stats`, `app_services` |

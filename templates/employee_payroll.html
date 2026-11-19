@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+{% from '_holiday_macros.html' import off_day_banner, holiday_list %}
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         
         <div class="container-fluid">
@@ -34,6 +35,11 @@
                     <li class="nav-item">
                         <a class="nav-link active" href="{{ url_for('payroll.employee_payroll') }}">
                             <i class="bi bi-cash"></i> My Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('leave.my_leaves') }}">
+                            <i class="bi bi-calendar2-check"></i> My Leaves
                         </a>
                     </li>
                     {% if current_user and current_user.designation == 'Manager' %}
@@ -75,6 +81,7 @@
     </nav>
 
     <div class="container mt-4">
+        {{ holiday_list(holidays_between(), 'Holidays this month') }}
         <div class="row">
             <div class="col-md-12">
                 <h2><i class="bi bi-cash"></i> My Payroll</h2>

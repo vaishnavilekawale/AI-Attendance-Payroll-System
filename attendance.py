@@ -244,11 +244,17 @@ class AttendanceManager:
         """
         today = datetime.now().date()
         
-        # Sunday is a weekly holiday/off day - block attendance marking
-        if today.weekday() == 6:  # 6 = Sunday
+        # Sunday (weekly off) or an admin-defined holiday - block attendance marking
+        from holiday_utils import off_day_reason
+        off_reason = off_day_reason(today)
+        if off_reason:
+            if today.weekday() == 6:
+                message = 'Today is Sunday (Weekly Off). Attendance cannot be marked.'
+            else:
+                message = f'Today is a holiday ({off_reason}). Attendance cannot be marked.'
             return {
                 'success': False,
-                'message': 'Today is Sunday (Weekly Off). Attendance cannot be marked.'
+                'message': message
             }
         
         now = datetime.now()
@@ -671,8 +677,9 @@ class AttendanceManager:
         today = dt.now().date()
         current_time = dt.now().time()
         
-        # Sunday is a weekly holiday/off day - completely excluded from attendance
-        if target_date.weekday() == 6:  # 6 = Sunday
+        # Sunday or admin-defined holiday - completely excluded from attendance
+        from holiday_utils import is_off_day
+        if is_off_day(target_date):
             return []
         
         # Get office end time from settings
@@ -702,6 +709,10 @@ class AttendanceManager:
         )]
         attendance_by_employee = {att.employee_id: att for att in attendances}
         
+        # Employees on approved PAID leave today (CL/SL/EL) - see leave_utils.py
+        from leave_utils import get_employees_on_leave
+        on_leave_ids = get_employees_on_leave(target_date)
+
         result = []
         
         for employee in all_active_employees:
@@ -762,6 +773,13 @@ class AttendanceManager:
 
                 result.append(attendance)
             else:
+                # Paid leave: no record is created, so the employee is neither
+                # Present nor Absent for this day (same as a Sunday/holiday,
+                # but only for this employee). If they DID punch, the real
+                # record above is used instead.
+                if employee.id in on_leave_ids:
+                    continue
+
                 # Employee has no attendance record - apply business rules
                 if target_date > today:
                     # CASE A: Future date

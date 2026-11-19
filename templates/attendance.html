@@ -35,6 +35,7 @@
     </script>
 </head>
 <body>
+{% from '_holiday_macros.html' import off_day_banner, holiday_list %}
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('attendance.dashboard') }}">
@@ -98,6 +99,8 @@
     </nav>
 
     <div class="container-fluid mt-4">
+        {{ off_day_banner(today_off_reason) }}
+        {{ holiday_list(holidays_between(request.args.get('start_date'), request.args.get('end_date')), 'Holidays in selected period') }}
         <div class="row">
             <div class="col-12">
                 <h2 class="mb-4">Attendance Management</h2>

@@ -7,6 +7,17 @@
     <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Phone layout: smaller holiday calendar cells, no sideways scrolling */
+        #holCalendar td, #holCalendar th { padding: .25rem .1rem; }
+        @media (max-width: 575.98px) {
+            #holCalendar td { height: 2.8rem !important; font-size: .8rem; }
+            #holCalendar td div { font-size: .5rem !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            #holCalendar th { font-size: .75rem; }
+            .container-fluid.py-4 { padding-left: .75rem; padding-right: .75rem; }
+            h2.mb-4 { font-size: 1.4rem; }
+        }
+    </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
@@ -97,8 +108,8 @@
         {% endif %}
 
         <div class="row">
-            <!-- Left Column - Main Settings Form (larger) -->
-            <div class="col-lg-7">
+            <!-- Left Column - Main Settings Form + Holidays -->
+            <div class="col-lg-7 d-flex flex-column">
                 <form method="POST" action="{{ url_for('settings.settings') }}" enctype="multipart/form-data">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <!-- Company Settings -->
@@ -134,25 +145,25 @@
                         </div>
                         <div class="card-body">
                             <div class="row">
-                                <div class="col-md-3">
+                                <div class="col-6 col-md-3">
                                     <div class="mb-3">
                                         <label class="form-label">Office Start Time</label>
                                         <input type="time" class="form-control" name="office_start_time" value="{{ settings.office_start_time }}" required>
                                     </div>
                                 </div>
-                                <div class="col-md-3">
+                                <div class="col-6 col-md-3">
                                     <div class="mb-3">
                                         <label class="form-label">Office End Time</label>
                                         <input type="time" class="form-control" name="office_end_time" value="{{ settings.office_end_time }}" required>
                                     </div>
                                 </div>
-                                <div class="col-md-3">
+                                <div class="col-6 col-md-3">
                                     <div class="mb-3">
                                         <label class="form-label">Grace Period (minutes)</label>
                                         <input type="number" class="form-control" name="grace_period_minutes" value="{{ settings.grace_period_minutes }}" required>
                                     </div>
                                 </div>
-                                <div class="col-md-3">
+                                <div class="col-6 col-md-3">
                                     <div class="mb-3">
                                         <label class="form-label">Working Hours/Day</label>
                                         <input type="number" class="form-control" name="working_hours_per_day" step="0.5" value="{{ settings.working_hours_per_day }}" required>
@@ -237,7 +248,7 @@
                         </div>
                     </div>
 
-                    <div class="mb-4">
+                    <div class="mb-4 d-flex flex-wrap gap-2">
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-save"></i> Save Settings
                         </button>
@@ -250,38 +261,121 @@
                     </div>
                 </form>
 
-                <!-- License Activation -->
-                <div class="card mb-4">
+                <!-- Holiday Calendar -->
+                <div class="card mb-4 flex-grow-1" id="holidays">
                     <div class="card-header">
-                        <h5 class="card-title mb-0"><i class="bi bi-key"></i> License Activation</h5>
+                        <h5 class="card-title mb-0"><i class="bi bi-calendar-heart"></i> Holiday Calendar (Paid Holidays)</h5>
                     </div>
                     <div class="card-body">
-                        <p class="small text-muted mb-2">
-                            Activate your license by pasting the license token provided
-                            by the vendor. The license is bound to this machine's
-                            hardware fingerprint.
+                        <p class="text-muted small mb-3">
+                            Click dates on the calendar to select them, enter a name (e.g. Diwali) and press
+                            <strong>Add Holiday</strong>. Holidays are treated like Sundays: attendance is not marked,
+                            nobody is marked absent, and no salary is deducted.
                         </p>
-                        <div id="licenseInfo" class="mb-3">
-                            <span class="spinner-border spinner-border-sm" role="status"></span>
-                            Loading license info...
+
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="holPrev" aria-label="Previous month"><i class="bi bi-chevron-left"></i></button>
+                            <strong id="holMonthLabel"></strong>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="holNext" aria-label="Next month"><i class="bi bi-chevron-right"></i></button>
                         </div>
-                        <form method="POST" action="{{ url_for('settings.activate_license') }}">
+                        <table class="table table-bordered text-center mb-2" id="holCalendar" style="table-layout: fixed;">
+                            <thead>
+                                <tr class="table-light">
+                                    <th class="text-danger">Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                        <div class="small text-muted mb-3">
+                            <span class="badge bg-success">Holiday</span>
+                            <span class="badge bg-primary">Selected</span>
+                            <span class="badge bg-secondary">Sunday (weekly off)</span>
+                        </div>
+
+                        <form method="POST" action="{{ url_for('settings.add_holidays') }}" class="row g-2 align-items-end" id="holidayForm">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <div class="mb-2">
-                                <textarea class="form-control form-control-sm" name="license_token" 
-                                          rows="3" placeholder="Paste your license token here..."
-                                          id="licenseTokenInput"></textarea>
+                            <input type="hidden" name="dates" id="holDates">
+                            <div class="col-md-7">
+                                <label class="form-label mb-1" for="holName">Holiday name</label>
+                                <input type="text" class="form-control" id="holName" name="name" maxlength="100" placeholder="e.g. Diwali">
+                                <div class="form-text" id="holSelectedInfo">No dates selected.</div>
                             </div>
-                            <button type="submit" class="btn btn-outline-primary btn-sm">
-                                <i class="bi bi-check-circle"></i> Activate License
-                            </button>
+                            <div class="col-md-5 d-flex flex-wrap gap-2">
+                                <button type="submit" class="btn btn-primary"><i class="bi bi-plus-circle"></i> Add Holiday</button>
+                                <button type="button" class="btn btn-outline-secondary" id="holClear">Clear</button>
+                            </div>
                         </form>
+
+                        <hr>
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                            <h6 class="mb-0">Configured holidays <span class="badge bg-secondary" id="holCount">{{ holidays|length }}</span></h6>
+                            {% if holidays %}
+                            <div class="d-flex align-items-center gap-2">
+                                <select class="form-select form-select-sm" id="holYearFilter" style="width:auto" aria-label="Filter by year">
+                                    {% for y in holiday_years %}
+                                    <option value="{{ y }}" {{ 'selected' if y == default_holiday_year else '' }}>{{ y }}</option>
+                                    {% endfor %}
+                                    <option value="all">All years</option>
+                                </select>
+                                <a href="#" class="btn btn-sm btn-outline-primary" id="holPdfBtn"
+                                   data-base="{{ url_for('settings.download_holidays_pdf') }}"
+                                   title="Download this list as PDF">
+                                    <i class="bi bi-file-earmark-pdf"></i> PDF
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% if holidays %}
+                        <div class="table-responsive border rounded" style="max-height: 280px; overflow-y: auto;">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light" style="position: sticky; top: 0; z-index: 1;">
+                                    <tr><th>Date</th><th>Day</th><th>Name</th><th class="text-end">Action</th></tr>
+                                </thead>
+                                <tbody id="holListBody">
+                                {% for h in holidays %}
+                                    <tr data-year="{{ h.date.year }}">
+                                        <td class="text-nowrap">{{ h.date.strftime('%d %b %Y') }}</td>
+                                        <td>{{ h.date.strftime('%A') }}</td>
+                                        <td>{{ h.name }}</td>
+                                        <td class="text-end">
+                                            <form method="POST" action="{{ url_for('settings.delete_holiday', holiday_id=h.id) }}" class="d-inline"
+                                                  onsubmit="return confirm('Remove this holiday?');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-muted small mt-2 mb-0">Use the year filter to browse other years. The PDF contains the selected year (or all years).</p>
+                        {% else %}
+                        <p class="text-muted small mb-0">No holidays added yet.</p>
+                        {% endif %}
                     </div>
                 </div>
             </div>
 
             <!-- Right Column - Configuration & Info (smaller) -->
-            <div class="col-lg-5">
+            <div class="col-lg-5 d-flex flex-column">
+                <!-- Employee Leaves -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-calendar2-check"></i> Employee Leaves
+                            {% if pending_leave_requests %}<span class="badge bg-warning text-dark ms-1">{{ pending_leave_requests }} request{{ 's' if pending_leave_requests != 1 else '' }}</span>{% endif %}</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted">
+                            Give an employee paid leave (CL / SL / EL) with a yearly quota and balance, and approve
+                            leave requests from employees. Paid leave days are not marked Absent and no salary is deducted.
+                        </p>
+                        <a href="{{ url_for('settings.leaves') }}" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-calendar2-plus"></i> Manage Leaves
+                        </a>
+                    </div>
+                </div>
+
                 <!-- Email Configuration -->
                 <div class="card mb-4">
                     <div class="card-header">
@@ -415,17 +509,48 @@
                             See admin accounts, unlock a locked admin, or add another
                             administrator. Existing admins are unaffected.
                         </p>
-                        <a href="{{ url_for('auth.manage_admins') }}" class="btn btn-outline-primary btn-sm">
-                            <i class="bi bi-person-plus"></i> Manage Admins
-                        </a>
-                        <a href="{{ url_for('auth.login_audit') }}" class="btn btn-outline-secondary btn-sm ms-1">
-                            <i class="bi bi-shield-check"></i> Login Audit Log
-                        </a>
+                        <div class="d-flex flex-wrap gap-2">
+                            <a href="{{ url_for('auth.manage_admins') }}" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-person-plus"></i> Manage Admins
+                            </a>
+                            <a href="{{ url_for('auth.login_audit') }}" class="btn btn-outline-secondary btn-sm">
+                                <i class="bi bi-shield-check"></i> Login Audit Log
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- License Activation -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="bi bi-key"></i> License Activation</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="small text-muted mb-2">
+                            Activate your license by pasting the license token provided
+                            by the vendor. The license is bound to this machine's
+                            hardware fingerprint.
+                        </p>
+                        <div id="licenseInfo" class="mb-3">
+                            <span class="spinner-border spinner-border-sm" role="status"></span>
+                            Loading license info...
+                        </div>
+                        <form method="POST" action="{{ url_for('settings.activate_license') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="mb-2">
+                                <textarea class="form-control form-control-sm" name="license_token" 
+                                          rows="3" placeholder="Paste your license token here..."
+                                          id="licenseTokenInput"></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-check-circle"></i> Activate License
+                            </button>
+                        </form>
                     </div>
                 </div>
 
                 <!-- System Info -->
-                <div class="card">
+                <div class="card mb-4 flex-grow-1">
                     <div class="card-header">
                         <h5 class="card-title mb-0">System Info</h5>
                     </div>
@@ -489,6 +614,99 @@
     <footer class="app-footer">
         AI Attendance &amp; Payroll System &middot; v{{ app_version }}
     </footer>
+    <script>
+        // Holiday calendar
+        (function () {
+            var holidays = {{ holidays_json|tojson }};
+            var byDate = {};
+            holidays.forEach(function (h) { byDate[h.date] = h.name; });
+            var selected = {};
+            var view = new Date(); view.setDate(1);
+            var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+            var body = document.querySelector('#holCalendar tbody');
+            var label = document.getElementById('holMonthLabel');
+            var datesInput = document.getElementById('holDates');
+            var info = document.getElementById('holSelectedInfo');
+
+            function iso(y, m, d) {
+                return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+            }
+
+            function updateInfo() {
+                var keys = Object.keys(selected).sort();
+                datesInput.value = keys.join(',');
+                info.textContent = keys.length ? keys.length + ' date(s) selected: ' + keys.join(', ') : 'No dates selected.';
+            }
+
+            function render() {
+                var y = view.getFullYear(), m = view.getMonth();
+                label.textContent = MONTHS[m] + ' ' + y;
+                body.innerHTML = '';
+                var first = new Date(y, m, 1).getDay();
+                var days = new Date(y, m + 1, 0).getDate();
+                var day = 1;
+                for (var r = 0; r < 6 && day <= days; r++) {
+                    var tr = document.createElement('tr');
+                    for (var c = 0; c < 7; c++) {
+                        var td = document.createElement('td');
+                        if ((r === 0 && c < first) || day > days) {
+                            td.innerHTML = '&nbsp;';
+                        } else {
+                            var key = iso(y, m, day);
+                            td.textContent = day;
+                            td.style.verticalAlign = 'top';
+                            td.style.height = '3.2rem';
+                            if (byDate[key]) {
+                                td.classList.add('bg-success', 'text-white');
+                                td.title = byDate[key];
+                                td.innerHTML = day + '<div style="font-size:.65rem;line-height:1">' +
+                                    byDate[key].replace(/</g, '&lt;') + '</div>';
+                            } else if (c === 0) {
+                                td.classList.add('bg-secondary', 'text-white');
+                                td.title = 'Sunday (weekly off)';
+                            } else {
+                                td.style.cursor = 'pointer';
+                                if (selected[key]) { td.classList.add('bg-primary', 'text-white'); }
+                                td.addEventListener('click', (function (k) {
+                                    return function () {
+                                        if (selected[k]) { delete selected[k]; } else { selected[k] = true; }
+                                        updateInfo(); render();
+                                    };
+                                })(key));
+                            }
+                            day++;
+                        }
+                        tr.appendChild(td);
+                    }
+                    body.appendChild(tr);
+                }
+            }
+
+            document.getElementById('holPrev').addEventListener('click', function () { view.setMonth(view.getMonth() - 1); render(); });
+            document.getElementById('holNext').addEventListener('click', function () { view.setMonth(view.getMonth() + 1); render(); });
+            document.getElementById('holClear').addEventListener('click', function () { selected = {}; updateInfo(); render(); });
+            document.getElementById('holidayForm').addEventListener('submit', function (e) {
+                if (!datesInput.value) { e.preventDefault(); alert('Please click one or more dates on the calendar first.'); }
+            });
+            render(); updateInfo();
+
+            // Configured-holidays list: year filter + PDF link
+            var yearSel = document.getElementById('holYearFilter');
+            var pdfBtn = document.getElementById('holPdfBtn');
+            function applyYearFilter() {
+                var y = yearSel.value, shown = 0;
+                document.querySelectorAll('#holListBody tr').forEach(function (tr) {
+                    var ok = (y === 'all' || tr.getAttribute('data-year') === y);
+                    tr.style.display = ok ? '' : 'none';
+                    if (ok) { shown++; }
+                });
+                document.getElementById('holCount').textContent = shown;
+                pdfBtn.href = pdfBtn.getAttribute('data-base') + '?year=' + encodeURIComponent(y);
+            }
+            if (yearSel && pdfBtn) { yearSel.addEventListener('change', applyYearFilter); applyYearFilter(); }
+        })();
+    </script>
     <script>
         // Auto-hide flash messages after 4 seconds (modal alerts are left alone)
         document.addEventListener('DOMContentLoaded', function () {

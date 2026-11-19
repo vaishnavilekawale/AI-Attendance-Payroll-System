@@ -34,6 +34,7 @@ from database import db
 from models import (
     Employee, EmployeeLogin, Settings, Attendance, Payroll,
     LogoutApprovalRequest, AttendanceActivity, LoginLockout, now_ist,
+    EmployeeLeave, LeaveRequest, LeaveQuota,
 )
 import login_security as ls
 from auth_decorators import login_required, admin_required
@@ -434,6 +435,13 @@ def delete_employee(id):
     payroll_records = Payroll.query.filter_by(employee_id=id).all()
     for record in payroll_records:
         db.session.delete(record)
+
+    # Paid leave data: leave days, leave requests and this employee's custom
+    # quota. The quota rows must go too, otherwise a later employee that gets
+    # a recycled id would silently inherit them.
+    EmployeeLeave.query.filter_by(employee_id=id).delete(synchronize_session=False)
+    LeaveRequest.query.filter_by(employee_id=id).delete(synchronize_session=False)
+    LeaveQuota.query.filter_by(employee_id=id).delete(synchronize_session=False)
 
     db.session.flush()
 

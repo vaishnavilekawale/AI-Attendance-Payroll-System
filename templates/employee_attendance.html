@@ -35,6 +35,7 @@
     </script>
 </head>
 <body>
+{% from '_holiday_macros.html' import off_day_banner, holiday_list %}
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('attendance.employee_dashboard') }}">
@@ -58,6 +59,11 @@
                     <li class="nav-item">
                         <a class="nav-link" href="{{ url_for('payroll.employee_payroll') }}">
                             <i class="bi bi-cash"></i> My Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('leave.my_leaves') }}">
+                            <i class="bi bi-calendar2-check"></i> My Leaves
                         </a>
                     </li>
                     {% if current_user and current_user.designation == 'Manager' %}
@@ -106,6 +112,20 @@
             </div>
         </div>
 
+{% if today_leave %}
+        <div class="alert alert-success d-flex align-items-center" role="alert">
+            <i class="bi bi-calendar2-check me-2"></i>
+            <div><strong>You are on paid leave today ({{ today_leave }}).</strong> You are not marked absent and no salary is deducted.</div>
+        </div>
+        {% endif %}
+        {% if today_off_reason %}
+        <div class="alert alert-success d-flex align-items-center" role="alert">
+            <i class="bi bi-calendar-heart me-2"></i>
+            <div><strong>Today is an off day: {{ today_off_reason }}.</strong> Attendance is not required and no one is marked absent. This is a paid day off.</div>
+        </div>
+        {% endif %}
+
+        {{ holiday_list(holidays_between(), 'Holidays this month') }}
         <!-- Today's Attendance Status -->
         <div class="row mb-4">
             <div class="col-md-12">

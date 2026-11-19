@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+{% from '_holiday_macros.html' import off_day_banner, holiday_list %}
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('attendance.dashboard') }}">
@@ -73,6 +74,7 @@
     </nav>
 
     <div class="container-fluid mt-4">
+        {{ holiday_list(holidays_in_month(month, year), 'Holidays this payroll month') }}
         <div class="row">
             <div class="col-12">
                 <div class="d-flex justify-content-between align-items-center mb-4">

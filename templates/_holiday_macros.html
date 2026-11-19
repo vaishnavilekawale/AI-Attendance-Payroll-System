@@ -1,0 +1,19 @@
+{# Shared holiday display macros. Import with:
+   {% from '_holiday_macros.html' import off_day_banner, holiday_list %} #}
+{% macro off_day_banner(reason) %}
+{% if reason %}
+<div class="alert alert-success d-flex align-items-center" role="alert">
+    <i class="bi bi-calendar-heart me-2"></i>
+    <div><strong>Today is an off day: {{ reason }}.</strong> Attendance is not required and no one is marked absent. This is a paid day off.</div>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro holiday_list(items, label='Holidays') %}
+{% if items %}
+<div class="alert alert-info py-2 mb-3" role="alert">
+    <i class="bi bi-calendar-heart me-1"></i><strong>{{ label }}:</strong>
+    {% for d, n in items %}<span class="badge bg-success ms-1">{{ d.strftime('%d %b %Y') }} &middot; {{ n }}</span>{% endfor %}
+</div>
+{% endif %}
+{% endmacro %}

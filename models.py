@@ -257,6 +257,7 @@ class Payroll(db.Model):
     late_days = db.Column(db.Integer, default=0)
     paid_days = db.Column(db.Float, default=0.0)
     lop_days = db.Column(db.Float, default=0.0)
+    paid_leave_days = db.Column(db.Float, default=0.0)  # CL/SL/EL days (already included in paid_days)
     total_hours_worked = db.Column(db.Float, default=0.0)
     overtime_hours = db.Column(db.Float, default=0.0)
     per_day_salary = db.Column(db.Numeric(10, 2, asdecimal=False), default=0.0)
@@ -305,6 +306,82 @@ class Payroll(db.Model):
     
     # Ensure unique employee per month
     __table_args__ = (db.UniqueConstraint('employee_id', 'month', 'year', name='unique_employee_month'),)
+
+class Holiday(db.Model):
+    """Company paid holiday (e.g. Diwali). Treated exactly like a Sunday /
+    weekly off: attendance is blocked, nobody is marked absent, and the day is
+    excluded from payroll working days so no pay is deducted."""
+    __tablename__ = 'holidays'
+
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, unique=True, index=True)
+    name = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=now_ist)
+
+class LeaveQuota(db.Model):
+    """Yearly paid-leave quota (days) for one leave type (CL / SL / EL).
+
+    employee_id NULL  -> company-wide default for every employee.
+    employee_id set   -> override for that one employee.
+    The quota applies to each calendar year.
+    """
+    __tablename__ = 'leave_quotas'
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=True, index=True)
+    leave_type = db.Column(db.String(2), nullable=False)
+    days_per_year = db.Column(db.Float, nullable=False, default=0.0)
+    updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
+
+
+class EmployeeLeave(db.Model):
+    """One PAID leave day for one employee (one row per day).
+
+    A day with a row here is treated like a Sunday/holiday for THAT employee
+    only: no absent mark, no LOP, full pay (see leave_utils.py).
+    """
+    __tablename__ = 'employee_leaves'
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False, index=True)
+    date = db.Column(db.Date, nullable=False, index=True)
+    leave_type = db.Column(db.String(2), nullable=False)  # CL / SL / EL
+    reason = db.Column(db.String(200))
+    created_by = db.Column(db.Integer)
+    created_at = db.Column(db.DateTime, default=now_ist)
+
+    employee = db.relationship('Employee', backref=db.backref('leaves', lazy='dynamic',
+                                                              cascade='all, delete-orphan'))
+
+    __table_args__ = (db.UniqueConstraint('employee_id', 'date', name='unique_employee_leave_date'),)
+
+
+class LeaveRequest(db.Model):
+    """An employee's request for paid leave, decided by the admin.
+
+    pending   -> waiting for the admin
+    approved  -> the leave days were recorded in employee_leaves
+    rejected  -> admin said no (admin_note holds the reason)
+    cancelled -> withdrawn by the employee while still pending
+    """
+    __tablename__ = 'leave_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False, index=True)
+    leave_type = db.Column(db.String(2), nullable=False)  # CL / SL / EL
+    from_date = db.Column(db.Date, nullable=False)
+    to_date = db.Column(db.Date, nullable=False)
+    working_days = db.Column(db.Integer, default=0)        # days it needs, at the time of applying
+    reason = db.Column(db.String(200))
+    status = db.Column(db.String(10), nullable=False, default='pending', index=True)
+    admin_note = db.Column(db.String(200))
+    decided_by = db.Column(db.Integer)
+    decided_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=now_ist)
+
+    employee = db.relationship('Employee', backref=db.backref('leave_requests', lazy='dynamic',
+                                                              cascade='all, delete-orphan'))
+
 
 class Settings(db.Model):
     __tablename__ = 'settings'
@@ -514,7 +591,10 @@ class LogoutApprovalRequest(db.Model):
     remarks = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=now_ist)
     approved_at = db.Column(db.DateTime)
-    approved_by = db.Column(db.Integer, db.ForeignKey('employees.id'))
+    approved_by = db.Column(db.Integer, db.ForeignKey('employees.id'))   # the MANAGER who decided
+    # The ADMIN who decided (admins live in a different table than employees, so
+    # an admin id must never be stored in approved_by - id 1 there is employee #1).
+    approved_by_admin_id = db.Column(db.Integer)
 
     # Set when an Admin manually edits the attendance after this request was
     # rejected. The request stays 'rejected' (so approval history is preserved),
@@ -531,6 +611,22 @@ class LogoutApprovalRequest(db.Model):
     employee = db.relationship('Employee', foreign_keys=[employee_id], backref='logout_requests')
     manager = db.relationship('Employee', foreign_keys=[manager_id], backref='assigned_approvals')
     approver = db.relationship('Employee', foreign_keys=[approved_by])
+
+    @property
+    def approver_name(self):
+        """Name shown in 'Approved/Rejected By': the admin or the manager who decided."""
+        if self.approved_by_admin_id:
+            admin = db.session.get(Admin, self.approved_by_admin_id)
+            return f"{admin.username} (Admin)" if admin else 'Admin'
+        if self.approved_by is None:
+            return '-'
+        if self.approved_by != self.manager_id:
+            # Old rows: a manager can only decide requests assigned to him
+            # (approved_by == manager_id), so anything else was an admin whose
+            # id had been saved here.
+            admin = db.session.get(Admin, self.approved_by)
+            return f"{admin.username} (Admin)" if admin else 'Admin'
+        return self.approver.name if self.approver else '-'
     
     # Ensure exactly one request per attendance_id for auto_logout requests
     __table_args__ = (

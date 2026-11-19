@@ -29,12 +29,14 @@ everywhere it appeared.
 import os
 import io
 import zipfile
+from datetime import date
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, session, current_app
 
 from config import Config, BASE_DIR
 from database import db
-from models import Settings, Employee, AttendanceSettingsHistory, now_ist
+from models import (Settings, Employee, AttendanceSettingsHistory, Holiday, Payroll,
+                    EmployeeLeave, LeaveQuota, LeaveRequest, now_ist)
 from auth_decorators import login_required, admin_required
 from file_helpers import allowed_file
 from services.app_services import get_services
@@ -42,6 +44,10 @@ from licensing.license_manager import get_license_manager
 from backup_manager import write_backup_zip
 
 settings_bp = Blueprint('settings', __name__)
+
+# Shown in Settings -> System Info and the page footer. Keep in sync with
+# MyAppVersion in installer/AttendancePayrollSystem.iss.
+APP_VERSION = '1.0.0'
 
 
 def _mask_email(address):
@@ -166,8 +172,445 @@ def settings():
         return redirect(url_for('settings.settings'))
 
     email_test = None
+    holidays = Holiday.query.order_by(Holiday.date).all()
+    holidays_json = [{'id': h.id, 'date': h.date.isoformat(), 'name': h.name} for h in holidays]
+    holiday_years = sorted({h.date.year for h in holidays}, reverse=True)
+    this_year = now_ist().year
+    if this_year in holiday_years:
+        default_holiday_year = this_year
+    else:
+        default_holiday_year = holiday_years[0] if holiday_years else this_year
+    try:
+        pending_leave_requests = LeaveRequest.query.filter_by(status='pending').count()
+    except Exception:
+        db.session.rollback()
+        pending_leave_requests = 0
     return render_template('settings.html', settings=settings, email_test=email_test,
-                           mail_status=_email_config_status(settings))
+                           mail_status=_email_config_status(settings),
+                           pending_leave_requests=pending_leave_requests,
+                           holidays=holidays, holidays_json=holidays_json,
+                           app_version=APP_VERSION,
+                           holiday_years=holiday_years,
+                           default_holiday_year=default_holiday_year)
+
+
+# ==================== HOLIDAY CALENDAR ====================
+
+@settings_bp.route('/settings/holidays/add', methods=['POST'])
+@login_required
+@admin_required
+def add_holidays():
+    """Add one or more paid-holiday dates (comma-separated YYYY-MM-DD) sharing one name."""
+    from datetime import datetime as _dt
+    name = (request.form.get('name') or '').strip()
+    raw_dates = [d.strip() for d in (request.form.get('dates') or '').split(',') if d.strip()]
+
+    if not raw_dates:
+        flash('Please select at least one date on the calendar.', 'danger')
+        return redirect(url_for('settings.settings') + '#holidays')
+    if not name:
+        flash('Please enter a holiday name (e.g. Diwali).', 'danger')
+        return redirect(url_for('settings.settings') + '#holidays')
+    name = name[:100]
+
+    added = updated = skipped = 0
+    for raw in raw_dates:
+        try:
+            d = _dt.strptime(raw, '%Y-%m-%d').date()
+        except ValueError:
+            skipped += 1
+            continue
+        existing = Holiday.query.filter_by(date=d).first()
+        if existing:
+            existing.name = name
+            updated += 1
+        else:
+            db.session.add(Holiday(date=d, name=name))
+            added += 1
+    db.session.commit()
+
+    current_app.logger.info(f"HOLIDAYS saved by admin: added={added}, updated={updated}, skipped={skipped}, name={name}")
+    msg = f"{added} holiday(s) added"
+    if updated:
+        msg += f", {updated} renamed"
+    if skipped:
+        msg += f", {skipped} invalid date(s) ignored"
+    flash(msg + '.', 'success' if (added or updated) else 'danger')
+    return redirect(url_for('settings.settings') + '#holidays')
+
+
+@settings_bp.route('/settings/holidays/<int:holiday_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_holiday(holiday_id):
+    holiday = db.session.get(Holiday, holiday_id)
+    if not holiday:
+        flash('Holiday not found.', 'danger')
+    else:
+        db.session.delete(holiday)
+        db.session.commit()
+        current_app.logger.info(f"HOLIDAY removed by admin: {holiday.date} {holiday.name}")
+        flash(f"Holiday '{holiday.name}' ({holiday.date.strftime('%d %b %Y')}) removed.", 'success')
+    return redirect(url_for('settings.settings') + '#holidays')
+
+
+@settings_bp.route('/settings/holidays/pdf', methods=['GET'])
+@login_required
+@admin_required
+def download_holidays_pdf():
+    """Download the configured holiday list as a PDF (?year=2026 or ?year=all)."""
+    from pdf_generator import PDFGenerator
+
+    year_arg = (request.args.get('year') or 'all').strip().lower()
+    query = Holiday.query.order_by(Holiday.date)
+    if year_arg == 'all':
+        year_label = 'All years'
+    else:
+        try:
+            year = int(year_arg)
+        except ValueError:
+            flash('Invalid year.', 'danger')
+            return redirect(url_for('settings.settings') + '#holidays')
+        query = query.filter(Holiday.date >= date(year, 1, 1), Holiday.date <= date(year, 12, 31))
+        year_label = str(year)
+
+    settings = Settings.query.first()
+    pdf_bytes = PDFGenerator().generate_holiday_list_pdf(query.all(), getattr(settings, 'company_name', '') or '', year_label)
+    filename = f"holiday_list_{year_label.replace(' ', '_').lower()}.pdf"
+    return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
+                     as_attachment=True, download_name=filename)
+
+
+# ==================== EMPLOYEE PAID LEAVE (CL / SL / EL) ====================
+
+def _leave_year(raw):
+    try:
+        y = int(raw)
+        if 2000 <= y <= 2100:
+            return y
+    except (TypeError, ValueError):
+        pass
+    return now_ist().year
+
+
+def _parse_iso_date(raw):
+    from datetime import datetime as _dt
+    try:
+        return _dt.strptime((raw or '').strip(), '%Y-%m-%d').date()
+    except ValueError:
+        return None
+
+
+def _leave_redirect(year=None, employee_id=None):
+    args = {}
+    if year:
+        args['year'] = year
+    if employee_id:
+        args['employee_id'] = employee_id
+    return redirect(url_for('settings.leaves', **args))
+
+
+def _leave_report_data(year, employee_id=None):
+    """Balance rows + leave records used by both the page and the PDF."""
+    from leave_utils import LEAVE_TYPES, get_default_quotas, get_balance
+
+    employees = Employee.query.filter_by(status='active').order_by(Employee.name).all()
+    defaults = get_default_quotas()
+    balances = []
+    for emp in employees:
+        if employee_id and emp.id != employee_id:
+            continue
+        balances.append({'employee': emp, 'balance': get_balance(emp.id, year, defaults)})
+
+    q = EmployeeLeave.query.filter(
+        EmployeeLeave.date >= date(year, 1, 1), EmployeeLeave.date <= date(year, 12, 31))
+    if employee_id:
+        q = q.filter(EmployeeLeave.employee_id == employee_id)
+    records = q.order_by(EmployeeLeave.date.desc(), EmployeeLeave.id.desc()).all()
+    return employees, defaults, balances, records
+
+
+@settings_bp.route('/settings/leaves', methods=['GET'])
+@login_required
+@admin_required
+def leaves():
+    """Employee paid leave: add leave, quotas, balances and leave records."""
+    from leave_utils import LEAVE_TYPES
+
+    year = _leave_year(request.args.get('year'))
+    try:
+        employee_id = int(request.args.get('employee_id') or 0) or None
+    except ValueError:
+        employee_id = None
+
+    employees, defaults, balances, records = _leave_report_data(year, employee_id)
+    years = sorted({year, now_ist().year} | {r.date.year for r in EmployeeLeave.query.all()}, reverse=True)
+    from leave_utils import get_balance, get_employee_overrides
+    overrides_json = {str(e.id): get_employee_overrides(e.id) for e in employees}
+    balances_json = {str(e.id): get_balance(e.id, year, defaults) for e in employees}
+    from leave_utils import leave_working_days
+    pending_requests = (LeaveRequest.query.filter_by(status='pending')
+                        .order_by(LeaveRequest.created_at).all())
+    recent_requests = (LeaveRequest.query.filter(LeaveRequest.status != 'pending')
+                       .order_by(LeaveRequest.decided_at.desc(), LeaveRequest.id.desc()).limit(15).all())
+    request_info = {}
+    for r in pending_requests:
+        bal = get_balance(r.employee_id, r.from_date.year, defaults)[r.leave_type]
+        request_info[r.id] = {'days': len(leave_working_days(r.employee, r.from_date, r.to_date)),
+                              'balance': bal['balance'], 'quota': bal['quota']}
+    return render_template('leaves.html', employees=employees, leave_types=LEAVE_TYPES,
+                           pending_requests=pending_requests, recent_requests=recent_requests,
+                           request_info=request_info,
+                           defaults=defaults, balances=balances, records=records,
+                           year=year, years=years, employee_id=employee_id,
+                           balances_json=balances_json, overrides_json=overrides_json,
+                           app_version=APP_VERSION,
+                           today_iso=now_ist().date().isoformat())
+
+
+@settings_bp.route('/settings/leaves/add', methods=['POST'])
+@login_required
+@admin_required
+def add_leave():
+    from leave_utils import grant_leave, LEAVE_TYPE_NAMES
+
+    employee = db.session.get(Employee, request.form.get('employee_id', type=int) or 0)
+    leave_type = (request.form.get('leave_type') or '').upper()
+    start = _parse_iso_date(request.form.get('from_date'))
+    end = _parse_iso_date(request.form.get('to_date')) or start
+    reason = request.form.get('reason') or ''
+
+    if not employee:
+        flash('Please select an employee.', 'danger')
+        return _leave_redirect()
+    if leave_type not in LEAVE_TYPE_NAMES:
+        flash('Please select a leave type.', 'danger')
+        return _leave_redirect()
+    if not start:
+        flash('Please select the leave date.', 'danger')
+        return _leave_redirect()
+
+    try:
+        res = grant_leave(employee, start, end, leave_type, reason, session.get('admin_id'))
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'danger')
+        return _leave_redirect(start.year)
+    db.session.commit()
+
+    fmt = lambda days: ', '.join(d.strftime('%d %b') for d in days)
+    granted = res['granted']
+    if granted:
+        msg = f"{len(granted)} day(s) of {LEAVE_TYPE_NAMES[leave_type]} recorded for {employee.name}."
+        category = 'success'
+    else:
+        msg = f"No leave was recorded for {employee.name}."
+        category = 'danger'
+    if res['over_quota']:
+        msg += (f" {len(res['over_quota'])} day(s) not recorded because the yearly "
+                f"{leave_type} quota is used up - they stay Absent / LOP ({fmt(res['over_quota'])}).")
+        category = 'warning' if granted else 'danger'
+    if res['off_days']:
+        msg += f" Skipped Sunday/holiday: {fmt(res['off_days'])}."
+    if res['already']:
+        msg += f" Already had leave: {fmt(res['already'])}."
+    if res['before_joining']:
+        msg += f" Before joining date, skipped: {fmt(res['before_joining'])}."
+
+    # Payroll that was already generated for these months does not change by itself.
+    months = sorted({(d.year, d.month) for d in granted})
+    stale = [m for m in months if Payroll.query.filter_by(
+        employee_id=employee.id, year=m[0], month=m[1]).first()]
+    if stale:
+        msg += (" Payroll for " + ', '.join(date(y, m, 1).strftime('%b %Y') for y, m in stale) +
+                " already exists - recalculate it from the Payroll page to include this leave.")
+        category = 'warning' if category == 'success' else category
+
+    current_app.logger.info(
+        f"LEAVE added by admin: employee={employee.id} type={leave_type} granted={len(granted)} "
+        f"over_quota={len(res['over_quota'])} off={len(res['off_days'])} already={len(res['already'])}")
+    flash(msg, category)
+    return _leave_redirect(start.year)
+
+
+@settings_bp.route('/settings/leaves/requests/<int:request_id>/approve', methods=['POST'])
+@login_required
+@admin_required
+def approve_leave_request(request_id):
+    """Approve an employee's leave request: creates the paid leave days."""
+    from leave_utils import grant_leave, LEAVE_TYPE_NAMES
+
+    req = db.session.get(LeaveRequest, request_id)
+    if not req or req.status != 'pending':
+        flash('This request is no longer pending.', 'warning')
+        return _leave_redirect()
+    employee = req.employee
+    try:
+        res = grant_leave(employee, req.from_date, req.to_date, req.leave_type,
+                          req.reason or '', session.get('admin_id'))
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), 'danger')
+        return _leave_redirect()
+
+    fmt = lambda days: ', '.join(d.strftime('%d %b') for d in days)
+    granted = res['granted']
+    if not granted:
+        db.session.rollback()
+        why = []
+        if res['over_quota']:
+            why.append(f"the {req.leave_type} quota is used up ({fmt(res['over_quota'])})")
+        if res['already']:
+            why.append(f"leave already exists on {fmt(res['already'])}")
+        if res['off_days']:
+            why.append(f"only Sundays/holidays ({fmt(res['off_days'])})")
+        flash(f"Could not approve - no day can be recorded: {'; '.join(why) or 'nothing to record'}. "
+              f"Increase the quota or reject the request.", 'danger')
+        return _leave_redirect()
+    db.session.flush()   # let the quota/leave rows be visible before the payroll check below
+
+    note = ''
+    if res['over_quota']:
+        note = f"Not paid (quota used up): {fmt(res['over_quota'])}"
+    req.status = 'approved'
+    req.decided_by = session.get('admin_id')
+    req.decided_at = now_ist()
+    req.admin_note = (note[:200] or None)
+    db.session.commit()
+
+    msg = f"Approved: {len(granted)} day(s) of {LEAVE_TYPE_NAMES[req.leave_type]} for {employee.name}."
+    category = 'success'
+    if note:
+        msg += f" {note} - those days stay Absent / LOP."
+        category = 'warning'
+    months = sorted({(d.year, d.month) for d in granted})
+    stale = [m for m in months if Payroll.query.filter_by(
+        employee_id=employee.id, year=m[0], month=m[1]).first()]
+    if stale:
+        msg += (" Payroll for " + ', '.join(date(y, m, 1).strftime('%b %Y') for y, m in stale) +
+                " already exists - recalculate it from the Payroll page to include this leave.")
+        category = 'warning'
+    current_app.logger.info(f"LEAVE request {req.id} approved: employee={employee.id} granted={len(granted)}")
+    flash(msg, category)
+    return _leave_redirect(req.from_date.year)
+
+
+@settings_bp.route('/settings/leaves/requests/<int:request_id>/reject', methods=['POST'])
+@login_required
+@admin_required
+def reject_leave_request(request_id):
+    req = db.session.get(LeaveRequest, request_id)
+    if not req or req.status != 'pending':
+        flash('This request is no longer pending.', 'warning')
+        return _leave_redirect()
+    req.status = 'rejected'
+    req.decided_by = session.get('admin_id')
+    req.decided_at = now_ist()
+    req.admin_note = ((request.form.get('note') or '').strip()[:200] or None)
+    db.session.commit()
+    current_app.logger.info(f"LEAVE request {req.id} rejected: employee={req.employee_id}")
+    flash(f"Request from {req.employee.name} rejected.", 'success')
+    return _leave_redirect()
+
+
+@settings_bp.route('/settings/leaves/<int:leave_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_leave(leave_id):
+    leave = db.session.get(EmployeeLeave, leave_id)
+    year = None
+    if not leave:
+        flash('Leave not found.', 'danger')
+    else:
+        year = leave.date.year
+        name = leave.employee.name if leave.employee else ''
+        stale = Payroll.query.filter_by(
+            employee_id=leave.employee_id, year=leave.date.year, month=leave.date.month).first()
+        d = leave.date
+        db.session.delete(leave)
+        db.session.commit()
+        current_app.logger.info(f"LEAVE removed by admin: employee={leave.employee_id} date={d}")
+        msg = f"Leave on {d.strftime('%d %b %Y')} removed for {name}."
+        if stale:
+            msg += f" Payroll for {d.strftime('%b %Y')} already exists - recalculate it from the Payroll page."
+        flash(msg, 'warning' if stale else 'success')
+    return _leave_redirect(year)
+
+
+@settings_bp.route('/settings/leaves/quotas', methods=['POST'])
+@login_required
+@admin_required
+def save_leave_quotas():
+    """Save yearly quotas: company default (no employee) or one employee's override."""
+    from leave_utils import LEAVE_TYPES
+
+    employee_id = request.form.get('employee_id', type=int)
+    employee = db.session.get(Employee, employee_id) if employee_id else None
+    if employee_id and not employee:
+        flash('Employee not found.', 'danger')
+        return _leave_redirect()
+
+    # "Reset to default": drop every custom quota of this employee, so the
+    # company default (Yearly Quota - all employees) applies again.
+    if employee and request.form.get('reset'):
+        LeaveQuota.query.filter_by(employee_id=employee.id).delete()
+        db.session.commit()
+        flash(f"{employee.name} now uses the default quota again.", 'success')
+        return _leave_redirect(request.form.get('year', type=int))
+
+    values = {}
+    for code, _ in LEAVE_TYPES:
+        raw = (request.form.get(f'quota_{code}') or '').strip()
+        if raw == '':
+            values[code] = None  # blank: employee -> use the default; default -> keep current
+            continue
+        try:
+            days = float(raw)
+        except ValueError:
+            flash('Quota must be a number.', 'danger')
+            return _leave_redirect()
+        if days < 0 or days > 366:
+            flash('Quota must be between 0 and 366 days.', 'danger')
+            return _leave_redirect()
+        values[code] = days
+
+    for code, days in values.items():
+        row = LeaveQuota.query.filter_by(employee_id=employee.id if employee else None,
+                                         leave_type=code).first()
+        if days is None:
+            if employee and row:
+                db.session.delete(row)  # back to the company default
+            continue
+        if row:
+            row.days_per_year = days
+        else:
+            db.session.add(LeaveQuota(employee_id=employee.id if employee else None,
+                                      leave_type=code, days_per_year=days))
+    db.session.commit()
+    flash(f"Leave quota saved for {employee.name}." if employee else "Default leave quota saved.", 'success')
+    return _leave_redirect(request.form.get('year', type=int))
+
+
+@settings_bp.route('/settings/leaves/pdf', methods=['GET'])
+@login_required
+@admin_required
+def download_leaves_pdf():
+    """Download leave balances + leave records as PDF (?year=2026[&employee_id=5])."""
+    from pdf_generator import PDFGenerator
+
+    year = _leave_year(request.args.get('year'))
+    employee_id = request.args.get('employee_id', type=int)
+    _, _, balances, records = _leave_report_data(year, employee_id)
+    settings = Settings.query.first()
+    scope = ''
+    if employee_id:
+        emp = db.session.get(Employee, employee_id)
+        scope = emp.name if emp else ''
+    pdf_bytes = PDFGenerator().generate_leave_report_pdf(
+        year, getattr(settings, 'company_name', '') or '', balances, records, scope)
+    filename = f"leave_report_{year}" + (f"_emp{employee_id}" if employee_id else '') + ".pdf"
+    return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
+                     as_attachment=True, download_name=filename)
 
 
 # ==================== EMAIL (SMTP) SETTINGS ====================

@@ -349,7 +349,9 @@ def dashboard():
     # Department stats
     dept_stats = am.get_department_stats(today, today)
     
+    from holiday_utils import off_day_reason
     return render_template('dashboard.html',
+                         today_off_reason=off_day_reason(today),
                          present=present,
                          absent=absent,
                          half_day=half_day,
@@ -468,7 +470,23 @@ def employee_dashboard():
         attendance_date=today
     ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(AttendanceActivity.activity_time).all()
     
+    from holiday_utils import off_day_reason
+    # Paid-leave summary for the dashboard card (never breaks the dashboard)
+    try:
+        from leave_utils import get_balance, get_leave_dates
+        leave_balance = get_balance(employee_id, today.year)
+        _today_leave = get_leave_dates(employee_id, today, today).get(today)
+        from models import LeaveRequest
+        pending_leave_count = LeaveRequest.query.filter_by(employee_id=employee_id, status='pending').count()
+    except Exception:
+        db.session.rollback()
+        leave_balance, _today_leave, pending_leave_count = None, None, 0
+
     return render_template('employee_dashboard.html',
+                         leave_balance=leave_balance,
+                         today_leave=_today_leave,
+                         pending_leave_count=pending_leave_count,
+                         today_off_reason=off_day_reason(today),
                          employee=employee,
                          current_user=current_user,
                          today=today,
@@ -856,7 +874,17 @@ def employee_attendance():
         am._add_display_out_time(att, att.date)
         # logger.info(f"  Display OUT Time after _add_display_out_time: {att.display_out_time if hasattr(att, 'display_out_time') else 'N/A'}")
     
+    from holiday_utils import off_day_reason
+    try:
+        from leave_utils import get_leave_dates
+        today_leave = get_leave_dates(employee_id, today, today).get(today)
+    except Exception:
+        db.session.rollback()
+        today_leave = None
+
     return render_template('employee_attendance.html', 
+                         today_leave=today_leave,
+                         today_off_reason=off_day_reason(today),
                          employee=employee, 
                          current_user=current_user,
                          attendance_records=attendance_records,

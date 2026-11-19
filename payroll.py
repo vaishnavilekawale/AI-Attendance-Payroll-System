@@ -45,6 +45,9 @@ PAYSLIP_ATTENDANCE_FIELDS = (
     ('present_days', 'Present Days'),
     ('half_days', 'Half Days'),
     ('absent_days', 'Absent Days'),
+    # 'paid_leave_days' ("Paid Leave Days") is inserted here by
+    # build_payslip_attendance_rows ONLY when the employee had paid leave,
+    # so payslips of everyone else look exactly as before.
     ('late_days', 'Late Days'),
     ('paid_days', 'Paid Days'),
     ('lop_days', 'LOP Days'),
@@ -88,9 +91,12 @@ def round_days(days):
     return round(float(days or 0.0), 1)
 
 
-def compute_paid_and_lop_days(present_days, absent_days, half_days):
-    """Derive paid and LOP day counts from attendance breakdown."""
-    paid_days = round_days(present_days + (half_days * 0.5))
+def compute_paid_and_lop_days(present_days, absent_days, half_days, paid_leave_days=0):
+    """Derive paid and LOP day counts from attendance breakdown.
+
+    Paid leave (CL/SL/EL) days count as PAID days and never as LOP.
+    """
+    paid_days = round_days(present_days + (half_days * 0.5) + (paid_leave_days or 0))
     lop_days = round_days(absent_days + (half_days * 0.5))
     return paid_days, lop_days
 
@@ -125,6 +131,11 @@ def build_payslip_attendance_rows(payroll):
     rows = []
     for field_name, label in PAYSLIP_ATTENDANCE_FIELDS:
         value = get_payroll_field_value(payroll, field_name)
+        if field_name == 'late_days':
+            leave_value = get_payroll_field_value(payroll, 'paid_leave_days')
+            if leave_value > 0:
+                rows.append(('Paid Leave Days',
+                             str(int(leave_value)) if leave_value == int(leave_value) else f"{leave_value:.1f}"))
         if field_name == 'per_day_salary':
             display = format_currency(value)
         elif field_name in ('paid_days', 'lop_days'):
@@ -198,12 +209,10 @@ def get_month_working_days(year, month):
     window restricted to a handful of days) or because of absences within
     the period.
     """
+    from holiday_utils import count_working_days
     total_days = get_month_total_days(year, month)
-    working_days = 0
-    for day in range(1, total_days + 1):
-        if date(year, month, day).weekday() != 6:  # 6 = Sunday
-            working_days += 1
-    return working_days
+    # Sundays AND admin-defined holidays are excluded (paid off days).
+    return count_working_days(date(year, month, 1), date(year, month, total_days))
 
 
 def get_proration_factor(paid_days, full_month_working_days):
@@ -236,9 +245,14 @@ def compute_payroll_amounts(
     overtime_hours,
     month,
     year,
+    paid_leave_days=0,
 ):
     """
     Compute all payroll earnings, deductions, and summary fields for one employee.
+
+    ``paid_leave_days`` (CL/SL/EL) are paid days: they raise paid_days (so the
+    pro-rata factor stays full) and are never absent/LOP. Default 0 keeps every
+    existing caller's result identical.
     Returns a dict ready to persist on the Payroll model.
     """
     settings = Settings.get_settings()
@@ -268,7 +282,8 @@ def compute_payroll_amounts(
     payslip_half_days = round_days(half_days + late_mark_half_days)
     present_days = present_days - late_mark_half_days
 
-    paid_days, lop_days = compute_paid_and_lop_days(present_days, absent_days, payslip_half_days)
+    paid_leave_days = float(paid_leave_days or 0)
+    paid_days, lop_days = compute_paid_and_lop_days(present_days, absent_days, payslip_half_days, paid_leave_days)
 
     # ------------------------------------------------------------------
     # PRO-RATA EARNINGS SCALING
@@ -443,6 +458,7 @@ def compute_payroll_amounts(
         'late_days': late_days,
         'paid_days': paid_days,
         'lop_days': lop_days,
+        'paid_leave_days': paid_leave_days,
         'total_hours_worked': round_money(total_hours_worked),
         'overtime_hours': round_money(overtime_hours),
         'per_day_salary': per_day_salary,
@@ -551,8 +567,9 @@ class PayrollCalculator:
             absent_days = attendance_stats['absent_days']
             half_days = attendance_stats['half_days']
             late_days = attendance_stats['late_days']
+            paid_leave_days = attendance_stats.get('paid_leave_days', 0)
 
-            evaluated_days = present_days + absent_days + half_days
+            evaluated_days = present_days + absent_days + half_days + paid_leave_days
             if evaluated_days != working_days:
                 logger.warning(
                     "Attendance breakdown mismatch for employee %s (%s): "
@@ -577,6 +594,7 @@ class PayrollCalculator:
                 overtime_hours=attendance_stats['overtime_hours'],
                 month=month,
                 year=year,
+                paid_leave_days=paid_leave_days,
             )
 
             payroll = Payroll.query.filter_by(
@@ -617,15 +635,9 @@ class PayrollCalculator:
         if end_date < start_date:
             return 0
 
-        working_days = 0
-        current_date = start_date
-        while current_date <= end_date:
-            # Sunday is a weekly holiday/off day - exclude from working days
-            if current_date.weekday() != 6:  # 6 = Sunday
-                working_days += 1
-            current_date += timedelta(days=1)
-
-        return working_days
+        # Sundays AND admin-defined holidays are excluded from working days.
+        from holiday_utils import count_working_days
+        return count_working_days(start_date, end_date)
 
     def get_payroll(self, year, month, employee_id=None):
         """Get payroll records."""

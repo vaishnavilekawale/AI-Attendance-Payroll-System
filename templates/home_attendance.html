@@ -282,6 +282,7 @@
     </script>
 </head>
 <body>
+{% from '_holiday_macros.html' import off_day_banner, holiday_list %}
 
     <!-- Professional top bar: branding, live clock, single unobtrusive Login entry point -->
     <div class="kiosk-topbar">
@@ -337,6 +338,8 @@
             <p>Look at the camera - attendance is detected and recorded automatically.</p>
         </div>
 
+        {{ off_day_banner(today_off_reason) }}
+        {{ holiday_list(holidays_between(), 'Holidays this month') }}
         <div class="kiosk-grid">
             <div class="kiosk-card">
                 <div class="kiosk-card-header">

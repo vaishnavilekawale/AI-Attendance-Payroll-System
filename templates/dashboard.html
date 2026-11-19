@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
+{% from '_holiday_macros.html' import off_day_banner, holiday_list %}
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="{{ url_for('attendance.dashboard') }}">
@@ -108,6 +109,14 @@
             </div>
         </div>
 
+{% if today_off_reason %}
+        <div class="alert alert-success d-flex align-items-center" role="alert">
+            <i class="bi bi-calendar-heart me-2"></i>
+            <div><strong>Today is an off day: {{ today_off_reason }}.</strong> Attendance is not required and no one is marked absent. This is a paid day off.</div>
+        </div>
+        {% endif %}
+
+        {{ holiday_list(holidays_between(), 'Holidays this month') }}
         <!-- Stats Cards -->
         <div class="row mb-4">
             <div class="col-md-2">

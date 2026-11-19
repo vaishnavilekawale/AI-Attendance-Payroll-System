@@ -62,6 +62,16 @@ def init_db(app):
             with db.engine.connect() as conn:
                 conn.execute(db.text("ALTER TABLE logout_approval_requests ADD COLUMN admin_overridden_at DATETIME"))
                 conn.commit()
+        if 'approved_by_admin_id' not in lar_columns:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE logout_approval_requests ADD COLUMN approved_by_admin_id INTEGER"))
+                # Old admin decisions had the ADMIN id saved in approved_by (an employee id).
+                # A manager can only decide his own requests (approved_by == manager_id),
+                # so every other decided row was made by an admin: move it to the new column.
+                conn.execute(db.text(
+                    "UPDATE logout_approval_requests SET approved_by_admin_id = approved_by, approved_by = NULL "
+                    "WHERE approved_by IS NOT NULL AND approved_by != manager_id"))
+                conn.commit()
 
         # attendance_activities: admin-edit bookkeeping columns
         act_columns = [col['name'] for col in inspector.get_columns('attendance_activities')]
@@ -260,6 +270,10 @@ def init_db(app):
             if 'lop_days' not in payroll_columns:
                 with db.engine.connect() as conn:
                     conn.execute(db.text("ALTER TABLE payroll ADD COLUMN lop_days FLOAT DEFAULT 0.0"))
+                    conn.commit()
+            if 'paid_leave_days' not in payroll_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(db.text("ALTER TABLE payroll ADD COLUMN paid_leave_days FLOAT DEFAULT 0.0"))
                     conn.commit()
             allowance_columns = {
                 'hra': 'hra FLOAT DEFAULT 0.0',

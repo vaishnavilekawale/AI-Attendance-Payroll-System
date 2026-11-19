@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Leaves - AI Attendance System</title>
+    <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+{% from '_holiday_macros.html' import off_day_banner, holiday_list %}
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{{ url_for('attendance.employee_dashboard') }}">
+                <i class="bi bi-person-badge"></i> AI Attendance System
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance.employee_dashboard') }}">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance.employee_attendance') }}">
+                            <i class="bi bi-calendar-check"></i> My Attendance
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('payroll.employee_payroll') }}">
+                            <i class="bi bi-cash"></i> My Payroll
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="{{ url_for('leave.my_leaves') }}">
+                            <i class="bi bi-calendar2-check"></i> My Leaves
+                        </a>
+                    </li>
+                    {% if current_user and current_user.designation == 'Manager' %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('approvals.manager_approvals') }}">
+                            <i class="bi bi-check-circle"></i> Approvals
+                        </a>
+                    </li>
+                    {% endif %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('reports.employee_reports') }}">
+                            <i class="bi bi-file-earmark-bar-graph"></i> My Reports
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('attendance.employee_profile') }}">
+                            <i class="bi bi-person"></i> My Profile
+                        </a>
+                    </li>
+                </ul>
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> {{ session.employee_username }}
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="{{ url_for('auth.employee_change_password') }}">
+                                <i class="bi bi-key"></i> Change Password
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('auth.logout') }}">
+                                <i class="bi bi-box-arrow-right"></i> Logout
+                            </a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4 mb-5">
+        <h2 class="mb-3">My Leaves</h2>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Balance -->
+        <div class="row g-3 mb-4">
+            {% for code, label in leave_types %}
+            {% set v = balance[code] %}
+            <div class="col-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body py-3 px-2">
+                        <div class="text-muted small">{{ code }} <span class="d-none d-sm-inline">- {{ label }}</span></div>
+                        <div class="display-6 fw-semibold {{ 'text-danger' if v.balance <= 0 and v.quota > 0 else '' }}">{{ '%g'|format(v.balance) }}</div>
+                        <div class="text-muted small">left of {{ '%g'|format(v.quota) }} &middot; used {{ '%g'|format(v.used) }}</div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <p class="text-muted small mb-4">Balance for {{ year }}. Leave is paid: no salary is deducted on an approved leave day.</p>
+
+        <div class="row">
+            <div class="col-lg-5">
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="card-title mb-0"><i class="bi bi-send"></i> Request Leave</h5></div>
+                    <div class="card-body">
+                        <form method="POST" action="{{ url_for('leave.apply_leave') }}" class="row g-2">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <div class="col-12">
+                                <label class="form-label mb-1" for="mlType">Leave type</label>
+                                <select class="form-select" name="leave_type" id="mlType" required>
+                                    {% for code, label in leave_types %}
+                                    <option value="{{ code }}">{{ code }} - {{ label }} ({{ '%g'|format(balance[code].balance) }} left)</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label mb-1" for="mlFrom">From</label>
+                                <input type="date" class="form-control" name="from_date" id="mlFrom" required>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label mb-1" for="mlTo">To <span class="text-muted small">(optional)</span></label>
+                                <input type="date" class="form-control" name="to_date" id="mlTo">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label mb-1" for="mlReason">Reason <span class="text-muted small">(optional)</span></label>
+                                <input type="text" class="form-control" name="reason" id="mlReason" maxlength="200" placeholder="e.g. Family function">
+                                <div class="form-text">Sundays and holidays are not counted. Your admin must approve the request.</div>
+                            </div>
+                            <div class="col-12"><button type="submit" class="btn btn-primary"><i class="bi bi-send"></i> Send Request</button></div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-7">
+                <div class="card mb-4">
+                    <div class="card-header"><h5 class="card-title mb-0"><i class="bi bi-hourglass-split"></i> My Requests</h5></div>
+                    <div class="card-body">
+                        {% if requests %}
+                        <div class="table-responsive border rounded" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light" style="position: sticky; top: 0;"><tr><th>Dates</th><th>Status</th></tr></thead>
+                                <tbody>
+                                {% for r in requests %}
+                                    <tr>
+                                        <td>
+                                            {{ r.from_date.strftime('%d %b') }}{% if r.to_date != r.from_date %} &ndash; {{ r.to_date.strftime('%d %b') }}{% endif %} {{ r.to_date.strftime('%Y') }}
+                                            <span class="badge bg-info text-dark">{{ r.leave_type }}</span>
+                                            {% if r.reason %}<div class="text-muted small">{{ r.reason }}</div>{% endif %}
+                                        </td>
+                                        <td>
+                                            {% if r.status == 'pending' %}<span class="badge bg-warning text-dark">Pending</span>
+                                            {% elif r.status == 'approved' %}<span class="badge bg-success">Approved</span>
+                                            {% elif r.status == 'rejected' %}<span class="badge bg-danger">Rejected</span>
+                                            {% else %}<span class="badge bg-secondary">Cancelled</span>{% endif %}
+                                            {% if r.admin_note and r.status in ('approved', 'rejected') %}<div class="text-muted small">{{ r.admin_note }}</div>{% endif %}
+                                            {% if r.status == 'pending' %}
+                                            <form method="POST" action="{{ url_for('leave.cancel_leave_request', request_id=r.id) }}" class="mt-1"
+                                                  onsubmit="return confirm('Cancel this request?');">
+                                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary py-0">Cancel</button>
+                                            </form>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="text-muted small mb-0">You have not requested any leave yet.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <h5 class="card-title mb-0"><i class="bi bi-calendar2-check"></i> Leave Taken in {{ year }}</h5>
+                        <form method="GET" action="{{ url_for('leave.my_leaves') }}">
+                            <select class="form-select form-select-sm" name="year" onchange="this.form.submit()" aria-label="Year">
+                                {% for y in years %}<option value="{{ y }}" {{ 'selected' if y == year else '' }}>{{ y }}</option>{% endfor %}
+                            </select>
+                        </form>
+                    </div>
+                    <div class="card-body">
+                        {% if taken %}
+                        <div class="table-responsive border rounded" style="max-height: 260px; overflow-y: auto;">
+                            <table class="table table-sm mb-0">
+                                <thead class="table-light" style="position: sticky; top: 0;"><tr><th>Date</th><th>Type</th><th>Reason</th></tr></thead>
+                                <tbody>
+                                {% for l in taken %}
+                                    <tr><td class="text-nowrap">{{ l.date.strftime('%d %b %Y') }} <span class="text-muted small">{{ l.date.strftime('%a') }}</span></td>
+                                        <td><span class="badge bg-info text-dark">{{ l.leave_type }}</span></td>
+                                        <td class="small">{{ l.reason or '' }}</td></tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="text-muted small mt-2 mb-0">{{ taken|length }} day(s) in total.</p>
+                        {% else %}
+                        <p class="text-muted small mb-0">No leave taken in {{ year }}.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+    <script>
+        (function () {
+            var from = document.getElementById('mlFrom'), to = document.getElementById('mlTo');
+            from.addEventListener('change', function () { if (!to.value || to.value < from.value) { to.value = from.value; } to.min = from.value; });
+        })();
+    </script>
+</body>
+</html>

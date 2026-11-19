@@ -195,18 +195,31 @@ def calculate_employee_attendance_stats(
     absent_days = 0
     half_days = 0
     late_days = 0
+    paid_leave_days = 0
     total_hours_worked = 0.0
     overtime_hours = 0.0
 
+    from holiday_utils import get_holidays, is_off_day
+    from leave_utils import get_leave_dates
+    holidays = get_holidays(start_date, end_date)
+    # This employee's approved PAID leave days (CL/SL/EL). Always empty unless
+    # the admin recorded leave, so results are unchanged for everyone else.
+    leave_dates = get_leave_dates(employee_id, start_date, end_date)
+
     current_date = start_date
     while current_date <= end_date:
-        # Sunday is a weekly holiday/off day - completely excluded from attendance
-        if current_date.weekday() == 6:  # 6 = Sunday
+        # Sunday or admin-defined holiday - completely excluded from attendance
+        if is_off_day(current_date, holidays):
             current_date += timedelta(days=1)
             continue
 
         daily_records = attendance_manager.calculate_attendance_with_absent(current_date)
         employee_records = [record for record in daily_records if record.employee.id == employee_id]
+
+        # Paid-leave day: the attendance pipeline skips the employee (no
+        # record), so it is counted as a paid day instead of Absent/LOP.
+        if not employee_records and current_date in leave_dates:
+            paid_leave_days += 1
 
         for attendance in employee_records:
             category, is_late = classify_attendance_record(
@@ -237,6 +250,7 @@ def calculate_employee_attendance_stats(
         'absent_days': absent_days,
         'half_days': half_days,
         'late_days': late_days,
+        'paid_leave_days': paid_leave_days,
         'total_hours_worked': total_hours_worked,
         'overtime_hours': overtime_hours,
     }
