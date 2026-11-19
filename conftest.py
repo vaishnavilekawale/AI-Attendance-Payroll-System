@@ -424,3 +424,24 @@ def non_sunday_date():
     if today.weekday() == 6:  # Sunday
         return date(2024, 1, 8)  # a Monday
     return today
+
+@pytest.fixture
+def logged_in_admin(client, make_admin):
+  admin = make_admin()
+  with client.session_transaction() as sess:
+    sess["user_id"] = admin.id
+    sess["admin_id"] = admin.id
+    sess["role"] = "admin"
+    sess["is_admin"] = True
+  return client, admin
+
+
+@pytest.fixture
+def logged_in_employee(client, make_employee):
+  employee = make_employee()
+  with client.session_transaction() as sess:
+    sess["user_id"] = employee.id
+    sess["employee_id"] = employee.id
+    sess["role"] = "employee"
+    sess["is_admin"] = False
+  return client, employee
