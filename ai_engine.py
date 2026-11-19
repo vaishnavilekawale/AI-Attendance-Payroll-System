@@ -1,3 +1,4 @@
+import gc
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Suppress TensorFlow warnings
 
@@ -43,7 +44,7 @@ _embeddings_cache_lock = threading.Lock()
 _deepface_inference_lock = threading.Lock()
 
 # Consistent parameters across all methods
-DETECTOR_BACKEND = 'retinaface'
+DETECTOR_BACKEND = 'opencv'
 MODEL_NAME = 'Facenet512'
 
 # ---------------------------------------------------------------------------
@@ -868,16 +869,32 @@ class FaceRecognitionEngine:
                     del _employee_embeddings_cache[k]
 
             try:
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    futures = [executor.submit(get_employee_embedding_cached, employee_id, p) for p in image_paths]
-                    for future in futures:
-                        try:
-                            future.result(timeout=30)
-                        except Exception as e:
-                            logger.warning(f"Error warming cache for image: {e}")
-                _save_persistent_embeddings_cache()
+              for p in image_paths:
+                try:
+                  get_employee_embedding_cached(employee_id, p)
+                except Exception as e:
+                  logger.warning(
+                      f"Error warming cache for image {p}: {e}"
+                  )
+                finally:
+                  gc.collect()
+              _save_persistent_embeddings_cache()
             except Exception as e:
-                logger.error(f"Error warming embeddings cache: {e}")
+              logger.error(f"Error warming embeddings cache: {e}")
+            finally:
+              gc.collect()
+              
+            # try:
+            #     with ThreadPoolExecutor(max_workers=4) as executor:
+            #         futures = [executor.submit(get_employee_embedding_cached, employee_id, p) for p in image_paths]
+            #         for future in futures:
+            #             try:
+            #                 future.result(timeout=30)
+            #             except Exception as e:
+            #                 logger.warning(f"Error warming cache for image: {e}")
+            #     _save_persistent_embeddings_cache()
+            # except Exception as e:
+            #     logger.error(f"Error warming embeddings cache: {e}")
 
             logger.info(f"Registered employee {employee_name} with {valid_images} valid images")
             return valid_images
