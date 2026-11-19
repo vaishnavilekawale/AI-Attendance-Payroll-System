@@ -266,6 +266,9 @@ def _resolve_database_uri():
     if not database_url:
         return default_uri
 
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+
     if database_url.startswith('sqlite:///'):
         raw_path = database_url[len('sqlite:///'):]
         # An absolute path looks like `/foo/bar` (POSIX, sqlite:////foo/bar
