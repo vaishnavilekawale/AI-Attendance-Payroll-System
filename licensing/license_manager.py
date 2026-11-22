@@ -934,6 +934,11 @@ class LicenseManager:
         return os.path.join(BASE_DIR, ".env")
 
     def _env_read(self, key: str) -> Optional[str]:
+        # Hosted deployments (e.g. Render) have no persistent .env file, so
+        # a real environment variable takes priority over the file.
+        env_value = os.environ.get(key)
+        if env_value and env_value.strip():
+            return env_value.strip()
         path = self._env_file_path()
         if not os.path.exists(path):
             return None
