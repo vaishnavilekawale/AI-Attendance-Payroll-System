@@ -59,7 +59,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from config import Config, BASE_DIR
+from config import Config, BASE_DIR, DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class BackupPasswordError(BackupError):
 # Settings (instance/backup_settings.json)
 # ---------------------------------------------------------------------------
 def _settings_path() -> str:
-    return os.path.join(BASE_DIR, "instance", SETTINGS_FILE_NAME)
+    return os.path.join(DATA_DIR, "instance", SETTINGS_FILE_NAME)
 
 
 def _read_json(path: str) -> Dict:
@@ -315,7 +315,7 @@ def _norm(path: str) -> str:
 
 def local_backup_dir() -> str:
     """The guaranteed, dedicated local folder (outside uploads/)."""
-    return os.path.join(BASE_DIR, DEDICATED_DIR_NAME)
+    return os.path.join(DATA_DIR, DEDICATED_DIR_NAME)
 
 
 def legacy_backup_dir() -> str:
@@ -443,7 +443,7 @@ def _is_within(path: str, parent: str) -> bool:
 # Zip creation
 # ---------------------------------------------------------------------------
 def _sqlite_db_path() -> str:
-    return os.path.join(BASE_DIR, "instance", "attendance.db")
+    return os.path.join(DATA_DIR, "instance", "attendance.db")
 
 
 def _add_tree(zf: zipfile.ZipFile, folder_path: str, arc_root: str, excluded: List[str]) -> int:
@@ -512,7 +512,7 @@ def write_backup_zip(fileobj, include_env: bool = False) -> None:
         _add_database(zf)
         _add_tree(zf, Config.UPLOAD_FOLDER, "uploads", excluded)
         _add_tree(zf, Config.DATASET_FOLDER, "dataset", excluded)
-        license_path = os.path.join(BASE_DIR, LICENSE_FILE_NAME)
+        license_path = os.path.join(DATA_DIR, LICENSE_FILE_NAME)
         if os.path.exists(license_path):
             zf.write(license_path, arcname=LICENSE_FILE_NAME)
         if include_env:
@@ -569,7 +569,7 @@ def verify_backup_zip(zip_path: str, expect_db: bool = True) -> List[str]:
 # State / last-backup detection
 # ---------------------------------------------------------------------------
 def _state_path() -> str:
-    return os.path.join(BASE_DIR, "instance", STATE_FILE_NAME)
+    return os.path.join(DATA_DIR, "instance", STATE_FILE_NAME)
 
 
 def _read_state() -> Dict:
@@ -947,8 +947,10 @@ def _safe_member_parts(name: str) -> Optional[List[str]]:
 
 
 def _extract_member(zf: zipfile.ZipFile, member: str, parts: List[str]) -> str:
-    target = os.path.join(BASE_DIR, *parts)
-    if not _is_within(target, _norm(BASE_DIR)):
+    # .env stays next to the app; everything else lives under DATA_DIR.
+    root = BASE_DIR if parts == [".env"] else DATA_DIR
+    target = os.path.join(root, *parts)
+    if not _is_within(target, _norm(root)):
         raise BackupError(f"The backup contains an unsafe path ({member}); restore refused.")
     os.makedirs(os.path.dirname(target), exist_ok=True)
     with zf.open(member) as src, open(target, "wb") as dst:
@@ -1053,7 +1055,7 @@ def restore_backup(path: str, password: Optional[str] = None, restore_env: bool 
                     _extract_member(zf, member, parts)
                     result["env_restored"] = True
                 elif parts == [LICENSE_FILE_NAME]:
-                    if not os.path.exists(os.path.join(BASE_DIR, LICENSE_FILE_NAME)):
+                    if not os.path.exists(os.path.join(DATA_DIR, LICENSE_FILE_NAME)):
                         _extract_member(zf, member, parts)
                         result["license_restored"] = True
 

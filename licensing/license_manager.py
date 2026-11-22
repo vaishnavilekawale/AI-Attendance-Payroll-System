@@ -146,7 +146,7 @@ try:
 except ImportError:
     WINDOWS_AVAILABLE = False
 
-from config import BASE_DIR
+from config import BASE_DIR, DATA_DIR
 from .plans import TRIAL_DAYS  # re-exported: client_security imports it from here
 
 logger = logging.getLogger(__name__)
@@ -793,7 +793,7 @@ class LicenseManager:
     def _license_file_path(self) -> str:
         # BASE_DIR is frozen-aware (see config.py) - resolves next to the
         # .exe when packaged, or the project folder in development.
-        return os.path.join(BASE_DIR, LICENSE_FILE_NAME)
+        return os.path.join(DATA_DIR, LICENSE_FILE_NAME)
 
     def load_license_token(self) -> Optional[str]:
         """Load the raw license token string, preferring the LICENSE_TOKEN
@@ -988,7 +988,7 @@ class LicenseManager:
             return uri[len("sqlite:///"):]
         if uri and not uri.startswith("sqlite"):
             return None  # MySQL etc. - cannot read directly
-        return os.path.join(BASE_DIR, "instance", "attendance.db")
+        return os.path.join(DATA_DIR, "instance", "attendance.db")
 
     def _db_last_activity_utc(self) -> Optional[datetime]:
         """Newest activity timestamp in the SQLite database, as UTC."""
