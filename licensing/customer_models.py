@@ -166,25 +166,53 @@ _engines = {}
 _session_factories = {}
 
 
+def _external_database_url():
+    """Optional hosted database (e.g. Neon Postgres) for the customers data.
+
+    Set VENDOR_DATABASE_URL (or DATABASE_URL) on the vendor server. When it is
+    not set, the local SQLite customers.db is used exactly as before.
+    """
+    url = (os.environ.get("VENDOR_DATABASE_URL") or os.environ.get("DATABASE_URL") or "").strip()
+    if not url:
+        return None
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg2://" + url[len("postgresql://"):]
+    return url
+
+
+def _engine_key():
+    return _external_database_url() or get_customers_db_path()
+
+
+def _is_sqlite(engine) -> bool:
+    return engine.dialect.name == "sqlite"
+
+
 def get_customer_engine():
-    """Engine for the current customers.db path (cached per path)."""
-    path = get_customers_db_path()
+    """Engine for the current customers database (cached per path / URL)."""
+    key = _engine_key()
     with _engine_lock:
-        engine = _engines.get(path)
+        engine = _engines.get(key)
         if engine is None:
-            engine = create_engine(
-                f"sqlite:///{path}", echo=False,
-                connect_args={"timeout": 30, "check_same_thread": False},
-            )
-            _engines[path] = engine
-            _session_factories[path] = sessionmaker(bind=engine, expire_on_commit=False)
+            external = _external_database_url()
+            if external:
+                engine = create_engine(external, echo=False, pool_pre_ping=True, pool_recycle=300)
+            else:
+                engine = create_engine(
+                    f"sqlite:///{key}", echo=False,
+                    connect_args={"timeout": 30, "check_same_thread": False},
+                )
+            _engines[key] = engine
+            _session_factories[key] = sessionmaker(bind=engine, expire_on_commit=False)
         return engine
 
 
 def get_customer_session():
     """A NEW session. The caller is responsible for closing it."""
     engine = get_customer_engine()
-    return _session_factories[get_customers_db_path()]()
+    return _session_factories[_engine_key()]()
 
 
 @contextmanager
@@ -219,6 +247,10 @@ _ADDED_COLUMNS = (
 
 def _upgrade_schema(engine) -> None:
     """Add columns introduced after the first customers.db format."""
+    if not _is_sqlite(engine):
+        # A fresh Postgres database is created complete by create_all(); the
+        # legacy-SQLite column upgrades below do not apply.
+        return
     inspector = inspect(engine)
     for table, column, ddl in _ADDED_COLUMNS:
         if not inspector.has_table(table):
@@ -244,7 +276,7 @@ def init_customer_db():
     engine = get_customer_engine()
     Base.metadata.create_all(engine)
     _upgrade_schema(engine)
-    logger.info("Customer database ready at: %s", get_customers_db_path())
+    logger.info("Customer database ready at: %s", "external database" if _external_database_url() else get_customers_db_path())
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ from email.utils import formataddr
 from typing import Dict, Optional
 
 from .receipt_generator import build_receipt_pdf, receipt_rows
+from .brevo_mail import brevo_enabled, send_mime_via_brevo
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class LicenseEmailService:
     # ------------------------------------------------------------------
     @property
     def is_configured(self) -> bool:
-        return bool(self.smtp_username and self.smtp_password)
+        return brevo_enabled() or bool(self.smtp_username and self.smtp_password)
 
     def send_license_key_email(self, customer_name: str, customer_email: str,
                                license_key: str, machine_fingerprint: str,
@@ -179,6 +180,9 @@ class LicenseEmailService:
     def _deliver(self, msg) -> None:
         """Hand a finished message to the SMTP server. Raises on failure.
         (Separate method so tests can replace it without a network.)"""
+        if brevo_enabled():
+            send_mime_via_brevo(msg, self.sender_email, self.sender_name)
+            return
         if self.smtp_port == 465:
             with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port,
                                   timeout=_SMTP_TIMEOUT_SECONDS,

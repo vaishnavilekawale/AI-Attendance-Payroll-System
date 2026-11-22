@@ -7,6 +7,7 @@ from email.utils import formataddr, formatdate, make_msgid
 import os
 from config import Config, BASE_DIR
 import logging
+from brevo_mail import brevo_enabled, send_mime_via_brevo
 
 # Removed logging.basicConfig() to avoid conflict with app.py logging configuration
 # Logging is now configured centrally in app.py with force=True to ensure all logs appear
@@ -266,7 +267,7 @@ This is an automated email. Please do not reply.
         logger.info(f"[Email Service] SMTP Server: {self.smtp_server}:{self.smtp_port}")
         logger.info(f"[Email Service] SMTP Username: {self.smtp_username}")
 
-        if not self.smtp_username or not self.smtp_password:
+        if not brevo_enabled() and (not self.smtp_username or not self.smtp_password):
             logger.error("[Email Service] ERROR: SMTP credentials not configured")
             return {'success': False, 'message': 'SMTP credentials not configured'}
 
@@ -322,14 +323,22 @@ This is an automated email. Please do not reply.
                         )
                         msg.attach(part)
 
+            # Hosts that block SMTP (e.g. Render free plan): send through the
+            # Brevo HTTPS API when BREVO_API_KEY is set.
+            if brevo_enabled():
+                logger.info("[Email Service] Sending via Brevo API...")
+                send_mime_via_brevo(msg, self.default_sender or self.smtp_username, self.company_name)
+                logger.info(f"[Email Service] [OK] Email sent successfully to {to_email} (Brevo)")
+                return {'success': True, 'message': 'Email sent successfully'}
+
             # Connect to SMTP server
             logger.info(f"[Email Service] Connecting to SMTP server...")
             if self.use_tls:
-                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=20)
                 server.starttls()
                 logger.info(f"[Email Service] TLS enabled")
             else:
-                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
+                server = smtplib.SMTP(self.smtp_server, self.smtp_port, timeout=20)
                 logger.info(f"[Email Service] TLS disabled")
             
             logger.info(f"[Email Service] Logging in to SMTP server...")
