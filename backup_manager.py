@@ -59,7 +59,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from config import Config, BASE_DIR, DATA_DIR
+from config import Config, BASE_DIR, DATA_DIR as _CFG_DATA_DIR
+from config import BASE_DIR as _CFG_BASE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ class BackupPasswordError(BackupError):
 # Settings (instance/backup_settings.json)
 # ---------------------------------------------------------------------------
 def _settings_path() -> str:
-    return os.path.join(DATA_DIR, "instance", SETTINGS_FILE_NAME)
+    return os.path.join(_data_dir(), "instance", SETTINGS_FILE_NAME)
 
 
 def _read_json(path: str) -> Dict:
@@ -309,13 +310,24 @@ def verify_encrypted_file(path: str, password: str) -> None:
 # ---------------------------------------------------------------------------
 # Directory resolution
 # ---------------------------------------------------------------------------
+def _data_dir() -> str:
+    """Folder holding persistent data (backups, license, instance/ settings).
+
+    config.DATA_DIR defaults to BASE_DIR (desktop installs), in which case this
+    returns this module's BASE_DIR, so the two can never disagree (tests patch
+    it). Only when DATA_DIR was explicitly set to a different folder (e.g. a
+    Render disk) is that folder used.
+    """
+    return _CFG_DATA_DIR if _CFG_DATA_DIR != _CFG_BASE_DIR else BASE_DIR
+
+
 def _norm(path: str) -> str:
     return os.path.normcase(os.path.realpath(os.path.abspath(path)))
 
 
 def local_backup_dir() -> str:
     """The guaranteed, dedicated local folder (outside uploads/)."""
-    return os.path.join(DATA_DIR, DEDICATED_DIR_NAME)
+    return os.path.join(_data_dir(), DEDICATED_DIR_NAME)
 
 
 def legacy_backup_dir() -> str:
@@ -443,7 +455,7 @@ def _is_within(path: str, parent: str) -> bool:
 # Zip creation
 # ---------------------------------------------------------------------------
 def _sqlite_db_path() -> str:
-    return os.path.join(DATA_DIR, "instance", "attendance.db")
+    return os.path.join(_data_dir(), "instance", "attendance.db")
 
 
 def _add_tree(zf: zipfile.ZipFile, folder_path: str, arc_root: str, excluded: List[str]) -> int:
@@ -512,7 +524,7 @@ def write_backup_zip(fileobj, include_env: bool = False) -> None:
         _add_database(zf)
         _add_tree(zf, Config.UPLOAD_FOLDER, "uploads", excluded)
         _add_tree(zf, Config.DATASET_FOLDER, "dataset", excluded)
-        license_path = os.path.join(DATA_DIR, LICENSE_FILE_NAME)
+        license_path = os.path.join(_data_dir(), LICENSE_FILE_NAME)
         if os.path.exists(license_path):
             zf.write(license_path, arcname=LICENSE_FILE_NAME)
         if include_env:
@@ -569,7 +581,7 @@ def verify_backup_zip(zip_path: str, expect_db: bool = True) -> List[str]:
 # State / last-backup detection
 # ---------------------------------------------------------------------------
 def _state_path() -> str:
-    return os.path.join(DATA_DIR, "instance", STATE_FILE_NAME)
+    return os.path.join(_data_dir(), "instance", STATE_FILE_NAME)
 
 
 def _read_state() -> Dict:
@@ -947,8 +959,8 @@ def _safe_member_parts(name: str) -> Optional[List[str]]:
 
 
 def _extract_member(zf: zipfile.ZipFile, member: str, parts: List[str]) -> str:
-    # .env stays next to the app; everything else lives under DATA_DIR.
-    root = BASE_DIR if parts == [".env"] else DATA_DIR
+    # .env stays next to the app; everything else lives under the data dir.
+    root = BASE_DIR if parts == [".env"] else _data_dir()
     target = os.path.join(root, *parts)
     if not _is_within(target, _norm(root)):
         raise BackupError(f"The backup contains an unsafe path ({member}); restore refused.")
@@ -1055,7 +1067,7 @@ def restore_backup(path: str, password: Optional[str] = None, restore_env: bool 
                     _extract_member(zf, member, parts)
                     result["env_restored"] = True
                 elif parts == [LICENSE_FILE_NAME]:
-                    if not os.path.exists(os.path.join(DATA_DIR, LICENSE_FILE_NAME)):
+                    if not os.path.exists(os.path.join(_data_dir(), LICENSE_FILE_NAME)):
                         _extract_member(zf, member, parts)
                         result["license_restored"] = True
 
