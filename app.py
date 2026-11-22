@@ -7,13 +7,7 @@ import time
 
 from flask import Flask, render_template, request, session, flash, redirect, url_for, jsonify
 
-from config import config, Config, BASE_DIR, DATA_DIR
-
-# Optional (FILE_STORE=db): restore face images / model / uploads / backups from the
-# database BEFORE anything reads them - for hosts with an ephemeral disk (Render free).
-import persistent_store
-persistent_store.restore_on_startup()
-
+from config import config, Config, BASE_DIR
 from database import db, init_db
 from ai_engine import preload_employee_embeddings
 from face_recognition_singleton import get_face_recognizer
@@ -95,7 +89,7 @@ logging.getLogger("services.attendance_calculator").setLevel(logging.ERROR)
 # resolves a relative path against it - Flask's own, Flask-SQLAlchemy's,
 # a future extension's - lands next to the .exe instead of in a temp
 # folder, regardless of how that code path computes its default.
-_instance_dir = os.path.join(DATA_DIR, 'instance')
+_instance_dir = os.path.join(BASE_DIR, 'instance')
 os.makedirs(_instance_dir, exist_ok=True)
 
 app = Flask(__name__, instance_path=_instance_dir)
@@ -267,11 +261,14 @@ from attendance_routes import attendance_bp
 app.register_blueprint(attendance_bp)
 
 with app.app_context():
-    # Never log the raw URI - it contains the database password. render_as_string
-    # (hide_password=True) masks it; only the host/db name is shown.
     logger.info(
-        "DATABASE: %s",
-        db.engine.url.render_as_string(hide_password=True)
+        "DATABASE URI: %s",
+        app.config["SQLALCHEMY_DATABASE_URI"]
+    )
+
+    logger.info(
+        "DATABASE FILE: %s",
+        db.engine.url
     )
 
 
@@ -281,7 +278,6 @@ with app.app_context():
 
 payroll_scheduler.init_app(app)
 atexit.register(payroll_scheduler.shutdown)
-persistent_store.init_app(app)
 
 logger.info("Payroll scheduler initialized")
 
@@ -488,3 +484,4 @@ if __name__ == '__main__':
         from waitress import serve
         logger.info(f"Starting production WSGI server (waitress) on {SERVER_HOST}:{SERVER_PORT}")
         serve(app, host=SERVER_HOST, port=SERVER_PORT, threads=8)
+        

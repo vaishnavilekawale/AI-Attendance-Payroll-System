@@ -36,18 +36,11 @@ else:
 ENV_FILE = os.path.join(BASE_DIR, '.env')
 load_dotenv(ENV_FILE)
 
-# Where persistent data lives (encrypted face images, uploads/payslips, trained
-# model, backups, license.lic, instance/ settings). Defaults to BASE_DIR, so
-# desktop/.exe installs behave exactly as before. On hosts with an ephemeral
-# filesystem (Render) set DATA_DIR to the persistent-disk mount, e.g. /var/data
-DATA_DIR = (os.environ.get('DATA_DIR') or '').strip().strip('"') or BASE_DIR
-os.makedirs(DATA_DIR, exist_ok=True)
-
 # SQLite will not create a missing parent directory on its own - without
 # this, a fresh install (first double-click, nothing exists yet) fails
 # with "unable to open database file" the moment SQLAlchemy tries to
 # open instance/attendance.db.
-os.makedirs(os.path.join(DATA_DIR, 'instance'), exist_ok=True)
+os.makedirs(os.path.join(BASE_DIR, 'instance'), exist_ok=True)
 
 # ---------------------------------------------------------------------
 # LOGGING - configured HERE, not in app.py, and as the very first thing
@@ -268,7 +261,7 @@ def _resolve_database_uri():
     this happened.
     """
     database_url = os.environ.get('DATABASE_URL')
-    default_uri = 'sqlite:///' + os.path.join(DATA_DIR, 'instance', 'attendance.db').replace('\\', '/')
+    default_uri = 'sqlite:///' + os.path.join(BASE_DIR, 'instance', 'attendance.db').replace('\\', '/')
 
     if not database_url:
         return default_uri
@@ -389,9 +382,9 @@ class Config:
     # Upload Configuration - all writable/persistent, so these must use
     # BASE_DIR (the exe's own folder when frozen), never a __file__-
     # derived path, or data gets wiped on every restart of a packaged build.
-    UPLOAD_FOLDER = os.path.join(DATA_DIR, 'uploads')
-    DATASET_FOLDER = os.path.join(DATA_DIR, 'dataset')
-    TRAINED_MODEL_FOLDER = os.path.join(DATA_DIR, 'trained_model')
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+    DATASET_FOLDER = os.path.join(BASE_DIR, 'dataset')
+    TRAINED_MODEL_FOLDER = os.path.join(BASE_DIR, 'trained_model')
     MAX_CONTENT_LENGTH = 16 * 1024 * 1024  # 16MB max file size
     
     # Allowed Extensions
@@ -446,7 +439,7 @@ class Config:
 # of the console) is the fastest way to confirm whether BASE_DIR resolved
 # to a stable, persistent folder or something else.
 logger.info("SQLite database path (if using default): %s",
-            os.path.join(DATA_DIR, 'instance', 'attendance.db'))
+            os.path.join(BASE_DIR, 'instance', 'attendance.db'))
 
 class DevelopmentConfig(Config):
     DEBUG = True
