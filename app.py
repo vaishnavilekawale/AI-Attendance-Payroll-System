@@ -267,14 +267,11 @@ from attendance_routes import attendance_bp
 app.register_blueprint(attendance_bp)
 
 with app.app_context():
+    # Never log the raw URI - it contains the database password. render_as_string
+    # (hide_password=True) masks it; only the host/db name is shown.
     logger.info(
-        "DATABASE URI: %s",
-        app.config["SQLALCHEMY_DATABASE_URI"]
-    )
-
-    logger.info(
-        "DATABASE FILE: %s",
-        db.engine.url
+        "DATABASE: %s",
+        db.engine.url.render_as_string(hide_password=True)
     )
 
 
@@ -491,4 +488,3 @@ if __name__ == '__main__':
         from waitress import serve
         logger.info(f"Starting production WSGI server (waitress) on {SERVER_HOST}:{SERVER_PORT}")
         serve(app, host=SERVER_HOST, port=SERVER_PORT, threads=8)
-        
