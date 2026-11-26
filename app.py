@@ -11,6 +11,7 @@ from config import config, Config, BASE_DIR
 from database import db, init_db
 from ai_engine import preload_employee_embeddings
 from face_recognition_singleton import get_face_recognizer
+from auth_decorators import admin_required
 from scheduler_service import payroll_scheduler
 from licensing.client_security import init_license_gate, get_access_state, MODE_LOCKED
 
@@ -147,6 +148,13 @@ if not os.path.exists(dataset_folder):
 
 
 init_db(app)
+
+# Cloud/ephemeral-disk hosting (Render free etc.): when STORAGE_BACKEND=db is
+# set, face photos, trained model files, payslips and license.lic are mirrored
+# into the SAME database (e.g. a free Neon Postgres) and restored at startup.
+# Does nothing unless that environment variable is set. See storage_sync.py.
+import storage_sync
+storage_sync.init_app(app, db)
 
 # ------------------------------------------------------------------
 # Blueprints. Every route in the application now lives in a blueprint;
@@ -356,6 +364,56 @@ def inject_holiday_helpers():
             'holidays_in_month': holidays_in_month}
 
 
+# ------------------------------------------------------------------
+# External scheduler hook (cron-job.org / GitHub Actions / UptimeRobot).
+#
+# Free hosts put the app to sleep after ~15 minutes without traffic, which
+# also stops the in-process daily backup job. Pinging this URL on a schedule
+# wakes the app and can trigger work:
+#
+#     GET /cron/<CRON_TOKEN>                 -> wake-up only
+#     GET /cron/<CRON_TOKEN>?task=sync       -> flush files to the database now
+#     GET /cron/<CRON_TOKEN>?task=backup     -> run the normal backup routine
+#
+# Disabled unless the CRON_TOKEN environment variable is set (use a long
+# random value). A wrong token answers 404, so the URL cannot be guessed.
+# ------------------------------------------------------------------
+@app.route('/cron/<token>', methods=['GET'])
+@limiter.limit("60 per hour")
+def cron_ping(token):
+    import hmac
+    expected = os.environ.get('CRON_TOKEN', '')
+    if not expected or not hmac.compare_digest(str(token), expected):
+        return jsonify({'ok': False}), 404
+
+    task = (request.args.get('task') or 'ping').lower()
+    payload = {'ok': True, 'task': task}
+    try:
+        if task == 'sync':
+            payload['result'] = storage_sync.sync_now(reason='cron')
+        elif task == 'backup':
+            import backup_manager
+            from models import now_ist
+            res = backup_manager.run_backup(now_stamp=now_ist().strftime('%Y%m%d_%H%M%S'))
+            payload['ok'] = bool(res.get('success'))
+            payload['error'] = res.get('error')
+    except Exception as exc:
+        logger.error("cron task %s failed: %s", task, exc, exc_info=True)
+        payload['ok'] = False
+        payload['error'] = exc.__class__.__name__
+    status = storage_sync.storage_status()
+    payload['storage'] = {k: status.get(k) for k in
+                          ('enabled', 'restored', 'used_mb', 'limit_mb', 'percent', 'last_sync_utc')}
+    return jsonify(payload), (200 if payload['ok'] else 500)
+
+
+@app.route('/storage-status')
+@admin_required
+def storage_status_page():
+    """Admin-only JSON: how full the database file store is and when it last synced."""
+    return jsonify(storage_sync.storage_status())
+
+
 @app.errorhandler(404)
 def not_found(error):
     return render_template('login.html'), 404
@@ -424,8 +482,10 @@ if __name__ == '__main__':
 
     # Use explicit variables so the printed URL always matches the actual
     # server address that Flask binds to.
-    SERVER_HOST = '127.0.0.1'
-    SERVER_PORT = 5000
+    # On a hosting platform (Render sets PORT) the app must listen on 0.0.0.0
+    # and on the platform's port; on a desktop install nothing changes.
+    SERVER_HOST = os.environ.get('HOST') or ('0.0.0.0' if os.environ.get('PORT') else '127.0.0.1')
+    SERVER_PORT = int(os.environ.get('PORT') or 5000)
     SERVER_URL = f'http://{SERVER_HOST}:{SERVER_PORT}/'
 
     # Never hardcode debug=True here - it must follow the environment-driven
@@ -451,7 +511,7 @@ if __name__ == '__main__':
     # since use_reloader=False, but guarded defensively) and can be
     # disabled entirely via SKIP_BROWSER_AUTOLAUNCH=true (e.g. for
     # automated/CI runs of the packaged build).
-    if os.environ.get('SKIP_BROWSER_AUTOLAUNCH', '').lower() != 'true':
+    if os.environ.get('SKIP_BROWSER_AUTOLAUNCH', '').lower() != 'true' and not os.environ.get('PORT'):
         import threading
         import webbrowser
         threading.Timer(1.5, lambda: webbrowser.open(SERVER_URL)).start()

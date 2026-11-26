@@ -303,6 +303,22 @@ class Config:
     SQLALCHEMY_DATABASE_URI = _resolve_database_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # Hosted databases (Neon, Supabase, Render Postgres...) close idle
+    # connections - Neon's free plan even suspends the database after ~5
+    # minutes without queries. Without pre-ping the first request after a
+    # pause fails with "SSL connection has been closed unexpectedly".
+    # Not applied to SQLite (desktop install), which needs none of this.
+    SQLALCHEMY_ENGINE_OPTIONS = (
+        {} if SQLALCHEMY_DATABASE_URI.startswith('sqlite')
+        else {
+            'pool_pre_ping': True,
+            'pool_recycle': 240,
+            'pool_size': 5,
+            'max_overflow': 5,
+            'connect_args': {'connect_timeout': 30},
+        }
+    )
+
     # Session Configuration
     PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
 

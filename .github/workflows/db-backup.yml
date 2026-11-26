@@ -1,0 +1,69 @@
+name: Daily database backup (Neon -> encrypted GitHub artifact)
+
+# Free, card-free off-site backup for the cloud deployment (Render + Neon).
+# Because face photos, the trained-model files and payslips are stored INSIDE
+# the Neon database (see storage_sync.py), one pg_dump contains everything.
+#
+# One-time setup: repository -> Settings -> Secrets and variables -> Actions
+#   DATABASE_URL       the Neon connection string (postgresql://...?sslmode=require)
+#   BACKUP_PASSPHRASE  a long random passphrase; the dump is AES-256 encrypted with it
+#                      (KEEP IT SAFE - without it the backup cannot be opened)
+#   APP_URL            (optional) https://your-app.onrender.com
+#   CRON_TOKEN         (optional) same value as CRON_TOKEN on Render
+# Optional repository VARIABLE: PG_VERSION (default 17) - must be >= the Neon server version.
+#
+# Restore:   gpg -d aiaps_YYYY-MM-DD.sql.gz.gpg | gunzip | psql "$NEW_DATABASE_URL"
+
+on:
+  schedule:
+    - cron: "30 20 * * *"      # 02:00 IST every day
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
+    steps:
+      - name: Wake the app and flush files into the database (optional)
+        if: ${{ env.APP_URL != '' && env.CRON_TOKEN != '' }}
+        run: |
+          curl -fsS --max-time 240 --retry 3 --retry-delay 30 --retry-all-errors \
+            "${APP_URL}/cron/${CRON_TOKEN}?task=sync" || echo "App not reachable - continuing with the dump"
+
+      - name: Install a matching PostgreSQL client
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client-${{ vars.PG_VERSION || '17' }}
+
+      - name: Dump, compress and encrypt
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL" || { echo "DATABASE_URL secret is missing"; exit 1; }
+          test -n "$BACKUP_PASSPHRASE" || { echo "BACKUP_PASSPHRASE secret is missing"; exit 1; }
+          PGBIN="/usr/lib/postgresql/${{ vars.PG_VERSION || '17' }}/bin"
+          STAMP=$(date -u +%Y-%m-%d)
+          "$PGBIN/pg_dump" --no-owner --no-privileges "$DATABASE_URL" | gzip -9 > "aiaps_${STAMP}.sql.gz"
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" \
+              --symmetric --cipher-algo AES256 -o "aiaps_${STAMP}.sql.gz.gpg" "aiaps_${STAMP}.sql.gz"
+          rm "aiaps_${STAMP}.sql.gz"
+          ls -l aiaps_*.gpg
+
+      - name: Upload encrypted backup (kept 14 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiaps-db-backup
+          path: aiaps_*.sql.gz.gpg
+          retention-days: 14
+          if-no-files-found: error

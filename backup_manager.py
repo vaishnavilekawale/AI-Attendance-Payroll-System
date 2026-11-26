@@ -60,6 +60,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from config import Config, BASE_DIR
+import storage_sync
 
 logger = logging.getLogger(__name__)
 
@@ -626,6 +627,19 @@ def last_backup_time() -> Optional[datetime]:
             except OSError:
                 pass
 
+    # Cloud mode (STORAGE_BACKEND=db): the "backup" is the last successful
+    # file sync into the database, which survives restarts.
+    if storage_sync.is_enabled():
+        raw_sync = storage_sync._state.last_sync_utc
+        if raw_sync and not storage_sync._state.last_error:
+            try:
+                parsed = datetime.fromisoformat(raw_sync)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                candidates.append(parsed.astimezone(timezone.utc))
+            except ValueError:
+                pass
+
     return max(candidates) if candidates else None
 
 
@@ -819,6 +833,34 @@ def run_backup(now_stamp: Optional[str] = None) -> Dict:
         return result
 
     try:
+        # CLOUD MODE (STORAGE_BACKEND=db, e.g. Render free + Neon): the disk is
+        # wiped on every restart, so a zip written to it would be worthless.
+        # Everything lives in the database instead, so "backup" means: flush
+        # all files into the database now. The database itself is copied
+        # off-site by the GitHub Actions pg_dump workflow (see
+        # .github/workflows/db-backup.yml).
+        if storage_sync.is_enabled():
+            sync = storage_sync.sync_now(reason="backup")
+            skipped = sync.get("skipped")
+            if skipped and skipped != "another sync is running":
+                raise BackupError(f"Files could not be saved to the database ({skipped}).")
+            if sync.get("errors") or sync.get("over_limit"):
+                raise BackupError(storage_sync.storage_status().get("last_error")
+                                  or "Some files could not be saved to the database.")
+            _update_state(
+                last_success_utc=datetime.now(timezone.utc).isoformat(),
+                last_path="database (cloud storage)",
+                last_external_path=None,
+                last_external_error=None,
+                last_encrypted=False,
+                last_error=None,
+                last_error_utc=None,
+            )
+            result["success"] = True
+            result["path"] = "database (cloud storage)"
+            logger.info("Cloud-mode backup: files synced to the database %s", sync)
+            return result
+
         local_dir = local_backup_dir()
         os.makedirs(local_dir, exist_ok=True)
         _cleanup_stale_tmp(local_dir)
