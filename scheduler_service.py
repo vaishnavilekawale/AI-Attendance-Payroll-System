@@ -149,7 +149,12 @@ class PayrollScheduler:
             # Create scheduler with daemon=False to prevent Thread-1 exceptions on reload
             # daemon=False allows the scheduler to be properly shut down
             # self.scheduler = BackgroundScheduler(daemon=False)
-            self.scheduler = BackgroundScheduler()
+            # Run cron jobs in Indian time (Render servers are in UTC, which
+            # made "23:59 auto-logout" fire at 05:29 IST). Override with
+            # SCHEDULER_TIMEZONE if needed.
+            self.scheduler = BackgroundScheduler(
+                timezone=os.environ.get('SCHEDULER_TIMEZONE', 'Asia/Kolkata')
+            )
             
             # Start scheduler
             try:

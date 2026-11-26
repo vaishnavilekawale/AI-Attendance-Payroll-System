@@ -16,15 +16,28 @@ except ImportError:
 
 import numpy as np
 
+# mediapipe is optional and NOT installed on the free-cloud setup (it needs
+# TensorFlow-sized RAM). The lite OpenCV detector is used instead.
 try:
     import mediapipe as mp
 except ImportError:
     mp = None
 
-try:
-    from deepface import DeepFace
-except ImportError:
-    DeepFace = None
+# Face backend.
+#   FACE_BACKEND=lite     (default) OpenCV YuNet + SFace, ~150 MB RAM, no TensorFlow
+#   FACE_BACKEND=deepface original DeepFace + TensorFlow (needs >1 GB RAM)
+FACE_BACKEND = os.environ.get('FACE_BACKEND', 'lite').strip().lower()
+if FACE_BACKEND == 'deepface':
+    try:
+        from deepface import DeepFace
+    except ImportError:
+        DeepFace = None
+else:
+    try:
+        from lite_face import DeepFace
+    except Exception as _lite_exc:  # pragma: no cover - missing cv2 etc.
+        logging.getLogger(__name__).warning("lite_face unavailable: %s", _lite_exc)
+        DeepFace = None
 
 from config import Config
 import crypto_utils
@@ -43,8 +56,13 @@ _embeddings_cache_lock = threading.Lock()
 _deepface_inference_lock = threading.Lock()
 
 # Consistent parameters across all methods
-DETECTOR_BACKEND = 'retinaface'
-MODEL_NAME = 'Facenet512'
+_FAST_DETECTOR = "opencv" if FACE_BACKEND == 'deepface' else "yunet"
+if FACE_BACKEND == 'deepface':
+    DETECTOR_BACKEND = 'retinaface'
+    MODEL_NAME = 'Facenet512'
+else:
+    DETECTOR_BACKEND = 'yunet'
+    MODEL_NAME = 'SFace'
 
 # ---------------------------------------------------------------------------
 # STRICT MATCHING CONFIGURATION
@@ -60,7 +78,12 @@ MODEL_NAME = 'Facenet512'
 #   the best-matching employee must beat the second-best candidate by at
 #   least this much cosine distance, otherwise the face is reported Unknown
 #   instead of guessing.
-STRICT_MAX_TOLERANCE = 0.30
+# SFace cosine distances are larger than Facenet512's for the same person
+# (typically 0.15-0.40 for a match, > 0.6 for a different person), so its
+# ceiling is looser. Override with FACE_STRICT_MAX_TOLERANCE if needed; the
+# admin Settings value can still only tighten it.
+_DEFAULT_CEILING = 0.30 if FACE_BACKEND == 'deepface' else 0.45
+STRICT_MAX_TOLERANCE = float(os.environ.get('FACE_STRICT_MAX_TOLERANCE', _DEFAULT_CEILING))
 MIN_MATCH_MARGIN = 0.05
 
 # Kept only for backwards compatibility (tests / callers import it). It no
@@ -71,7 +94,13 @@ EARLY_EXIT_DISTANCE = 0.18
 
 
 # Where the computed embeddings are persisted between server restarts.
-EMBEDDINGS_CACHE_FILE = os.path.join(Config.TRAINED_MODEL_FOLDER, 'embeddings_cache.pkl')
+# The file name includes the model: embeddings of different models (512-d
+# Facenet512 vs 128-d SFace) must never be mixed.
+EMBEDDINGS_CACHE_FILE = os.path.join(
+    Config.TRAINED_MODEL_FOLDER,
+    'embeddings_cache.pkl' if FACE_BACKEND == 'deepface'
+    else f'embeddings_cache_{MODEL_NAME.lower()}.pkl'
+)
 
 
 def clear_embeddings_cache():
@@ -183,7 +212,7 @@ def get_employee_embedding_cached(employee_id, img_path):
             embedding_obj = DeepFace.represent(
                 img_path=image_array,
                 model_name=MODEL_NAME,
-                detector_backend="opencv",
+                detector_backend=_FAST_DETECTOR,
                 enforce_detection=False
             )
         if embedding_obj:
@@ -456,18 +485,12 @@ class FaceDetectionEngine:
         return self._detect_with_mediapipe(frame)
 
     def _detect_with_deepface(self, frame):
-        """Detect faces using DeepFace"""
-        temp_path = os.path.join(Config.TRAINED_MODEL_FOLDER, 'temp_detect.jpg')
+        """Detect faces with the active backend (lite YuNet or DeepFace)."""
         try:
-            os.makedirs(Config.TRAINED_MODEL_FOLDER, exist_ok=True)
-            resized_frame = cv2.resize(frame, (640, 640))
-            
-            # ✅ Fix 1 & 2: Save frame before passing to DeepFace
-            cv2.imwrite(temp_path, resized_frame)
-
-            # ✅ Fix 4: Use consistent detector_backend
+            # The frame is passed as an array in its own coordinates, so the
+            # returned boxes can be used directly on the original frame.
             faces = DeepFace.extract_faces(
-                img_path=temp_path,
+                img_path=frame,
                 detector_backend=DETECTOR_BACKEND,
                 enforce_detection=False
             )
@@ -483,13 +506,10 @@ class FaceDetectionEngine:
 
             return result
         except Exception as e:
-            logger.error(f"DeepFace detection error: {e}")
+            logger.error(f"Face detection error: {e}")
             if self.face_detection is not None:
                 return self._detect_with_mediapipe(frame)
             return []
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
 
     def _detect_with_mediapipe(self, frame):
         """Detect faces using MediaPipe"""
@@ -817,7 +837,7 @@ class FaceRecognitionEngine:
                 # directly off disk itself.
                 faces = DeepFace.extract_faces(
                     img_path=image,
-                    detector_backend="opencv",
+                    detector_backend=_FAST_DETECTOR,
                     enforce_detection=False
                 )
 
@@ -992,7 +1012,7 @@ class FaceRecognitionEngine:
             target_objs = DeepFace.represent(
                 img_path=resized_frame,
                 model_name=MODEL_NAME,
-                detector_backend="opencv",
+                detector_backend=_FAST_DETECTOR,
                 enforce_detection=False
             )
         except Exception as e:

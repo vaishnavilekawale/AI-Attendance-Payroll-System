@@ -464,7 +464,10 @@ class TestRecognizeFace:
         # what actually distinguishes "capping happened" from "would have
         # failed anyway".
         import math
-        rad = math.radians(53)  # cosine distance = 1 - cos(53deg) ~= 0.398
+        # Cosine distance = ceiling + 0.10: loose enough to pass the uncapped
+        # 0.6 tolerance, but above STRICT_MAX_TOLERANCE (0.30 for DeepFace,
+        # 0.45 for the lite SFace backend), so it must be rejected.
+        rad = math.acos(1.0 - (ai_engine.STRICT_MAX_TOLERANCE + 0.10))
         fake_deepface = MagicMock()
         fake_deepface.represent.side_effect = [
             [{'embedding': [1.0, 0.0], 'facial_area': {'x': 0, 'y': 0, 'w': 100, 'h': 100}}],
