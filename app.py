@@ -268,15 +268,23 @@ app.register_blueprint(approvals_bp)
 from attendance_routes import attendance_bp
 app.register_blueprint(attendance_bp)
 
+def _mask_db_uri(uri):
+    """Hide the password in a database URL before it is written to any log."""
+    import re
+    return re.sub(r'(://[^:/@\s]+:)[^@\s]*@', r'\1***@', str(uri))
+
+
 with app.app_context():
+    # Never log the raw URI: for Postgres/MySQL it contains the password, and
+    # hosting platforms keep these logs where other people can read them.
     logger.info(
         "DATABASE URI: %s",
-        app.config["SQLALCHEMY_DATABASE_URI"]
+        _mask_db_uri(app.config["SQLALCHEMY_DATABASE_URI"])
     )
 
     logger.info(
         "DATABASE FILE: %s",
-        db.engine.url
+        _mask_db_uri(db.engine.url)
     )
 
 
@@ -544,4 +552,3 @@ if __name__ == '__main__':
         from waitress import serve
         logger.info(f"Starting production WSGI server (waitress) on {SERVER_HOST}:{SERVER_PORT}")
         serve(app, host=SERVER_HOST, port=SERVER_PORT, threads=8)
-        
