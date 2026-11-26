@@ -179,7 +179,7 @@ class PayrollScheduler:
                 self.scheduler.add_job(
                     func=self.run_catchup_backup_if_overdue,
                     trigger='date',
-                    run_date=datetime.now() + timedelta(seconds=60),
+                    run_date=datetime.now(self.scheduler.timezone) + timedelta(seconds=60),
                     id='catchup_backup',
                     name='Startup Catch-up Backup Check',
                     replace_existing=True

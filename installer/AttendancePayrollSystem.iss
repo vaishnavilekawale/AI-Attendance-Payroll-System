@@ -23,7 +23,7 @@
 ; -----------------------------
 ; 1. Run scripts\download_vendor_assets.py (see README.md Section 5.3) so
 ;    the UI renders fully offline.
-; 2. Populate DeepFace model weights and build with PyInstaller (README.md
+; 2. Download the face models (python scripts\download_face_models.py) and build with PyInstaller (README.md
 ;    Sections 5 and 6):
 ;        pyinstaller attendance_app.spec --clean
 ;    This must produce a populated dist\AttendancePayrollSystem\ folder
@@ -124,7 +124,7 @@ WizardSmallImageFile=wizard_small_100.bmp,wizard_small_150.bmp,wizard_small_200.
 VersionInfoVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoProductName={#MyAppName}
-; 64-bit only - matches typical PyInstaller/TensorFlow/DeepFace builds on
+; 64-bit only - matches typical PyInstaller/OpenCV builds on
 ; Windows, which do not ship 32-bit wheels for these dependencies.
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

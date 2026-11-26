@@ -3,10 +3,9 @@ PyInstaller entry point. Not meant to be run directly during normal
 development - use `python app.py` for that, same as always. This exists
 purely so the packaged .exe has a clean, single entry point that:
 
-  1. Points DeepFace at its bundled model weights (if you followed the
-     attendance_app.spec instructions to pre-download and bundle them)
-     rather than trying to download them at runtime on a customer's
-     possibly-offline machine.
+  1. Points the face engine (lite_face.py) at its bundled ONNX models
+     (face_models/, added by attendance_app.spec) rather than trying to
+     download them at runtime on a customer's possibly-offline machine.
   2. Runs app.py's existing `if __name__ == '__main__':` startup block
      exactly as-is via runpy.run_module(), so no changes to app.py's own
      structure were needed for packaging.
@@ -61,20 +60,15 @@ else:
 
 os.environ.setdefault('APP_PERSISTENT_DIR', persistent_dir)
 
-# When frozen by PyInstaller, bundled READ-ONLY data files (like DeepFace's
-# pre-downloaded weights) live under sys._MEIPASS - that's fine for
-# read-only assets, unlike the writable data above. Point DeepFace at the
-# bundled weights folder there, if attendance_app.spec's deepface_weights
-# bundling step was used.
+# When frozen by PyInstaller, bundled READ-ONLY data files (the face
+# models) live under sys._MEIPASS - that's fine for read-only assets,
+# unlike the writable data above. Point lite_face.py at the bundled
+# face_models folder there (added by attendance_app.spec).
 if getattr(sys, 'frozen', False):
     bundle_dir = sys._MEIPASS
-    bundled_weights = os.path.join(bundle_dir, 'deepface_weights')
-    if os.path.isdir(bundled_weights):
-        os.environ['DEEPFACE_HOME'] = os.path.dirname(bundled_weights)
-        # DeepFace expects DEEPFACE_HOME/.deepface/weights/<file>.h5 -
-        # verify this exact layout against your installed deepface
-        # version if weights aren't found at runtime; this has shifted
-        # between deepface releases before.
+    bundled_models = os.path.join(bundle_dir, 'face_models')
+    if os.path.isdir(bundled_models):
+        os.environ.setdefault('LITE_FACE_MODEL_DIR', bundled_models)
 
 # Run app.py's own module code with __name__ == '__main__', so its
 # existing startup block (folder creation, browser auto-launch,

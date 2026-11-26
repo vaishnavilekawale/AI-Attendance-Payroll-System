@@ -4,8 +4,8 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10.x-3776AB?logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask&logoColor=white)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-2.15-FF6F00?logo=tensorflow&logoColor=white)
-![DeepFace](https://img.shields.io/badge/DeepFace-FaceNet512-8A2BE2)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.8-5C3EE8?logo=opencv&logoColor=white)
+![Face engine](https://img.shields.io/badge/Face%20engine-YuNet%20%2B%20SFace%20(ONNX)-8A2BE2)
 ![Security](https://img.shields.io/badge/Security-AES--256%20%7C%20Ed25519-success)
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20(64--bit)-0078D6?logo=windows&logoColor=white)
 ![Version](https://img.shields.io/badge/version-1.0.0-informational)
@@ -70,9 +70,9 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 
 | Feature | Details |
 | --- | --- |
-| **Face-recognition kiosk** | Public scanning page (`/`) that scans continuously (about every 2 seconds). DeepFace (FaceNet512, RetinaFace detector) with strict cosine-distance matching |
+| **Face-recognition kiosk** | Public scanning page (`/`) that scans continuously (about every 2 seconds). OpenCV face engine (YuNet detector + SFace 128-d embeddings, no TensorFlow) with strict cosine-distance matching |
 | **Employee self-service attendance** | After logging in, an employee marks their *own* attendance with their face (**My Attendance** page). The face must match the logged-in employee, otherwise it is rejected |
-| **No guessing on look-alikes** | Hard distance ceiling of `0.30` plus a minimum margin of `0.05` over the second-best candidate — ambiguous faces are reported *Unknown* instead of being guessed |
+| **No guessing on look-alikes** | Hard distance ceiling of `0.45` (SFace; configurable with `FACE_STRICT_MAX_TOLERANCE`) plus a minimum margin of `0.05` over the second-best candidate — ambiguous faces are reported *Unknown* instead of being guessed |
 | **Single punch per appearance** | Frame-presence lock (8-second timeout) prevents duplicate punches while someone stands in front of the camera |
 | **Multiple IN/OUT pairs per day** | Every IN→OUT pair is stored as an activity; working hours are the exact sum of all pairs |
 | **Auto-logout approval** | At **23:59** every day, anyone who never punched out gets a *logout approval request* that a manager/admin approves or rejects. A startup pass also backfills requests missed while the PC was off |
@@ -137,7 +137,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 | Layer | Technology |
 | --- | --- |
 | **Backend** | Python 3.10, Flask 3.0, SQLAlchemy 2.0, Flask-Migrate / Alembic, Flask-WTF, Flask-Limiter |
-| **AI / Computer Vision** | DeepFace 0.0.93 (FaceNet512 + RetinaFace), TensorFlow 2.15 + tf-keras, OpenCV-Contrib 4.8.1.78, MediaPipe 0.10.21, NumPy 1.26.4 |
+| **AI / Computer Vision** | OpenCV 4.8.1.78 (`opencv-python-headless`) with the built-in ONNX models YuNet (face detection) and SFace (face recognition) via `lite_face.py`, NumPy 1.26.4. No TensorFlow / DeepFace / MediaPipe — fits the Render free plan (512 MB RAM) |
 | **Frontend** | Bootstrap 5, Bootstrap Icons, vanilla JavaScript (`fetch`), Chart.js |
 | **Database** | SQLite (default) or MySQL via PyMySQL |
 | **PDF & Security** | ReportLab, pikepdf (AES-256), `cryptography` (Fernet, Ed25519) |
@@ -220,12 +220,12 @@ The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licen
 
 | Requirement | Version | Notes |
 | --- | --- | --- |
-| 🐍 **Python** | **3.10.x, 64-bit** (3.10.11 recommended) | TensorFlow 2.15 / MediaPipe wheels are most reliable on 3.10. **Avoid 3.11, 3.12 and newer.** `setup.bat` installs 3.10.11 for you if it is missing. |
+| 🐍 **Python** | **3.10.x, 64-bit** (3.10.11 recommended) | The pinned NumPy 1.26.4 / OpenCV 4.8.1.78 wheels are built for 3.10. **Avoid 3.11, 3.12 and newer.** `setup.bat` installs 3.10.11 for you if it is missing. |
 | 🔧 **Git** | Any recent version | To clone the repository |
 | 📷 **Webcam** | Any USB / built-in | Needed for face registration and recognition |
 | 🪟 **Windows** | 10 / 11, 64-bit | Build and ship for 64-bit only |
-| 💽 **Disk / RAM** | ~5 GB free, 8 GB RAM recommended | TensorFlow + DeepFace are large |
-| 🌐 **Internet** | Needed during setup | To install packages, to download the UI files, and to download face-model weights on first use |
+| 💽 **Disk / RAM** | ~1 GB free, 4 GB RAM recommended | The face engine itself needs only ~150 MB RAM |
+| 🌐 **Internet** | Needed during setup | To install packages, to download the UI files, and to download the two face models (~38 MB) |
 | 🗄 **MySQL 8.x** | *Optional* | Only if you don't want the default SQLite |
 
 **Only for building the installer** (developers / build machine):
@@ -235,7 +235,7 @@ The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licen
 | **PyInstaller** (installed via `requirements-packaging.txt`) | Freezes the app into an `.exe` |
 | **[Inno Setup 6](https://jrsoftware.org/isinfo.php)** | Compiles the final `Setup.exe` installer. `setup.bat` installs it for you (menu option 2) if it is missing. |
 
-> ⚠️ **Why Python 3.10?** DeepFace, TensorFlow 2.15, `tf-keras` and `mediapipe==0.10.21` all publish official Windows wheels for 3.9–3.11, and 3.10 is the safest overlap. Also, `numpy` is pinned to `1.26.4` (below 2.0) on purpose — NumPy 2.x breaks TensorFlow/MediaPipe.
+> ⚠️ **Why Python 3.10?** The pinned packages (`numpy==1.26.4`, `opencv-python-headless==4.8.1.78`) and Render's `PYTHON_VERSION=3.10.11` are tested on 3.10. Avoid 3.12 and newer.
 
 ### How to install Python 3.10 correctly
 
@@ -274,16 +274,16 @@ venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
-pip uninstall -y opencv-python opencv-python-headless
-pip install --force-reinstall --no-deps opencv-contrib-python==4.8.1.78
+pip uninstall -y opencv-python opencv-contrib-python
 
+python scripts\download_face_models.py
 python scripts\download_vendor_assets.py
 copy .env.example .env
 set FLASK_ENV=development
 python app.py
 ```
 
-> ⏱ First install downloads several GB (TensorFlow, OpenCV, MediaPipe) — expect several minutes (10 to 30 on a slow connection).
+> ⏱ The install downloads about 200 MB (OpenCV, pandas, Flask, …) — expect a few minutes. The face models (~38 MB) are downloaded by `python scripts\download_face_models.py`.
 
 ---
 
@@ -314,8 +314,8 @@ It does these steps for you and **stops at the first error** (it never prints a 
 | --- | --- |
 | 1 | Finds **Python 3.10 (64-bit)**. If it is missing, downloads **Python 3.10.11** from python.org and installs it silently for the current user (stops with a clear message and a manual link if that fails) |
 | 2 | Creates the `venv` folder |
-| 3 | Upgrades `pip`, installs everything in `requirements.txt`, removes the conflicting plain `opencv-python` that DeepFace pulls in and keeps only `opencv-contrib-python` and checks that `cv2`, TensorFlow, MediaPipe and DeepFace import correctly |
-| 4 | Creates `.env` from `.env.example`, creates `licensing\.env.vendor` from its example (vendor use only) and creates the folders the app needs |
+| 3 | Upgrades `pip`, removes any other OpenCV package, installs everything in `requirements.txt` (only `opencv-python-headless`) and checks that `cv2` and the face engine (`lite_face`) import correctly |
+| 4 | Creates `.env` from `.env.example`, creates `licensing\.env.vendor` from its example (vendor use only) and creates the folders the app needs, then downloads the two face models (`python scripts\download_face_models.py`, ~38 MB) into `face_models\` |
 | 5 | Downloads the UI files (Bootstrap, icons, Chart.js, fonts) into `static\vendor` |
 
 Then a menu appears:
@@ -332,9 +332,9 @@ Then a menu appears:
 >
 > 🌐 **Internet is required** for the automatic installs. Both downloads use HTTPS; no file hash is checked.
 
-> 📝 During install you will see a list of **about 112 packages**. That is normal. Your `requirements.txt` has about 35 direct packages, but TensorFlow, DeepFace and MediaPipe bring many more of their own.
+> 📝 During install pip also installs the dependencies of the packages in `requirements.txt` (Flask, pandas, reportlab, …) — that is normal.
 
-> ⚠️ **OpenCV conflict:** DeepFace asks for plain `opencv-python`, which clashes with `opencv-contrib-python` (both provide `cv2`). If you see `cv2` errors after setup, follow the repair steps in [Troubleshooting](#-cv2-errors-module-cv2-has-no-attribute-imread--attendance-not-marked).
+> ⚠️ **OpenCV conflict:** only ONE OpenCV package may be installed (`opencv-python`, `opencv-contrib-python` and `opencv-python-headless` all provide `cv2`). If you see `cv2` errors after setup, follow the repair steps in [Troubleshooting](#-cv2-errors-module-cv2-has-no-attribute-imread--attendance-not-marked).
 
 ### Option B: manual setup, step by step
 
@@ -375,23 +375,22 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Now fix the OpenCV conflict (DeepFace installs plain `opencv-python`):
+Make sure no other OpenCV package is installed (only `opencv-python-headless` from `requirements.txt` should exist):
 
 ```
-pip uninstall -y opencv-python opencv-python-headless
-pip install --force-reinstall --no-deps opencv-contrib-python==4.8.1.78
+pip uninstall -y opencv-python opencv-contrib-python
+pip install -r requirements.txt
 ```
 
-Verify the heavy ML stack imported correctly **before** doing anything else:
+Verify OpenCV and the face engine import correctly **before** doing anything else:
 
 ```
-python -c "import cv2, tensorflow, mediapipe, deepface; print('OK')"
-pip check
+python -c "import cv2, lite_face; print('OK', cv2.__version__)"
 ```
 
-You want to see `OK`. `pip check` may still print `deepface ... requires opencv-python, which is not installed` — that message is **harmless** (see [Troubleshooting](#-pip-check-says-deepface-requires-opencv-python)).
+You want to see `OK 4.8.1`.
 
-> ⚠️ Use a **clean** venv. Never have plain `opencv-python` installed next to `opencv-contrib-python` — both provide `cv2` and will conflict. Always install packages with the **pinned versions** from `requirements.txt`, and never interrupt a `pip install` halfway.
+> ⚠️ Use a **clean** venv. Never have `opencv-python` installed next to `opencv-python-headless` / `opencv-contrib-python` — all provide `cv2` and will conflict. Always install packages with the **pinned versions** from `requirements.txt`, and never interrupt a `pip install` halfway.
 
 #### Step 5️⃣ — Configure the environment file (`.env`)
 
@@ -477,19 +476,18 @@ python scripts\download_vendor_assets.py
 
 This saves Bootstrap, Bootstrap Icons, Chart.js and fonts into `static\vendor\` so the UI renders without internet. Required before building the installer; **also required for development**, because these files are **not stored in GitHub** (they are git-ignored). If you skip this step the pages open **without any styling**.
 
-#### Step 7️⃣ — Download the face-model weights (one time)
+#### Step 7️⃣ — Download the face models (one time)
 
-DeepFace downloads FaceNet512 + RetinaFace weights to `%USERPROFILE%\.deepface\weights` the **first time it runs a face operation** — not at install time. Trigger it once on your machine:
-
-1. Run `python app.py` (see section 8) and finish the Setup Wizard.
-2. Add a test employee and capture **at least one photo** in Face Registration.
-3. Stop the app (`Ctrl+C`) and confirm the files exist:
+Face recognition uses two small OpenCV ONNX models: **YuNet** (finds the face, ~0.2 MB) and **SFace** (turns a face into a 128-number embedding, ~37 MB). Download them once:
 
 ```
-dir %USERPROFILE%\.deepface\weights
+python scripts\download_face_models.py
+dir face_models
 ```
 
-You should see `facenet512_weights.h5` and RetinaFace weights (~100–300 MB total). The PyInstaller build bundles these so client PCs work **offline**. (`scripts\prepare_deepface_weights.py` can also prepare them.)
+You should see `face_detection_yunet_2023mar.onnx` and `face_recognition_sface_2021dec.onnx`. (`setup.bat` does this for you. If you skip it, the app downloads them automatically the first time a face is processed, which needs internet.) The PyInstaller build bundles the `face_models` folder so client PCs work **offline**.
+
+> ℹ️ Switching from the old DeepFace engine? Old embeddings do not match the new model, so every employee must **register their face again**.
 
 #### Step 8️⃣ — Create the runtime folders (only if they are missing)
 
@@ -680,7 +678,7 @@ Two stages: **PyInstaller** makes the app folder → **Inno Setup** wraps it int
 
 - [ ] Clean venv with `requirements.txt` installed (no plain `opencv-python`; `python -c "import cv2; print(cv2.imread)"` works)
 - [ ] `python scripts/download_vendor_assets.py` has been run
-- [ ] DeepFace weights exist in `%USERPROFILE%\.deepface\weights` (Step 7)
+- [ ] Face models exist in `face_models\` (`python scripts\download_face_models.py`, Step 7)
 - [ ] Your **own** Ed25519 public key is embedded in `licensing/license_manager.py` — see [License Management](#11--license--backup-management)
 - [ ] `console=False` in `attendance_app.spec` for client builds (`True` is only for debugging a build on your own machine)
 - [ ] `upx=False` stays as is (UPX triggers antivirus false-positives)
@@ -719,18 +717,18 @@ pip install -r requirements-packaging.txt      # PyInstaller + hooks-contrib
 pyinstaller attendance_app.spec --clean
 ```
 
-(Or choose **2** in the `setup.bat` menu — it installs the build tools, tries to pre-download the face weights and builds.)
+(Or choose **2** in the `setup.bat` menu — it installs the build tools, makes sure the face models are downloaded and builds.)
 
 Look for this line in the build output:
 
 ```
-[spec] Bundling DeepFace weights from: C:\Users\you\.deepface\weights
+[spec] Bundling face models from: C:\path\to\AI_APS\face_models
 ```
 
-If you see `WARNING: DeepFace weights folder not found`, **stop** — the build will try to download weights on the client PC. If weights live elsewhere:
+If you see `WARNING: face_models folder not found`, **stop** — the build would try to download the models on the client PC. Run `python scripts\download_face_models.py` (or set `FACE_MODELS_DIR` to another folder) and build again:
 
 ```
-set DEEPFACE_WEIGHTS_DIR=C:\path\to\.deepface\weights
+python scripts\download_face_models.py
 pyinstaller attendance_app.spec --clean
 ```
 
@@ -743,7 +741,7 @@ dist/
 └── AttendancePayrollSystem/
     ├── AttendancePayrollSystem.exe
     ├── templates/  static/  dataset/  uploads/  trained_model/
-    └── deepface_weights/ + bundled Python runtime & DLLs
+    └── face_models/ + bundled Python runtime & DLLs
 ```
 
 > ℹ️ The spec file itself states that it has not yet been verified end-to-end on a real build. Treat the checklist at the bottom of `attendance_app.spec` as mandatory, and test the result on another PC (next step).
@@ -972,7 +970,7 @@ All backup logic lives in `backup_manager.py` and is shared by the daily job, th
 
 **🐍 `setup.bat` says "Python 3.10 could not be found or installed automatically"**
 
-`setup.bat` normally installs Python 3.10.11 by itself. If it could not (no internet, the download was blocked, or your antivirus blocked the installer), install Python 3.10.11 manually from python.org and tick **"Add Python to PATH"**, then run `setup.bat` again. Python 3.11, 3.12 and 3.13 will **not** work with TensorFlow 2.15. Check with `py -3.10 --version`.
+`setup.bat` normally installs Python 3.10.11 by itself. If it could not (no internet, the download was blocked, or your antivirus blocked the installer), install Python 3.10.11 manually from python.org and tick **"Add Python to PATH"**, then run `setup.bat` again. Python 3.12 and newer are not supported by the pinned packages. Check with `py -3.10 --version`.
 
 **⚠️ PowerShell: `venv\Scripts\activate` says "running scripts is disabled on this system"**
 
@@ -1002,24 +1000,24 @@ Windows could not start a helper Python process during the build. This is usuall
 
 The downloaded installer was blocked or was not a valid program. `setup.bat` then tries `winget` automatically. If that also fails, install [Inno Setup 6](https://jrsoftware.org/isdl.php) by hand, run `setup.bat` again and choose **2**.
 
-**📦 `pip install -r requirements.txt` fails (especially on tensorflow)**
+**📦 `pip install -r requirements.txt` fails**
 
-You are probably not on Python 3.10 or not on 64-bit Windows. Delete the `venv` folder and run `setup.bat` again. Also make sure you have enough free disk space (about 5 GB) and a stable internet connection.
+You are probably not on Python 3.10 or not on 64-bit Windows. Delete the `venv` folder and run `setup.bat` again. Also make sure you have enough free disk space (about 1 GB) and a stable internet connection.
 
-**🚫 `python -c "import cv2, tensorflow, ..."` fails**
+**🚫 `python -c "import cv2, lite_face"` fails**
 
-Check `python --version` is 3.10.x, use a fresh venv, and make sure `numpy` is 1.26.4 (not 2.x) and only `opencv-contrib-python` is installed:
+Check `python --version` is 3.10.x, use a fresh venv, and make sure `numpy` is 1.26.4 (not 2.x) and only `opencv-python-headless` is installed:
 
 ```
-pip uninstall -y opencv-python opencv-python-headless
-pip install --force-reinstall --no-deps opencv-contrib-python==4.8.1.78
+pip uninstall -y opencv-python opencv-contrib-python
+pip install --force-reinstall --no-deps opencv-python-headless==4.8.1.78
 ```
 
 Fix this before attempting any PyInstaller build.
 
-**📝 The install shows "112 packages" but my `requirements.txt` is much shorter**
+**📝 pip installs more packages than my `requirements.txt` lists**
 
-Normal. TensorFlow, DeepFace and MediaPipe depend on many other packages, and pip lists all of them.
+Normal. Flask, pandas, reportlab and others depend on further packages, and pip lists all of them.
 
 **🎨 The pages look plain / unstyled**
 
@@ -1036,7 +1034,7 @@ The UI files in `static\vendor\` are not stored in GitHub. Run `python scripts\d
 ```
 pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless
 Remove-Item -Recurse -Force .\venv\Lib\site-packages\cv2 -ErrorAction SilentlyContinue
-pip install --no-cache-dir opencv-contrib-python==4.8.1.78
+pip install --no-cache-dir opencv-python-headless==4.8.1.78
 pip install numpy==1.26.4
 python -c "import cv2; print(cv2.__version__, cv2.imread)"
 ```
@@ -1079,10 +1077,6 @@ If `cv2.__file__` is `None`, or `dir cv2*` lists a `cv2` folder / `cv2.py` in th
 4. If a package was damaged, reinstall it at its **pinned** version, e.g. `pip install --force-reinstall --no-deps pandas==2.2.3`, then run `pip check`.
 
 > Prevention: never interrupt `pip` (Ctrl+C / closing the window) while it is installing, and install with the pinned versions from `requirements.txt`.
-
-### ℹ️ `pip check` says `deepface requires opencv-python`
-
-`deepface` and `retina-face` list plain `opencv-python` as a dependency, but this project deliberately uses `opencv-contrib-python`, which provides the same `cv2` module. The message is **harmless**. Do **not** "fix" it by installing `opencv-python` — that brings the two-OpenCV conflict back.
 
 ### 🖼 The `.exe` icon looks small or blurry in Explorer
 
@@ -1142,7 +1136,7 @@ The app is installed in a write-protected folder (e.g. `Program Files`). Reinsta
 
 **🐌 First face registration is slow, hangs or fails**
 
-On a normal PC it is downloading the model files (about 100 to 300 MB). Keep the internet on and wait. On an **offline PC** the build didn't include DeepFace weights: rebuild after populating `%USERPROFILE%\.deepface\weights` (Step 7) and confirm the `[spec] Bundling DeepFace weights` line appears.
+On a normal PC it is downloading the two face models (about 38 MB) the first time. Keep the internet on and wait, or run `python scripts\download_face_models.py` first. On an **offline PC** the build didn't include the models: run that script, rebuild, and confirm the `[spec] Bundling face models` line appears.
 
 **🙅 The face is not recognised / shows "Unknown"**
 
@@ -1173,7 +1167,7 @@ Expected — the Flask server and scheduler run inside the exe. End the `Attenda
 
 **🛡 Windows Defender / SmartScreen blocks the exe**
 
-Very common for PyInstaller apps bundling TensorFlow/OpenCV. In order of effectiveness: **code-sign** the exe/installer; keep `upx=False`; submit the file to [Microsoft for analysis](https://www.microsoft.com/en-us/wdsi/filesubmission); as a stopgap, have IT add an exclusion for the install folder.
+Very common for PyInstaller apps bundling OpenCV. In order of effectiveness: **code-sign** the exe/installer; keep `upx=False`; submit the file to [Microsoft for analysis](https://www.microsoft.com/en-us/wdsi/filesubmission); as a stopgap, have IT add an exclusion for the install folder.
 
 **💥 `ModuleNotFoundError` / `DLL load failed` only in the built exe**
 
@@ -1217,7 +1211,7 @@ python -m pytest tests\test_employees.py -v      # a single file
 | Face storage (`dataset\`, `trained_model\`) | Redirected by `conftest.py` to a temporary folder that is deleted afterwards. Your real face photos and `face_data.pkl` are **not** touched |
 | E-mail | Sending is suppressed — no real SMTP connection is made |
 | Windows registry (trial markers) | Replaced by an in-memory fake per test |
-| TensorFlow / DeepFace / OpenCV / MediaPipe | Replaced by lightweight stubs, so the suite runs fast and on CI. This also means **real face recognition is not exercised by the tests** — check it by hand with [section 9](#9--check-that-everything-works) |
+| TensorFlow / DeepFace / MediaPipe | Replaced by lightweight stubs (the app no longer needs them), so the suite runs fast and on CI. This also means **real face recognition is not exercised by the tests** — check it by hand with [section 9](#9--check-that-everything-works) |
 
 > ⚠️ **Why this matters.** Test employees always get database id `1`. Before the isolation was added, tests that delete employee `1` also removed the **real** employee 1 from the real face model, so "the first employee disappeared" every time you ran `pytest` and then `python app.py`. Keep the `_TEST_STORAGE_ROOT` block at the top of `conftest.py`, and never point tests at real folders. If a test needs the original paths (for example to check config defaults), use the `real_storage_paths` fixture.
 
@@ -1357,6 +1351,8 @@ Please read this before selling or deploying to a customer. The project is suita
 | `leave_utils.py` · `leave_routes.py` | Paid-leave helpers (quota/balance, `grant_leave()`, `validate_leave_request()`, the never-raising lookups used by attendance and payroll) and the employee **My Leaves** pages |
 | `holiday_utils.py` · `templates/_holiday_macros.html` | Weekly-off / paid-holiday helpers (`is_off_day()`, holiday lookups) and the badge macros used by the templates |
 | `ai_engine.py` · `face_recognition_singleton.py` | Face detection/recognition, strict matching, presence tracker, embedding cache |
+| `lite_face.py` · `scripts/download_face_models.py` · `face_models/` | Lightweight OpenCV face engine (YuNet detector + SFace embeddings, ONNX) and its model downloader. `face_models/` is git-ignored and filled by the script |
+| `CLOUD_DEPLOY.md` · `storage_sync.py` | Free cloud hosting (Render + Neon): files/models are mirrored into the database, set `STORAGE_BACKEND=db` |
 | `crypto_utils.py` | Encryption for face photos and stored payslip passwords |
 | `pdf_generator.py` · `email_service.py` | PDF payslips, attendance/admin reports, the Login Audit PDF the Holiday List PDF and the Leave Report PDF (payslips AES-256), SMTP delivery |
 | `scheduler_service.py` | APScheduler: monthly payroll, 23:59 auto-logout approvals, weekly backup, startup reconciliation and catch-up |
@@ -1364,7 +1360,7 @@ Please read this before selling or deploying to a customer. The project is suita
 | `services/` | `admin_reports_service`, `approval_service`, `attendance_calculator`, `attendance_stats`, `app_services` |
 | `licensing/` | Customer side: `license_manager.py` (Ed25519, trial, fingerprint), `client_security.py` (license gate + lock screen). Vendor side: `keygen.py`, `vendor_app.py` (Razorpay portal), `plans.py`, `payment_gateway.py`, `customer_*`, `license_email_service.py`, guides and `EULA.txt` |
 | `installer/` | Inno Setup script (`.iss`), `app_icon.ico`, six `wizard_*.bmp` images and icon instructions |
-| `scripts/` | `download_vendor_assets.py`, `prepare_deepface_weights.py`, `verify_icon.py`, `fix_cdn_links.py`, `update_contact_details.py` |
+| `scripts/` | `download_vendor_assets.py`, `download_face_models.py`, `verify_icon.py`, `fix_cdn_links.py`, `update_contact_details.py` |
 | `attendance_app.spec` | PyInstaller build specification |
 | `license.bat` | **Vendor only.** Creates the signing key (`.pem`) and `customers.db` automatically, then a menu: start the vendor portal, issue a license, show the fingerprint, run the app, check / rotate the key |
 | `setup.bat` | One-click setup: installs Python 3.10.11 if missing, sets up the environment, then a menu to run the app or build the `.exe` and installer (installs Inno Setup 6 if missing) |
@@ -1389,4 +1385,4 @@ Please read this before selling or deploying to a customer. The project is suita
 
 ---
 
-**AI Attendance & Payroll System** — built with ❤️ using Flask, DeepFace and Python.
+**AI Attendance & Payroll System** — built with ❤️ using Flask, OpenCV and Python.

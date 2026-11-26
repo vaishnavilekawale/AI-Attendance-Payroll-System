@@ -12,7 +12,8 @@ database** instead, using `storage_sync.py`.
 | Backups | Neon itself + a daily encrypted `pg_dump` kept 14 days by GitHub Actions |
 
 "AI training" in AIAPS = computing face embeddings from the stored photos with a
-pre-trained DeepFace model. The photos are the training data, so keeping the photos keeps
+pre-trained, lightweight OpenCV model (YuNet detector + SFace recognizer, ~38 MB, RAM ~150 MB,
+no TensorFlow - see `lite_face.py`). The photos are the training data, so keeping the photos keeps
 everything; the embeddings cache is restored too, so a restart does not re-encode all photos.
 
 ## 1. Neon (database) — free, no card
@@ -35,14 +36,26 @@ Environment variables (Render → your service → Environment):
 | `STORAGE_LIMIT_MB` | optional, default `700` |
 | `MAIL_*`, `COMPANY_NAME` … | as in `.env.example` |
 
+**Build command** (installs packages and downloads the two face models):
+```
+pip install -r requirements.txt && python scripts/download_face_models.py
+```
+
 **Start command (one process only):**
 ```
-waitress-serve --host=0.0.0.0 --port=$PORT --threads=4 app:app
+gunicorn app:app --workers 1 --threads 2 --timeout 300
 ```
-Keep the single process: it is what the face-recognition libraries need RAM-wise, and
-`storage_sync` assumes one process. If the service crashes with "out of memory" while using
-face recognition, the free 512 MB is too small for TensorFlow/DeepFace — move the same
-setup to another free host with more RAM (nothing in the code has to change).
+(`waitress-serve --host=0.0.0.0 --port=$PORT --threads=4 app:app` also works.)
+Keep the single process: `storage_sync` assumes one process, and the free 512 MB is enough for
+the lite face engine (about 150 MB). The old DeepFace/TensorFlow engine does **not** fit in 512 MB
+(set `FACE_BACKEND=deepface` only on a host with 1 GB+ RAM and add its packages to `requirements.txt`).
+
+> ⚠️ The variable name must be exactly `STORAGE_BACKEND` (not `FILE_STORE` or anything else) with
+> value `db`. After deploy, the log must contain `storage_sync: ACTIVE`, and `/storage-status`
+> must show `enabled: true`.
+
+Optional face / scheduler variables: `FACE_STRICT_MAX_TOLERANCE` (default `0.45`, lower = stricter),
+`SCHEDULER_TIMEZONE` (default `Asia/Kolkata`).
 
 ## 3. Keep it awake + daily flush (cron-job.org, free)
 Create two jobs at cron-job.org:
@@ -62,6 +75,8 @@ gpg -d aiaps_YYYY-MM-DD.sql.gz.gpg | gunzip | psql "$NEW_DATABASE_URL"
 
 ## 5. Check that it works
 * Log in as admin → open `/storage-status`: `enabled: true`, `restored: true`, `used_mb`, `percent`.
+* After switching to the lite face engine, every employee must **register their face again**
+  (old DeepFace embeddings do not match the new model).
 * Register an employee with photos, then Render → *Manual Deploy → Clear cache & deploy*.
   The employee and the photos must still be there and recognition must still work.
 * Storage ≥ 80 % full shows a warning in `last_error`; at the limit new files are **not**

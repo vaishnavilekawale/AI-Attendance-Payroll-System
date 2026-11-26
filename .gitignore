@@ -98,4 +98,6 @@ licensing/.env.vendor
 licensing/customers.db
 license.lic
 
+# Face-recognition ONNX models (downloaded by scripts/download_face_models.py)
+face_models/
 deepface_weights/

@@ -1996,7 +1996,7 @@ def train_face_model():
                 'required': required_count
             }), 400
 
-        # Train the model using DeepFace with global instance
+        # Train the model using the face engine (ai_engine.py) with global instance
         recognizer = get_face_recognizer()
         trained_count = recognizer.train_employee(str(employee.id), employee.name, image_paths)
 

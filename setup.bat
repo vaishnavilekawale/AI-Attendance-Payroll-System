@@ -9,7 +9,7 @@ echo.
 
 :: ---------------------------------------------------------
 :: 1. Find Python 3.10 64-bit. If missing, install 3.10.11 automatically.
-::    (TensorFlow 2.15 needs 3.10 on Windows)
+::    (the pinned numpy 1.26 / OpenCV 4.8 wheels are built for 3.10)
 :: ---------------------------------------------------------
 call :findpython
 if defined PY goto :pyfound
@@ -45,23 +45,16 @@ echo [..] Upgrading pip...
 python -m pip install --upgrade pip
 if errorlevel 1 goto :fail
 
-:: plain opencv-python conflicts with opencv-contrib-python
-pip uninstall -y opencv-python opencv-python-headless >nul 2>&1
+:: Only ONE OpenCV package may exist (they all provide the same `cv2` module).
+:: requirements.txt uses opencv-python-headless, so remove the other variants.
+pip uninstall -y opencv-python opencv-contrib-python opencv-contrib-python-headless >nul 2>&1
 
-echo [..] Installing requirements.txt ^(several GB, please wait^)...
+echo [..] Installing requirements.txt ^(about 200 MB, please wait^)...
 pip install -r requirements.txt
 if errorlevel 1 goto :fail
 
-:: deepface pulls plain opencv-python back in on every install, which clashes
-:: with opencv-contrib-python. Remove all OpenCV variants and keep only contrib.
-echo [..] Cleaning up OpenCV packages ^(keeping only opencv-contrib-python^)...
-pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python opencv-contrib-python-headless >nul 2>&1
-if exist venv\Lib\site-packages\cv2 rmdir /s /q venv\Lib\site-packages\cv2
-pip install --no-cache-dir --no-deps opencv-contrib-python==4.8.1.78
-if errorlevel 1 goto :fail
-
-echo [..] Checking that the heavy ML packages import correctly...
-python -c "import cv2, tensorflow, mediapipe, deepface; print('ML stack OK', cv2.__version__, cv2.imread)"
+echo [..] Checking that OpenCV and the face engine import correctly...
+python -c "import cv2, lite_face; print('Face engine OK', cv2.__version__, cv2.imread)"
 if errorlevel 1 goto :fail
 
 :: ---------------------------------------------------------
@@ -86,6 +79,16 @@ if not exist instance mkdir instance
 if not exist uploads mkdir uploads
 if not exist trained_model mkdir trained_model
 if not exist logs mkdir logs
+
+:: ---------------------------------------------------------
+:: 4b. Face-recognition models (OpenCV YuNet + SFace, about 38 MB, one time)
+:: ---------------------------------------------------------
+echo [..] Downloading face models into face_models ...
+python scripts\download_face_models.py
+if errorlevel 1 (
+    echo [WARN] Face model download failed. Check your internet and run:
+    echo        python scripts\download_face_models.py
+)
 
 :: ---------------------------------------------------------
 :: 5. Offline UI assets (Bootstrap, icons, Chart.js, fonts)
@@ -116,8 +119,8 @@ goto :menu
 :runapp
 echo.
 echo Starting at http://127.0.0.1:5000  ^(Ctrl+C to stop^)
-echo First run opens the Setup Wizard. The first face registration
-echo downloads the face-model weights, so keep internet ON.
+echo First run opens the Setup Wizard. The face models were downloaded
+echo during setup ^(face_models folder^).
 set FLASK_ENV=development
 python app.py
 goto :menu
@@ -127,11 +130,11 @@ echo.
 echo [..] Installing packaging tools...
 pip install -r requirements-packaging.txt
 if errorlevel 1 goto :fail
-echo [..] Pre-downloading face-model weights ^(optional, needed for offline PCs^)...
-python -c "from deepface import DeepFace; DeepFace.build_model('Facenet512'); print('weights OK')"
+echo [..] Making sure the face models are present ^(bundled for offline PCs^)...
+python scripts\download_face_models.py
 if errorlevel 1 (
-    echo [WARN] Could not pre-download weights. Register one test face with
-    echo        python app.py first, then build again.
+    echo [WARN] Could not download the face models. Check your internet,
+    echo        run python scripts\download_face_models.py, then build again.
 )
 echo [..] Building .exe ...
 pyinstaller attendance_app.spec --clean
@@ -144,8 +147,8 @@ if errorlevel 1 (
 )
 echo.
 echo Build done. Output is in the 'dist\AttendancePayrollSystem' folder.
-echo Look above for the line "Bundling DeepFace weights from:". If you see
-echo "WARNING: DeepFace weights folder not found", the exe will not work offline.
+echo Look above for the line "Bundling face models from:". If you see
+echo "WARNING: face_models folder not found", the exe will not work offline.
 goto :makeinstaller
 
 :: ---------------------------------------------------------

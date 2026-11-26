@@ -14,7 +14,7 @@
 #   pyinstaller attendance_app.spec
 #
 # pyinstaller-hooks-contrib specifically matters here: it ships
-# community-maintained hooks for tensorflow/mediapipe/PIL's hidden imports
+# community-maintained hooks for OpenCV/PIL/cryptography hidden imports
 # and data files, which vanilla PyInstaller does NOT reliably discover on
 # its own - skipping it is the single most common cause of
 # "ModuleNotFoundError" or "ImportError: DLL load failed" surprises at
@@ -77,57 +77,30 @@ datas = [
     (os.path.join(PROJECT_ROOT, 'static'), 'static'),
 ]
 
-# DeepFace downloads its model weight files (e.g. facenet512_weights.h5)
-# to ~/.deepface/weights the FIRST time it runs, if they aren't already
-# there. A customer's machine will very likely have no internet access
-# at the moment they first launch the packaged exe (or may be fully
-# offline), so the weights MUST be pre-downloaded on the BUILD machine
-# and bundled in - do not skip this step:
-#   1. On your build machine: run the app normally once with
-#      `python app.py` and actually trigger a face capture/training
-#      action, so DeepFace downloads its weights to ~/.deepface/weights.
-#   2. Build with the weights folder auto-detected (default) or point
-#      DEEPFACE_WEIGHTS_DIR at a custom location, e.g.:
-#        set DEEPFACE_WEIGHTS_DIR=C:\path\to\.deepface\weights   (Windows)
-#        pyinstaller attendance_app.spec --clean
-#   3. See the runtime note in launcher.py about DEEPFACE_HOME, which
-#      points the frozen app at this bundled folder inside sys._MEIPASS.
-#
-# This is auto-detected rather than requiring you to hand-edit this spec
-# file every build: if the weights aren't found, the build still
-# succeeds (so a dev machine without a GPU/webcam can still smoke-test
-# packaging) but prints a loud warning, since shipping without them means
-# the customer's exe will try to hit the internet on first face capture.
-deepface_weights_dir = os.environ.get(
-    'DEEPFACE_WEIGHTS_DIR',
-    os.path.expanduser(os.path.join('~', '.deepface', 'weights'))
+# The face engine (lite_face.py) uses two small OpenCV ONNX models
+# (YuNet detector + SFace recognizer, ~38 MB total) stored in face_models/.
+# They are downloaded on the BUILD machine and bundled, so the customer's
+# exe works fully offline:
+#   python scripts/download_face_models.py      (setup.bat does this too)
+#   pyinstaller attendance_app.spec --clean
+# launcher.py points LITE_FACE_MODEL_DIR at the bundled copy at runtime.
+# If the folder is missing the build still succeeds (handy for a quick
+# packaging smoke-test) but prints a loud warning, because the shipped exe
+# would then have to download the models on the customer's PC.
+face_models_dir = os.environ.get(
+    'FACE_MODELS_DIR', os.path.join(PROJECT_ROOT, 'face_models')
 )
-if os.path.isdir(deepface_weights_dir) and os.listdir(deepface_weights_dir):
-    datas.append((deepface_weights_dir, 'deepface_weights'))
-    print(f"[spec] Bundling DeepFace weights from: {deepface_weights_dir}")
+if os.path.isdir(face_models_dir) and any(
+        f.endswith('.onnx') for f in os.listdir(face_models_dir)):
+    datas.append((face_models_dir, 'face_models'))
+    print(f"[spec] Bundling face models from: {face_models_dir}")
 else:
     print(
-        f"[spec] WARNING: DeepFace weights folder not found or empty at "
-        f"'{deepface_weights_dir}'. Building WITHOUT bundled weights - the "
-        f"shipped exe will try to download them from the internet on the "
-        f"customer's machine the first time face capture/training runs. "
-        f"Run the app once locally to populate this folder, or set the "
-        f"DEEPFACE_WEIGHTS_DIR environment variable, then rebuild before "
-        f"shipping to an offline client."
+        f"[spec] WARNING: face_models folder not found or empty at "
+        f"'{face_models_dir}'. Building WITHOUT bundled face models - the "
+        f"shipped exe will try to download them on the customer's machine. "
+        f"Run `python scripts/download_face_models.py`, then rebuild."
     )
-
-# mediapipe ships compiled model files (palm/face detection .tflite,
-# .binarypb graph configs) as package data - collect_data_files finds
-# these; collect_dynamic_libs (below, in binaries) finds its separately
-# compiled _framework_bindings extension, which is a distinct concern
-# from the data files and is easy to miss.
-datas += collect_data_files('mediapipe')
-
-# tf_keras is TensorFlow 2.15's separate Keras-compatibility package
-# (a distinct top-level import from `tensorflow` itself) - it ships its
-# own data files and is NOT pulled in by collect_submodules('tensorflow')
-# below, since it's a different package.
-datas += collect_data_files('tf_keras')
 
 # cv2.data.haarcascades and similar package-relative data paths (if used
 # anywhere as a fallback face detector) live in cv2's own package data,
@@ -158,7 +131,6 @@ datas += copy_metadata('APScheduler')
 # PyInstaller's dependency walker can fail to pick up on its own.
 # ---------------------------------------------------------------------
 binaries = []
-binaries += collect_dynamic_libs('mediapipe')     # compiled _framework_bindings extension
 binaries += collect_dynamic_libs('cryptography')  # Rust-backed hazmat bindings
 binaries += collect_dynamic_libs('pikepdf')       # bundled qpdf shared library
 
@@ -199,13 +171,8 @@ hiddenimports = [
 
     # AI & Computer Vision
     'cv2',
-    'deepface',
-    'mediapipe',
-    'tensorflow',
-    'keras',
-    'tf_keras',
+    'lite_face',       # OpenCV YuNet + SFace face engine (see lite_face.py)
     'numpy',
-    'h5py',            # loads DeepFace's .h5 weight files; fragile on Windows
 
     # Utilities, Files & PDF
     'PIL',
@@ -226,10 +193,6 @@ hiddenimports = [
 
 # Auto-collect submodules for packages with dynamic/plugin-style internal
 # loading that a flat top-level import doesn't fully cover.
-hiddenimports += collect_submodules('tensorflow')
-hiddenimports += collect_submodules('tf_keras')
-hiddenimports += collect_submodules('mediapipe')
-hiddenimports += collect_submodules('deepface')
 hiddenimports += collect_submodules('cv2')
 hiddenimports += collect_submodules('cryptography')
 hiddenimports += collect_submodules('reportlab')
@@ -238,7 +201,6 @@ hiddenimports += collect_submodules('waitress')
 hiddenimports += collect_submodules('flask_wtf')
 hiddenimports += collect_submodules('flask_limiter')
 hiddenimports += collect_submodules('flask_sqlalchemy')
-hiddenimports += collect_submodules('h5py')
 hiddenimports += collect_submodules('limits')
 
 # SQLAlchemy resolves 'sqlite:///...' / 'mysql+pymysql://...' dialect
@@ -350,16 +312,15 @@ coll = COLLECT(
 # customer, in this order:
 #
 # [x] requirements.txt: plain `opencv-python` has been removed - only
-#     `opencv-contrib-python==4.8.1.78` remains. Re-create your build
+#     `opencv-python-headless==4.8.1.78` remains. Re-create your build
 #     venv from scratch (don't just `pip install -r requirements.txt`
-#     on top of an old venv that may still have opencv-python installed)
-#     to make sure the stale package is actually gone:
+#     on top of an old venv that may still have another OpenCV package
+#     installed) to make sure the stale package is actually gone:
 #       pip uninstall -y opencv-python opencv-contrib-python
 #       pip install -r requirements.txt
-# [ ] Populate DeepFace weights BEFORE building (run `python app.py`
-#     locally and do one face capture) so the auto-detect block above
-#     finds and bundles ~/.deepface/weights instead of printing the
-#     "WARNING: ... building WITHOUT bundled weights" message.
+# [ ] Run `python scripts/download_face_models.py` BEFORE building so the
+#     block above finds and bundles face_models/ instead of printing the
+#     "WARNING: ... building WITHOUT bundled face models" message.
 # [ ] Place a real installer/app_icon.ico BEFORE building, or the exe ships
 #     with PyInstaller's generic default icon (see the "[spec] WARNING: app
 #     icon not found" message above if you forgot this).
@@ -381,7 +342,7 @@ coll = COLLECT(
 #     would surface, and it can fail silently in a way that looks like
 #     the app started fine.
 # [ ] Trigger an actual face capture/registration flow - this is where
-#     DeepFace/TensorFlow/OpenCV/MediaPipe packaging problems surface.
+#     OpenCV / ONNX face-model packaging problems surface.
 #     Expect at least one round of "add this to hiddenimports/datas"
 #     iteration here.
 # [ ] Confirm PDF payslip generation (including AES-256 encryption via

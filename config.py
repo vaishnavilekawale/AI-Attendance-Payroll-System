@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # onefile and onedir modes (sys.executable always points at the real,
 # persistent .exe location in both), but onedir is the recommended build
 # mode for this app - see attendance_app.spec. Onefile re-extracts the
-# entire bundle (TensorFlow, MediaPipe, etc.) to a brand-new temp folder
+# entire bundle (OpenCV, NumPy, etc.) to a brand-new temp folder
 # on every single launch, which is slower and gives antivirus/temp-cleanup
 # tools far more opportunity to interfere with a launch in progress.
 # BASE_DIR itself is unaffected either way, but onedir is the safer,
