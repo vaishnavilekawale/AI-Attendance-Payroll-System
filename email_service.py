@@ -1465,27 +1465,6 @@ Regards,
     def test_email_connection(self):
         """Test email connection"""
         self._load_config()
-
-        # When Brevo (HTTPS API) is what really sends the mails, test THAT.
-        # Testing plain SMTP here would fail with "[Errno 101] Network is
-        # unreachable" on hosts that block SMTP ports, even though mails work.
-        if brevo_enabled():
-            try:
-                import requests
-                from brevo_mail import brevo_api_key
-                resp = requests.get(
-                    "https://api.brevo.com/v3/account",
-                    headers={"api-key": brevo_api_key(), "accept": "application/json"},
-                    timeout=20,
-                )
-                if resp.status_code == 200:
-                    return {'success': True, 'message': 'Email connection successful (Brevo)'}
-                if resp.status_code in (401, 403):
-                    return {'success': False, 'message': 'Brevo API key was rejected. Check BREVO_API_KEY.'}
-                return {'success': False, 'message': f'Brevo returned HTTP {resp.status_code}'}
-            except Exception as e:
-                return {'success': False, 'message': f'Could not reach Brevo: {e}'}
-
         if not self.smtp_username or not self.smtp_password:
             return {'success': False, 'message': 'SMTP credentials not configured'}
         
