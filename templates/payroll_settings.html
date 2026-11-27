@@ -35,7 +35,7 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('payroll.payroll') }}">
+                        <a class="nav-link active" href="{{ url_for('payroll.payroll') }}">
                             <i class="bi bi-cash"></i> Payroll
                         </a>
                     </li>
@@ -363,7 +363,7 @@
                         <button type="submit" class="btn btn-primary btn-lg">
                             <i class="bi bi-save"></i> Save Payroll Settings
                         </button>
-                        <a href="{{ url_for('attendance.dashboard') }}" class="btn btn-secondary btn-lg">
+                        <a href="{{ url_for('payroll.payroll') }}" class="btn btn-secondary btn-lg">
                             <i class="bi bi-x-circle"></i> Cancel
                         </a>
                     </div>
