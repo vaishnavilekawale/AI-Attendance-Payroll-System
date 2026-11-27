@@ -357,15 +357,15 @@ def init_db(app):
         try:
             ps_cols = [col['name'] for col in inspector.get_columns('payroll_settings')]
             for col_name, col_def in (
-                ('bank_advice_enabled', 'BOOLEAN DEFAULT 0'),
-                ('bank_advice_auto_send', 'BOOLEAN DEFAULT 0'),
+                ('bank_advice_enabled', 'BOOLEAN DEFAULT FALSE'),
+                ('bank_advice_auto_send', 'BOOLEAN DEFAULT FALSE'),
                 ('bank_recipient_name', 'VARCHAR(100)'),
                 ('bank_recipient_emails', 'VARCHAR(500)'),
                 ('company_bank_name', 'VARCHAR(100)'),
                 ('company_bank_account_number', 'VARCHAR(50)'),
                 ('company_bank_ifsc_code', 'VARCHAR(20)'),
                 ('salary_credit_days_text', "VARCHAR(50) DEFAULT '1 to 2 working days'"),
-                ('generation_day_migrated', 'BOOLEAN DEFAULT 0'),
+                ('generation_day_migrated', 'BOOLEAN DEFAULT FALSE'),
             ):
                 if col_name not in ps_cols:
                     with db.engine.connect() as conn:
@@ -495,4 +495,4 @@ def init_db(app):
         else:
             print("EmployeeLogin accounts already exist.")
 
-   
+            
