@@ -22,6 +22,7 @@ payroll_settings, employee_payroll, set_payslip_password) has been
 updated to match.
 """
 import os
+import re
 from datetime import datetime
 
 from flask import (
@@ -32,13 +33,18 @@ from werkzeug.utils import secure_filename
 
 import crypto_utils
 from database import db
-from models import Payroll, Employee, PayrollSettings, CompanySettings
+from models import Payroll, Employee, PayrollSettings, CompanySettings, BankAdvice
 from auth_decorators import login_required, admin_required, employee_required
 from file_helpers import allowed_file
 from pdf_generator import generate_payslip_password
 from scheduler_service import payroll_scheduler, get_payslip_full_path
 from services.app_services import get_services
 from extensions import limiter
+
+from bank_advice import (
+    credit_notice_text, send_bank_advice, email_payslips_with_credit_notice,
+    collect_advice_rows, generate_advice_pdf, get_advice_path, parse_emails,
+)
 
 payroll_bp = Blueprint('payroll', __name__)
 
@@ -83,8 +89,12 @@ def payroll():
     _, pc, _, _ = get_services()
     payrolls = Payroll.query.filter_by(month=month, year=year).order_by(Payroll.net_salary.desc()).all()
     summary = pc.get_payroll_summary(year, month)
+    payroll_settings = PayrollSettings.get_settings()
+    bank_advice = BankAdvice.query.filter_by(month=month, year=year).first()
 
-    return render_template('payroll.html', payrolls=payrolls, summary=summary, month=month, year=year)
+    return render_template('payroll.html', payrolls=payrolls, summary=summary, month=month, year=year,
+                           bank_advice_enabled=bool(payroll_settings.bank_advice_enabled),
+                           bank_advice=bank_advice)
 
 
 @payroll_bp.route('/payroll/calculate', methods=['POST'])
@@ -213,7 +223,8 @@ def send_payslip_email(id):
         payslip_path,
         payroll.month,
         payroll.year,
-        pdf_password=payslip_password
+        pdf_password=payslip_password,
+        credit_notice=credit_notice_text(),
     )
 
     if result['success']:
@@ -224,6 +235,67 @@ def send_payslip_email(id):
         flash(f'Error sending email: {result["message"]}', 'danger')
 
     return redirect(url_for('payroll.payroll'))
+
+
+# ==================== BANK PAYMENT ADVICE ====================
+
+@payroll_bp.route('/payroll/bank-advice/preview')
+@login_required
+@admin_required
+def bank_advice_preview():
+    """Download the Bank Payment Advice PDF for a month (nothing is emailed)."""
+    month = request.args.get('month', datetime.now().month, type=int)
+    year = request.args.get('year', datetime.now().year, type=int)
+
+    rows, skipped = collect_advice_rows(month, year)
+    if not rows:
+        flash('No payroll with complete bank details found for this month. '
+              'Calculate payroll first and make sure employees have account number + IFSC.', 'warning')
+        return redirect(url_for('payroll.payroll', month=month, year=year))
+
+    path = get_advice_path(year, month)
+    generate_advice_pdf(rows, month, year, CompanySettings.get_settings(),
+                        PayrollSettings.get_settings(), path)
+    if skipped:
+        flash('Left out of the advice: ' + '; '.join(f"{e.name} ({why})" for e, why in skipped), 'warning')
+    response = make_response(send_file(path, as_attachment=True, download_name=os.path.basename(path)))
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
+
+@payroll_bp.route('/payroll/bank-advice/send', methods=['POST'])
+@login_required
+@admin_required
+def bank_advice_send():
+    """Email the Bank Payment Advice to the bank (+ optionally payslips to employees)."""
+    month = int(request.form.get('month'))
+    year = int(request.form.get('year'))
+    notify_employees = request.form.get('notify_employees') == 'on'
+    # By default only employees who have NOT yet received this month's payslip
+    # email are mailed, so nobody gets the same payslip twice.
+    resend_to_all = request.form.get('resend_to_all') == 'on'
+
+    try:
+        result = send_bank_advice(month, year, force=True)
+        if result['success']:
+            flash(result['message'], 'success')
+        else:
+            flash(result['message'], 'danger')
+        if result.get('skipped'):
+            flash('Left out of the advice (fix their profile and re-send): ' + '; '.join(result['skipped']), 'warning')
+
+        # Employees are told "salary will be credited" only once the bank has the advice.
+        if result['success'] and notify_employees:
+            sent, failed = email_payslips_with_credit_notice(month, year, only_unsent=not resend_to_all)
+            flash(f'Payslip email sent to {sent} employee(s)'
+                  + ('' if resend_to_all else ' (employees who already got it were skipped)') + '.',
+                  'success' if not failed else 'warning')
+            if failed:
+                flash('Payslip email failed for: ' + '; '.join(failed), 'danger')
+    except Exception as e:
+        flash(f'Error sending bank advice: {str(e)}', 'danger')
+
+    return redirect(url_for('payroll.payroll', month=month, year=year))
 
 
 # ==================== PAYROLL AUTOMATION / COMPANY SETTINGS ====================
@@ -238,11 +310,26 @@ def payroll_settings():
 
     if request.method == 'POST':
         # Update payroll settings
-        payroll_settings.payroll_generation_day = int(request.form.get('payroll_generation_day', 31))
+        payroll_settings.payroll_generation_day = int(request.form.get('payroll_generation_day', 1))
         payroll_settings.payroll_generation_time = request.form.get('payroll_generation_time', '18:00')
         payroll_settings.auto_generate_payroll = request.form.get('auto_generate_payroll') == 'on'
         payroll_settings.auto_send_payslip_email = request.form.get('auto_send_payslip_email') == 'on'
         payroll_settings.payslip_storage_path = request.form.get('payslip_storage_path', 'payrolls')
+
+        # Bank Payment Advice settings
+        payroll_settings.bank_advice_enabled = request.form.get('bank_advice_enabled') == 'on'
+        payroll_settings.bank_advice_auto_send = request.form.get('bank_advice_auto_send') == 'on'
+        payroll_settings.bank_recipient_name = (request.form.get('bank_recipient_name') or '').strip() or None
+        bank_emails_raw = request.form.get('bank_recipient_emails') or ''
+        valid_bank_emails = parse_emails(bank_emails_raw)
+        entered = [p for p in re.split(r'[,;\n]+', bank_emails_raw) if p.strip()]
+        payroll_settings.bank_recipient_emails = ', '.join(valid_bank_emails) or None
+        if len(valid_bank_emails) < len({p.strip().lower() for p in entered}):
+            flash('Some bank email addresses were invalid and were not saved.', 'warning')
+        payroll_settings.company_bank_name = (request.form.get('company_bank_name') or '').strip() or None
+        payroll_settings.company_bank_account_number = (request.form.get('company_bank_account_number') or '').strip() or None
+        payroll_settings.company_bank_ifsc_code = (request.form.get('company_bank_ifsc_code') or '').strip().upper() or None
+        payroll_settings.salary_credit_days_text = (request.form.get('salary_credit_days_text') or '').strip() or '1 to 2 working days'
 
         # Professional tax settings
         payroll_settings.professional_tax_jan = float(request.form.get('professional_tax_jan', 200.0))

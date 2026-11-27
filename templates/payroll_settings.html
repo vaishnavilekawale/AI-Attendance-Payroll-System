@@ -108,11 +108,11 @@
                                         <select class="form-select" name="payroll_generation_day" required>
                                             {% for day in range(1, 32) %}
                                                 <option value="{{ day }}" {{ 'selected' if payroll_settings.payroll_generation_day == day else '' }}>
-                                                    {{ day }}{% if day == 31 %} (or last day of month){% endif %}
+                                                    {{ day }}{% if day == 1 %} (default){% elif day >= 29 %} (or last day if month is shorter){% endif %}
                                                 </option>
                                             {% endfor %}
                                         </select>
-                                        <small class="text-muted">Day of month to generate payroll</small>
+                                        <small class="text-muted">Payroll for the <strong>previous month</strong> is generated on this day (e.g. 15 = on 15 Dec it pays November)</small>
                                     </div>
                                 </div>
                                 <div class="col-md-4">
@@ -145,6 +145,76 @@
                                         <small class="d-block text-muted">Automatically email payslip to employees</small>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bank Payment Advice -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="card-title mb-0"><i class="bi bi-bank"></i> Bank Payment Advice (Salary Transfer)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> After payroll is calculated, a PDF with every employee's name, bank, account no.,
+                                IFSC, mobile, email and <strong>net salary</strong> is emailed to your bank, and each employee gets
+                                their payslip with a "salary will be credited soon" note. Employees need an account number and IFSC
+                                in their profile, otherwise they are left out of the advice.
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3 form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" name="bank_advice_enabled" id="bankAdviceEnabled" {{ 'checked' if payroll_settings.bank_advice_enabled else '' }}>
+                                        <label class="form-check-label" for="bankAdviceEnabled">Enable Bank Payment Advice</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3 form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" name="bank_advice_auto_send" id="bankAdviceAuto" {{ 'checked' if payroll_settings.bank_advice_auto_send else '' }}>
+                                        <label class="form-check-label" for="bankAdviceAuto">Send automatically after auto payroll</label>
+                                        <small class="d-block text-muted">Needs "Auto Payroll Generation" and "Auto Email Payslip" above.</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-5">
+                                    <div class="mb-3">
+                                        <label class="form-label">Bank contact name</label>
+                                        <input type="text" class="form-control" name="bank_recipient_name" value="{{ payroll_settings.bank_recipient_name or '' }}" placeholder="e.g. Payroll Desk, HDFC Bank">
+                                    </div>
+                                </div>
+                                <div class="col-md-7">
+                                    <div class="mb-3">
+                                        <label class="form-label">Bank email address(es)</label>
+                                        <input type="text" class="form-control" name="bank_recipient_emails" value="{{ payroll_settings.bank_recipient_emails or '' }}" placeholder="payroll@bank.com, rm@bank.com">
+                                        <small class="text-muted">Separate several addresses with commas.</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Company bank name</label>
+                                        <input type="text" class="form-control" name="company_bank_name" value="{{ payroll_settings.company_bank_name or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Company account no. (debit)</label>
+                                        <input type="text" class="form-control" name="company_bank_account_number" value="{{ payroll_settings.company_bank_account_number or '' }}">
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Company IFSC</label>
+                                        <input type="text" class="form-control text-uppercase" name="company_bank_ifsc_code" value="{{ payroll_settings.company_bank_ifsc_code or '' }}">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Credit time shown in the employee email</label>
+                                <input type="text" class="form-control" name="salary_credit_days_text" value="{{ payroll_settings.salary_credit_days_text or '1 to 2 working days' }}">
+                                <small class="text-muted">Email says: "your salary will be credited to your bank account within <em>this text</em>".</small>
                             </div>
                         </div>
                     </div>

@@ -60,6 +60,32 @@ def _employee_image_counts(dataset_folder, employees):
     return counts
 
 
+def _warn_if_bank_account_shared(employee):
+    """
+    Flash a (non-blocking) warning when another employee has the SAME
+    IFSC + account number. Joint accounts are legitimate, so this never
+    stops the save - it only catches copy-paste mistakes before a salary
+    goes to the wrong account.
+    """
+    account = (employee.bank_account_number or '').strip()
+    ifsc = (employee.bank_ifsc_code or '').strip().upper()
+    if not account or not ifsc:
+        return
+    others = Employee.query.filter(
+        Employee.id != employee.id,
+        Employee.bank_account_number == account,
+        Employee.bank_ifsc_code == ifsc,
+    ).all()
+    if others:
+        names = ', '.join(f"{o.name} ({o.employee_id})" for o in others)
+        flash(
+            f'Warning: the same bank account + IFSC is also saved for {names}. '
+            f'If this is NOT a joint account, correct it - otherwise the salary '
+            f'will be credited to that same account.',
+            'warning',
+        )
+
+
 def _stash_form_for_retry(modal_id, error_message):
     """Remember what the admin typed (and why it was rejected) so the page can
     re-open the same modal pre-filled instead of making them type everything again."""
@@ -142,6 +168,7 @@ def add_employee():
         office_location = request.form.get('office_location')
         bank_name = request.form.get('bank_name')
         bank_account_number = request.form.get('bank_account_number')
+        bank_ifsc_code = (request.form.get('bank_ifsc_code') or '').strip().upper() or None
 
         pan_number = request.form.get('pan_number', '').strip() or None
         uan_number = request.form.get('uan_number', '').strip() or None
@@ -219,6 +246,7 @@ def add_employee():
             office_location=office_location,
             bank_name=bank_name,
             bank_account_number=bank_account_number,
+            bank_ifsc_code=bank_ifsc_code,
             pan_number=pan_number,
             uan_number=uan_number,
             pf_number=pf_number,
@@ -266,6 +294,7 @@ def add_employee():
             pass
 
         flash(f'Employee {new_id} added successfully', 'success')
+        _warn_if_bank_account_shared(employee)
         return redirect(url_for('employees.employees'))
 
     return render_template('add_employee.html')
@@ -295,6 +324,7 @@ def edit_employee(id):
         office_location = request.form.get('office_location')
         bank_name = request.form.get('bank_name')
         bank_account_number = request.form.get('bank_account_number')
+        bank_ifsc_code = (request.form.get('bank_ifsc_code') or '').strip().upper() or None
 
         dob_raw = request.form.get('dob', '').strip()
         dob = datetime.strptime(dob_raw, '%Y-%m-%d').date() if dob_raw else None
@@ -347,6 +377,7 @@ def edit_employee(id):
         employee.office_location = office_location
         employee.bank_name = bank_name
         employee.bank_account_number = bank_account_number
+        employee.bank_ifsc_code = bank_ifsc_code
         employee.pan_number = pan_number
         employee.uan_number = uan_number
         employee.pf_number = pf_number
@@ -380,6 +411,7 @@ def edit_employee(id):
 
         db.session.commit()
         flash('Employee updated successfully', 'success')
+        _warn_if_bank_account_shared(employee)
         return redirect(url_for('employees.employees'))
 
     return render_template('add_employee.html', employee=employee, employees=all_employees,

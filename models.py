@@ -105,6 +105,9 @@ class Employee(db.Model):
     office_location = db.Column(db.String(100))
     bank_name = db.Column(db.String(100))
     bank_account_number = db.Column(db.String(50))
+    # IFSC of the employee's branch - needed by the bank to credit the salary
+    # (used on the Bank Payment Advice PDF).
+    bank_ifsc_code = db.Column(db.String(20))
     # Additional bank and tax details for professional payslip
     pan_number = db.Column(db.String(20))
     uan_number = db.Column(db.String(20))
@@ -526,7 +529,7 @@ class PayrollSettings(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     # Payroll generation schedule
-    payroll_generation_day = db.Column(db.Integer, default=31)  # Day of month (1-31)
+    payroll_generation_day = db.Column(db.Integer, default=1)  # Day of month (1-31) on which the PREVIOUS month's payroll runs
     payroll_generation_time = db.Column(db.String(5), default='18:00')  # HH:MM format
     auto_generate_payroll = db.Column(db.Boolean, default=False)  # Enable/disable auto generation
     auto_send_payslip_email = db.Column(db.Boolean, default=False)  # Enable/disable auto email
@@ -547,6 +550,28 @@ class PayrollSettings(db.Model):
     
     # PDF storage path
     payslip_storage_path = db.Column(db.String(255), default='payrolls')
+
+    # ---- Bank Payment Advice (salary transfer instruction to the bank) ----
+    # When enabled, after payroll is calculated a PDF listing every employee's
+    # name / bank / account no / IFSC / mobile / email / NET salary is emailed
+    # to the company's bank, and each employee's payslip email carries a
+    # "salary will be credited within N working days" note.
+    bank_advice_enabled = db.Column(db.Boolean, default=False)
+    # Send the advice automatically as part of the monthly auto payroll run.
+    bank_advice_auto_send = db.Column(db.Boolean, default=False)
+    # Bank's payroll-desk contact: name + one or more emails (comma separated).
+    bank_recipient_name = db.Column(db.String(100))
+    bank_recipient_emails = db.Column(db.String(500))
+    # Company's own (debit) account the salaries are paid from.
+    company_bank_name = db.Column(db.String(100))
+    company_bank_account_number = db.Column(db.String(50))
+    company_bank_ifsc_code = db.Column(db.String(20))
+    # Text shown in the employee payslip email, e.g. "1 to 2 working days".
+    salary_credit_days_text = db.Column(db.String(50), default='1 to 2 working days')
+    # One-time flag: the "Payroll Generation Day" used to be ignored (payroll always
+    # ran on the 1st). Old installs still hold the old default 31; the startup
+    # migration resets that to 1 once so their behaviour does not suddenly change.
+    generation_day_migrated = db.Column(db.Boolean, default=False)
     
     created_at = db.Column(db.DateTime, default=now_ist)
     updated_at = db.Column(db.DateTime, default=now_ist, onupdate=now_ist)
@@ -555,7 +580,7 @@ class PayrollSettings(db.Model):
     def get_settings(cls):
         settings = cls.query.first()
         if not settings:
-            settings = cls()
+            settings = cls(generation_day_migrated=True)
             db.session.add(settings)
             db.session.commit()
         return settings
@@ -673,6 +698,31 @@ class AttendanceSettingsHistory(db.Model):
         # Convert date to datetime at midnight
         target_datetime = datetime.combine(target_date, datetime.min.time())
         return cls.get_settings_for_datetime(target_datetime)
+
+
+class BankAdvice(db.Model):
+    """One row per bank payment advice generated for a payroll month.
+
+    Acts as the audit trail (what was sent, to whom, when) and as the guard
+    that stops the automatic run from emailing the bank twice for the same
+    month. A manual re-send from the Payroll page is still possible.
+    """
+    __tablename__ = 'bank_advice'
+
+    id = db.Column(db.Integer, primary_key=True)
+    month = db.Column(db.Integer, nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    file_path = db.Column(db.String(255))
+    employee_count = db.Column(db.Integer, default=0)
+    total_amount = db.Column(db.Numeric(14, 2, asdecimal=False), default=0.0)
+    skipped_count = db.Column(db.Integer, default=0)   # employees without bank details
+    sent_to = db.Column(db.String(500))
+    status = db.Column(db.String(20), default='generated')  # generated, sent, failed
+    error_message = db.Column(db.String(500))
+    generated_at = db.Column(db.DateTime, default=now_ist)
+    sent_at = db.Column(db.DateTime)
+
+    __table_args__ = (db.UniqueConstraint('month', 'year', name='unique_bank_advice_month'),)
 
 
 class CompanySettings(db.Model):

@@ -426,7 +426,8 @@ This is an automated email. Please do not reply.
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
-    def send_payslip(self, employee_email, employee_name, payslip_path, month, year, pdf_password=None):
+    def send_payslip(self, employee_email, employee_name, payslip_path, month, year, pdf_password=None,
+                     credit_notice=None):
         """
         Send payslip PDF to employee with a clean, deliverability-friendly
         email format.
@@ -458,6 +459,23 @@ This is an automated email. Please do not reply.
             pass
 
         subject = f"Payslip for {month} {year} - {self.company_name}"
+
+        # Optional "salary will be credited soon" note (Bank Payment Advice
+        # feature). `credit_notice` is a short phrase such as
+        # "1 to 2 working days"; when None the email is unchanged.
+        credit_notice_html = ""
+        credit_notice_text = ""
+        if credit_notice:
+            credit_notice_html = (
+                '<p style="margin: 16px 0; padding: 12px 16px; background-color: #EAF7EE; '
+                'border-left: 4px solid #157347; border-radius: 4px;">'
+                f'Your payslip for <strong>{month} {year}</strong> has been generated and your '
+                f'salary will be credited to your bank account within <strong>{credit_notice}</strong>.</p>'
+            )
+            credit_notice_text = (
+                f"\nYour payslip for {month} {year} has been generated and your salary will be "
+                f"credited to your bank account within {credit_notice}.\n"
+            )
 
         password_notice_html = ""
         password_notice_text = ""
@@ -494,6 +512,7 @@ This is an automated email. Please do not reply.
         <body style="font-family: Arial, Helvetica, sans-serif; color: #222;">
             <p>Dear {employee_name},</p>
             <p>Please find attached your payslip for <strong>{month} {year}</strong>.</p>
+            {credit_notice_html}
             {password_notice_html}
             <p>If you have any questions about this payslip, please contact HR.</p>
             <p>Thank you,<br>HR Department<br>{self.company_name}</p>
@@ -504,6 +523,7 @@ This is an automated email. Please do not reply.
         text_body = (
             f"Dear {employee_name},\n\n"
             f"Please find attached your payslip for {month} {year}.\n"
+            f"{credit_notice_text}"
             f"{password_notice_text}\n"
             "If you have any questions about this payslip, please contact HR.\n\n"
             f"Thank you,\nHR Department\n{self.company_name}\n"
@@ -517,6 +537,58 @@ This is an automated email. Please do not reply.
             attachments=[payslip_path]
         )
     
+    def send_bank_advice(self, to_email, recipient_name, month, year, advice_path,
+                         employee_count, total_amount, debit_account=None):
+        """
+        Email the Bank Payment Advice PDF (salary transfer instruction) to the
+        company's bank. `debit_account` is an optional short text such as
+        "HDFC Bank, A/c 50100012345678, IFSC HDFC0001234".
+        """
+        import calendar
+        try:
+            month_int = int(month)
+            if 1 <= month_int <= 12:
+                month = calendar.month_name[month_int]
+        except (TypeError, ValueError):
+            pass
+
+        greeting = recipient_name or "Sir/Madam"
+        subject = f"Salary Payment Advice - {month} {year} - {self.company_name}"
+        debit_html = f"<p>Debit account: <strong>{debit_account}</strong></p>" if debit_account else ""
+        debit_text = f"Debit account: {debit_account}\n" if debit_account else ""
+
+        html_body = f"""
+        <html>
+        <head></head>
+        <body style="font-family: Arial, Helvetica, sans-serif; color: #222;">
+            <p>Dear {greeting},</p>
+            <p>Please find attached the salary payment advice of <strong>{self.company_name}</strong>
+            for <strong>{month} {year}</strong>.</p>
+            <p>Number of employees: <strong>{employee_count}</strong><br>
+               Total net salary payable: <strong>Rs. {float(total_amount):,.2f}</strong></p>
+            {debit_html}
+            <p>Kindly credit the net salary to the beneficiary accounts listed in the attached PDF.</p>
+            <p>Thank you,<br>HR / Accounts Department<br>{self.company_name}</p>
+        </body>
+        </html>
+        """
+        text_body = (
+            f"Dear {greeting},\n\n"
+            f"Please find attached the salary payment advice of {self.company_name} for {month} {year}.\n\n"
+            f"Number of employees: {employee_count}\n"
+            f"Total net salary payable: Rs. {float(total_amount):,.2f}\n"
+            f"{debit_text}\n"
+            "Kindly credit the net salary to the beneficiary accounts listed in the attached PDF.\n\n"
+            f"Thank you,\nHR / Accounts Department\n{self.company_name}\n"
+        )
+        return self.send_email(
+            to_email=to_email,
+            subject=subject,
+            html_body=html_body,
+            text_body=text_body,
+            attachments=[advice_path],
+        )
+
     def send_attendance_report(self, to_email, employee_name, report_path, start_date, end_date):
         """Send attendance report to employee"""
         subject = f"Attendance Report - {start_date} to {end_date}"

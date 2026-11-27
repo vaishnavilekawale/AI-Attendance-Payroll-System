@@ -301,6 +301,12 @@
                                     <input type="text" class="form-control" name="bank_account_number">
                                 </div>
                             </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Bank IFSC Code</label>
+                                    <input type="text" class="form-control text-uppercase" name="bank_ifsc_code" maxlength="20" placeholder="e.g. HDFC0001234">
+                                </div>
+                            </div>
                             <div class="col-12">
                                 <hr>
                                 <h6 class="mb-3">Statutory Details</h6>
@@ -511,6 +517,12 @@
                                 <div class="mb-3">
                                     <label class="form-label">Bank Account Number</label>
                                     <input type="text" class="form-control" name="bank_account_number" value="{{ employee.bank_account_number or '' }}">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Bank IFSC Code</label>
+                                    <input type="text" class="form-control text-uppercase" name="bank_ifsc_code" maxlength="20" value="{{ employee.bank_ifsc_code or '' }}" placeholder="e.g. HDFC0001234">
                                 </div>
                             </div>
                             <div class="col-12">

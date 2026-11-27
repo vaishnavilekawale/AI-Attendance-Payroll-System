@@ -90,6 +90,21 @@ def get_payslip_full_path(year, month, filename, base_subdir=None):
     """
     return os.path.join(Config.UPLOAD_FOLDER, get_payslip_relative_path(year, month, filename, base_subdir))
 
+def effective_payroll_day(year, month, day):
+    """
+    The calendar day on which payroll runs in (year, month): the configured
+    "Payroll Generation Day", clamped to the month's last day (so 31 means
+    "last day of the month" and 30 still works in February).
+    """
+    import calendar
+    try:
+        day = int(day)
+    except (TypeError, ValueError):
+        day = 1
+    day = max(1, day)
+    return min(day, calendar.monthrange(year, month)[1])
+
+
 class PayrollScheduler:
     def __init__(self, app=None):
         self.scheduler = None
@@ -216,15 +231,14 @@ class PayrollScheduler:
             # Parse time (HH:MM format)
             hour, minute = map(int, settings.payroll_generation_time.split(':'))
             
-            # Create cron trigger - runs on the 1ST DAY of every month.
-            # Running a day later (instead of on the last day of the month
-            # that is still being calculated) guarantees the month being
-            # paid out has FULLY ended, so its last day's attendance is
-            # complete and correctly included in the payroll/payslip
-            # calculation (see calculate_monthly_payroll / attendance_stats,
-            # which otherwise clamp the evaluation window to "yesterday").
+            # The job fires EVERY DAY at the configured time; run_scheduled_payroll
+            # then checks whether today is the configured "Payroll Generation
+            # Day" (clamped to the month's length, so 30/31 also work in short
+            # months). Each run always pays out the PREVIOUS, fully-ended
+            # month, so its last day's attendance is complete and included
+            # (see calculate_monthly_payroll / attendance_stats, which
+            # otherwise clamp the evaluation window to "yesterday").
             trigger = CronTrigger(
-                day=1,
                 hour=hour,
                 minute=minute
             )
@@ -232,10 +246,10 @@ class PayrollScheduler:
             # Add job - ALWAYS scheduled regardless of auto_generate_payroll setting
             # The generate_monthly_payroll method checks the setting internally
             self.scheduler.add_job(
-                func=self.generate_monthly_payroll,
+                func=self.run_scheduled_payroll,
                 trigger=trigger,
                 id='payroll_generation',
-                name='Monthly Payroll Generation (1st of Next Month)',
+                name=f'Monthly Payroll Generation (day {settings.payroll_generation_day or 1})',
                 replace_existing=True
             )
 
@@ -244,8 +258,18 @@ class PayrollScheduler:
                 logger.info(f"Payroll Job: {payroll_job}")
                 logger.info(f"Payroll Next Run: {payroll_job.next_run_time}")
             
-            logger.info(f"Payroll generation scheduled for the 1st of every month (for the just-completed previous month) at {settings.payroll_generation_time}")
+            logger.info(f"Payroll generation scheduled for day {settings.payroll_generation_day or 1} of every month (for the previous, fully-ended month) at {settings.payroll_generation_time}")
     
+    def run_scheduled_payroll(self):
+        """Daily trigger: run payroll only when today is the configured Payroll Generation Day."""
+        with self.app.app_context():
+            settings = PayrollSettings.get_settings()
+            now = datetime.now()
+            due_day = effective_payroll_day(now.year, now.month, settings.payroll_generation_day or 1)
+            if now.day != due_day:
+                return
+        return self.generate_monthly_payroll()
+
     def reschedule_payroll_generation(self):
         """Reschedule payroll generation when settings change"""
         self.schedule_payroll_generation()
@@ -330,6 +354,10 @@ class PayrollScheduler:
                 # Get settings
                 company_settings = CompanySettings.get_settings()
                 
+                # Bank Payment Advice: phrase for the payslip email (or None)
+                from bank_advice import credit_notice_text
+                credit_notice = credit_notice_text(payroll_settings)
+
                 # Get all active employees
                 employees = Employee.query.filter_by(status='active').all()
                 
@@ -433,7 +461,10 @@ class PayrollScheduler:
                                 payslip_path=payslip_path,
                                 month=month_name,
                                 year=year,
-                                pdf_password=payslip_password
+                                pdf_password=payslip_password,
+                                # "Salary will be credited in 1-2 working days"
+                                # note - None unless Bank Payment Advice is on.
+                                credit_notice=credit_notice,
                             )
                             
                             if result['success']:
@@ -449,6 +480,27 @@ class PayrollScheduler:
                         logger.error(traceback.format_exc())
                         continue
                 
+                # Bank Payment Advice: once every payslip is done, email the
+                # bank the list of NET salaries to credit. Guarded by the
+                # bank_advice table, so a startup reconcile never sends it twice.
+                if payroll_settings.bank_advice_enabled and payroll_settings.bank_advice_auto_send:
+                    try:
+                        from bank_advice import send_bank_advice
+                        advice = send_bank_advice(month, year, force=False,
+                                                  email_service=self.email_service)
+                        if advice.get('success'):
+                            logger.info(f"Bank advice sent: {advice['message']}")
+                        elif advice.get('already_sent'):
+                            logger.info(advice['message'])
+                        else:
+                            logger.error(f"Bank advice NOT sent for {month}/{year}: {advice['message']}")
+                        for line in advice.get('skipped') or []:
+                            logger.warning(f"Bank advice skipped employee: {line}")
+                    except Exception as e:
+                        logger.error(f"Error sending bank advice for {month}/{year}: {e}")
+                        import traceback
+                        logger.error(traceback.format_exc())
+
                 logger.info(f"Automatic payroll generation completed for {month}/{year}")
                 
             except Exception as e:
@@ -592,7 +644,7 @@ class PayrollScheduler:
         Reconcile missed payroll periods on application startup.
         
         Detects payroll periods that should have been generated according to
-        the payroll schedule (1st of the month following the period, at
+        the payroll schedule (Payroll Generation Day of the month following the period, at
         payroll_generation_time) but were missed because the server was OFF
         at the scheduled time.
         
@@ -632,8 +684,8 @@ class PayrollScheduler:
                 
                 def _payroll_deadline(check_month, check_year):
                     """
-                    Payroll for a given (month, year) period is now due on the
-                    1ST DAY of the FOLLOWING month at the configured time -
+                    Payroll for a given (month, year) period is due on the
+                    configured Payroll Generation Day of the FOLLOWING month at the configured time -
                     NOT the last day of the period's own month. This mirrors
                     the live schedule (see schedule_payroll_generation) and
                     guarantees the period being paid out has fully ended
@@ -641,7 +693,10 @@ class PayrollScheduler:
                     always included.
                     """
                     deadline_month, deadline_year = _next_month(check_month, check_year)
-                    return datetime(deadline_year, deadline_month, 1, hour, minute)
+                    due_day = effective_payroll_day(
+                        deadline_year, deadline_month, settings.payroll_generation_day or 1
+                    )
+                    return datetime(deadline_year, deadline_month, due_day, hour, minute)
                 
                 # The two most recent periods that could plausibly have been
                 # missed while the server was down: last month (whose

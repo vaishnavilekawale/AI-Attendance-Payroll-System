@@ -345,6 +345,50 @@ def init_db(app):
         except Exception as e:
             print(f"Note: employee_login table may not exist yet: {e}")
         
+        # Bank Payment Advice: employee IFSC + payroll_settings bank columns
+        try:
+            emp_cols = [col['name'] for col in inspector.get_columns('employees')]
+            if 'bank_ifsc_code' not in emp_cols:
+                with db.engine.connect() as conn:
+                    conn.execute(db.text("ALTER TABLE employees ADD COLUMN bank_ifsc_code VARCHAR(20)"))
+                    conn.commit()
+        except Exception as e:
+            print(f"Note: could not add employees.bank_ifsc_code: {e}")
+        try:
+            ps_cols = [col['name'] for col in inspector.get_columns('payroll_settings')]
+            for col_name, col_def in (
+                ('bank_advice_enabled', 'BOOLEAN DEFAULT 0'),
+                ('bank_advice_auto_send', 'BOOLEAN DEFAULT 0'),
+                ('bank_recipient_name', 'VARCHAR(100)'),
+                ('bank_recipient_emails', 'VARCHAR(500)'),
+                ('company_bank_name', 'VARCHAR(100)'),
+                ('company_bank_account_number', 'VARCHAR(50)'),
+                ('company_bank_ifsc_code', 'VARCHAR(20)'),
+                ('salary_credit_days_text', "VARCHAR(50) DEFAULT '1 to 2 working days'"),
+                ('generation_day_migrated', 'BOOLEAN DEFAULT 0'),
+            ):
+                if col_name not in ps_cols:
+                    with db.engine.connect() as conn:
+                        conn.execute(db.text(f"ALTER TABLE payroll_settings ADD COLUMN {col_name} {col_def}"))
+                        conn.commit()
+        except Exception as e:
+            print(f"Note: could not add payroll_settings bank columns: {e}")
+        # One-time: before this change the saved "Payroll Generation Day" was
+        # ignored and payroll always ran on the 1st. Old rows still hold the
+        # former default (31) - reset to 1 once so nothing silently moves to
+        # month-end. Afterwards the admin's choice is honoured as saved.
+        try:
+            from models import PayrollSettings
+            ps = PayrollSettings.query.first()
+            if ps is not None and not ps.generation_day_migrated:
+                if ps.payroll_generation_day in (None, 31):
+                    ps.payroll_generation_day = 1
+                ps.generation_day_migrated = True
+                db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"Note: could not migrate payroll generation day: {e}")
+
         # Email (SMTP) settings columns on the settings table
         try:
             settings_columns = [col['name'] for col in inspector.get_columns('settings')]

@@ -251,7 +251,7 @@ def test_schedule_payroll_generation_registers_jobs(app_context):
 
     assert payroll_job is not None
     assert approval_job is not None
-    assert payroll_job.name == 'Monthly Payroll Generation (1st of Next Month)'
+    assert payroll_job.name == 'Monthly Payroll Generation (day 1)'
     assert approval_job.name == 'Daily Auto Logout Approval Request Creation'
 
 

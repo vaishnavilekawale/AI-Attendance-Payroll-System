@@ -83,6 +83,14 @@
                         <a href="{{ url_for('payroll.payroll_settings') }}" class="btn btn-info">
                             <i class="bi bi-gear"></i> Payroll Settings
                         </a>
+                        {% if bank_advice_enabled %}
+                        <a href="{{ url_for('payroll.bank_advice_preview', month=month, year=year) }}" class="btn btn-outline-secondary" title="Download the bank payment advice PDF (nothing is emailed)">
+                            <i class="bi bi-file-earmark-pdf"></i> Bank Advice PDF
+                        </a>
+                        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#bankAdviceModal">
+                            <i class="bi bi-bank"></i> Send to Bank
+                        </button>
+                        {% endif %}
                         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#calculateModal">
                             <i class="bi bi-calculator"></i> Calculate Payroll
                         </button>
@@ -100,7 +108,19 @@
                     {% endif %}
                 {% endwith %}
 
-                
+                {% if bank_advice_enabled and bank_advice %}
+                <div class="alert alert-{{ 'success' if bank_advice.status == 'sent' else 'danger' }}">
+                    <i class="bi bi-bank"></i>
+                    Bank advice for {{ month }}/{{ year }}:
+                    <strong>{{ bank_advice.status|upper }}</strong>
+                    &middot; {{ bank_advice.employee_count }} employee(s)
+                    &middot; Rs. {{ "{:,.2f}".format(bank_advice.total_amount or 0) }}
+                    {% if bank_advice.sent_at %}&middot; sent {{ bank_advice.sent_at.strftime('%d %b %Y %H:%M') }} to {{ bank_advice.sent_to }}{% endif %}
+                    {% if bank_advice.skipped_count %}&middot; <strong>{{ bank_advice.skipped_count }} left out</strong> (missing bank details / zero salary){% endif %}
+                    {% if bank_advice.error_message %}<br><small>{{ bank_advice.error_message }}</small>{% endif %}
+                </div>
+                {% endif %}
+
                 <!-- Payroll Summary -->
                 <div class="row mb-4">
                     <div class="col-md-3">
@@ -200,9 +220,17 @@
                                                     <i class="bi bi-file-earmark-pdf"></i>
                                                 </a>
                                                 {% if payroll.payslip_generated %}
+                                                {% if payroll.email_sent %}
+                                                <a href="{{ url_for('payroll.send_payslip_email', id=payroll.id) }}" class="btn btn-sm btn-outline-success"
+                                                   title="Payslip already emailed - click to send again"
+                                                   onclick="return confirm('This payslip was ALREADY emailed to {{ payroll.employee.name|e }}. Send it again?');">
+                                                    <i class="bi bi-envelope-check"></i>
+                                                </a>
+                                                {% else %}
                                                 <a href="{{ url_for('payroll.send_payslip_email', id=payroll.id) }}" class="btn btn-sm btn-success" title="Send Email">
                                                     <i class="bi bi-envelope"></i>
                                                 </a>
+                                                {% endif %}
                                                 {% endif %}
                                             </div>
                                         </td>
@@ -256,6 +284,54 @@
             </div>
         </div>
     </div>
+
+    {% if bank_advice_enabled %}
+    <!-- Send Bank Advice Modal -->
+    <div class="modal fade" id="bankAdviceModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Send Salary Advice to Bank - {{ month }}/{{ year }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="POST" action="{{ url_for('payroll.bank_advice_send') }}"
+                      onsubmit="var b=this.querySelector('button[type=submit]'); if (b.disabled) { return false; } b.disabled = true; b.innerHTML = 'Sending...';">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="month" value="{{ month }}">
+                    <input type="hidden" name="year" value="{{ year }}">
+                    <div class="modal-body">
+                        <p>The PDF listing every employee's name, bank, account no., IFSC, mobile, email and
+                           <strong>net salary</strong> will be emailed to the bank address saved in Payroll Settings.</p>
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" name="notify_employees" id="notifyEmployees" checked>
+                            <label class="form-check-label" for="notifyEmployees">
+                                Also email each employee their payslip with the note
+                                "salary will be credited within 1 to 2 working days" (text set in Payroll Settings)
+                            </label>
+                        </div>
+                        <div class="form-check mb-3 ms-3">
+                            <input class="form-check-input" type="checkbox" name="resend_to_all" id="resendToAll">
+                            <label class="form-check-label" for="resendToAll">
+                                Also re-send to employees who <strong>already received</strong> this month's payslip
+                                <small class="d-block text-muted">Leave unticked so nobody gets the same payslip twice.</small>
+                            </label>
+                        </div>
+                        {% if bank_advice and bank_advice.status == 'sent' %}
+                        <div class="alert alert-warning mb-0">
+                            <i class="bi bi-exclamation-triangle"></i> The bank was already sent this month's advice.
+                            Sending again will email the bank a second time - only do this if the bank asked for a corrected advice.
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-success"><i class="bi bi-send"></i> Send</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
     <script>
