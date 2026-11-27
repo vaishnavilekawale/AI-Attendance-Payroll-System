@@ -94,6 +94,8 @@ _instance_dir = os.path.join(BASE_DIR, 'instance')
 os.makedirs(_instance_dir, exist_ok=True)
 
 app = Flask(__name__, instance_path=_instance_dir)
+# Let browsers cache static files (CSS/JS/fonts) for a day -> faster repeat page loads.
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 86400
 
 # ------------------------------------------------------------------
 # Environment-driven configuration.

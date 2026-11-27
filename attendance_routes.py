@@ -337,14 +337,22 @@ def dashboard():
     recent_attendance = recent_attendance[:10]
     
     # Get today's activities for each employee
+    # ONE query for everybody (was one query per employee - slow when the
+    # database is remote), then grouped in Python. Result is identical:
+    # every employee with a real attendance row gets a list (maybe empty).
     today_activities = {}
-    for att in all_attendance_data:
-        if att.employee and not hasattr(att, 'is_dummy'):
-            activities = AttendanceActivity.query.filter_by(
-                employee_id=att.employee.id,
-                attendance_date=today
-            ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(AttendanceActivity.activity_time).all()
-            today_activities[att.employee.id] = activities
+    real_emp_ids = [att.employee.id for att in all_attendance_data
+                    if att.employee and not hasattr(att, 'is_dummy')]
+    for emp_id in real_emp_ids:
+        today_activities[emp_id] = []
+    if real_emp_ids:
+        rows = AttendanceActivity.query.filter(
+            AttendanceActivity.employee_id.in_(real_emp_ids),
+            AttendanceActivity.attendance_date == today,
+        ).filter(AttendanceActivity.hidden_by_admin.isnot(True)).order_by(
+            AttendanceActivity.activity_time).all()
+        for row in rows:
+            today_activities[row.employee_id].append(row)
     
     # Department stats
     dept_stats = am.get_department_stats(today, today)
