@@ -46,8 +46,9 @@
 The **AI Attendance & Payroll System** is a full-stack Flask application that:
 
 - ✅ marks employee attendance automatically using **face recognition** — at a public kiosk screen *and* from each employee's own login,
-- 💰 runs a complete **payroll pipeline** (allowances, deductions, overtime, net pay),
-- 📄 generates **AES-256 password-protected PDF payslips** and emails them automatically,
+- 💰 runs a complete **payroll pipeline** (allowances, deductions, overtime, paid holidays and leave, net pay),
+- 📄 generates **AES-256 password-protected PDF payslips** and emails them automatically (each employee gets one payslip email per month),
+- 🏦 prepares a **Bank Payment Advice** (net salaries to credit) and emails it to your bank,
 - 🔑 protects the product with **Ed25519-signed, machine-bound licenses** (30-day trial, then a license lock screen), and
 - 💾 protects customer data with **automated daily backups** at a time you choose (verified, optionally encrypted, plus a catch-up backup if the PC was off) and a one-click **restore**.
 
@@ -93,8 +94,11 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 - **Holiday list PDF** — download the configured holidays for one year or all years from Settings
 - **Paid leave** days count as paid days (never LOP) and appear as *Paid Leave Days* on the payslip; employees without leave get exactly the same numbers as before
 - **Leave report PDF** — leave balances and every leave day, for all employees or one, per year
-- **Automated monthly payroll** via APScheduler (1st of every month, 12:01, for the month just completed), with a startup **reconciliation pass** that backfills any period missed while the PC was off
-- **AES-256 password-protected PDF payslips** (ReportLab + pikepdf) with automated email delivery. Admins or employees can set a **custom payslip password**; otherwise a default formula derived from the employee's own details is used
+- **Automated monthly payroll** via APScheduler for the month just completed. The **Payroll Generation Day** (1 to 31, default the 1st; 31 means the last day of the month) and time (default 12:01) are set in **Payroll → Payroll Settings**. A startup **reconciliation pass** backfills any period missed while the PC was off
+- **One payslip email per employee per month** — when payroll runs (automatically or catching up after the PC was off), every employee whose payslip was **already emailed** is left untouched: not recalculated and not mailed again. Everyone else (no payroll yet, a payroll calculated mid-month, a PDF generated but never emailed, or an email that failed) is **recalculated for the full month**, gets a fresh PDF and is emailed. Sending a payslip by hand in **Payroll** marks it as emailed; the *Send Email* button asks for confirmation before re-sending one that was already sent
+- **Bank Payment Advice (salary transfer)** — optional, enabled in **Payroll → Payroll Settings**. A PDF listing every employee's name, bank, account number, IFSC, mobile, e-mail and **net salary** (with the grand total and the amount in words) is e-mailed to your bank's payroll desk, and employees' payslip e-mails can carry a *"salary will be credited in 1 to 2 working days"* note (text configurable). It can be sent automatically after auto payroll or manually from **Payroll → Send to Bank**; **Bank Advice PDF** downloads a preview without sending. Employees without an account number and IFSC are left out and listed so you can fix their profile. The `bank_advice` table makes sure the bank is never e-mailed twice for the same month unless you send again on purpose
+- **Payroll Settings page** — generation day/time, auto-generate and auto-email switches, payslip storage folder, monthly Professional Tax amounts, Bank Payment Advice details and company details / logo that appear on the payslip
+- **AES-256 password-protected PDF payslips** (ReportLab + pikepdf) with automated email delivery (SMTP can be entered in **Settings → Email Configuration**, with a *Test Email Connection* button, or set in `.env`). Admins or employees can set a **custom payslip password**; otherwise a default formula derived from the employee's own details is used
 - Admin dashboard analytics, department-wise stats, and PDF export for admin and employee reports
 - A single shared aggregation service, so numbers never disagree between screens
 
@@ -137,7 +141,7 @@ It ships as a **Windows installer / `.exe`** built with PyInstaller and Inno Set
 | Layer | Technology |
 | --- | --- |
 | **Backend** | Python 3.10, Flask 3.0, SQLAlchemy 2.0, Flask-Migrate / Alembic, Flask-WTF, Flask-Limiter |
-| **AI / Computer Vision** | OpenCV 4.8.1.78 (`opencv-python-headless`) with the built-in ONNX models YuNet (face detection) and SFace (face recognition) via `lite_face.py`, NumPy 1.26.4. No TensorFlow / DeepFace / MediaPipe — fits the Render free plan (512 MB RAM) |
+| **AI / Computer Vision** | OpenCV 4.8.1.78 (`opencv-python-headless`) with the built-in ONNX models YuNet (face detection) and SFace (face recognition) via `lite_face.py`, NumPy 1.26.4. No TensorFlow / DeepFace / MediaPipe — light on RAM (~150 MB for the face engine) |
 | **Frontend** | Bootstrap 5, Bootstrap Icons, vanilla JavaScript (`fetch`), Chart.js |
 | **Database** | SQLite (default) or MySQL via PyMySQL |
 | **PDF & Security** | ReportLab, pikepdf (AES-256), `cryptography` (Fernet, Ed25519) |
@@ -196,7 +200,8 @@ Created automatically on first start (`db.create_all()` plus small, safe column 
 | `attendance` · `attendance_activities` | One row per employee per day, plus every IN/OUT pair |
 | `logout_approval_requests` | Auto-logout requests awaiting manager/admin approval |
 | `attendance_settings_history` · `working_hours` · `settings` · `company_settings` | Versioned attendance rules, office hours, company details |
-| `payroll` · `payroll_settings` | Generated payslip rows and payroll rules |
+| `payroll` · `payroll_settings` | Generated payslip rows (with `payslip_generated` / `email_sent` flags) and payroll rules: generation day/time, auto switches, Professional Tax, Bank Payment Advice settings |
+| `bank_advice` | One row per month: when the Bank Payment Advice was sent, to whom, and the status (so the bank is never mailed twice automatically) |
 | `holidays` | Company paid holidays (one row per date, with a name) |
 | `employee_leaves` · `leave_quotas` | Paid leave days (one row per employee per day: CL / SL / EL) and the yearly quotas (company default, or per employee) |
 | `leave_requests` | Employee leave applications and the admin's decision (pending / approved / rejected / cancelled) |
@@ -210,9 +215,9 @@ The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licen
 | **Kiosk** | `/` (public, auto-scan), `POST /api/auto-scan-attendance` |
 | **Auth** | `/login` (admin and employee tabs), `/logout`, `/forgot-password`, `/employee-forgot-password`, `/change-password`, `/employee-change-password` |
 | **Setup & license** | `/setup/` (admin → company → license → done), `/license` (lock screen), `/license/activate` |
-| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll`, `/payroll-settings`, `/reports`, `/settings` (+ `POST /settings/holidays/add`, `POST /settings/holidays/<id>/delete`, `/settings/holidays/pdf?year=2026\|all`), `/settings/leaves` (+ `POST /settings/leaves/add`, `POST /settings/leaves/<id>/delete`, `POST /settings/leaves/quotas`, `/settings/leaves/pdf?year=2026`, `POST /settings/leaves/requests/<id>/approve\|reject`), `/my-leaves` (+ `POST /my-leaves/apply`, `POST /my-leaves/<id>/cancel`), `/admin/approvals`, `/admin/pending-manual-attendance`, `/admin/login-audit` (+ `/admin/login-audit/pdf`), `POST /employees/<id>/unlock`, `/admin/manage-admins`, `POST /admin/<id>/unlock`, `POST /admin/unlock-request`, `/admin/unlock/<token>` |
+| **Admin** | `/dashboard`, `/employees`, `/face-registration/<id>`, `/attendance`, `/payroll` (+ `POST /payroll/calculate`, `/payroll/payslip/<id>`, `/payroll/send-email/<id>`, `/payroll/bank-advice/preview`, `POST /payroll/bank-advice/send`), `/payroll-settings`, `/reports`, `/settings` (+ `POST /settings/email`, `POST /admin/backup/run-now`, `POST /admin/backup/restore`, `POST /settings/holidays/add`, `POST /settings/holidays/<id>/delete`, `/settings/holidays/pdf?year=2026\|all`), `/settings/leaves` (+ `POST /settings/leaves/add`, `POST /settings/leaves/<id>/delete`, `POST /settings/leaves/quotas`, `/settings/leaves/pdf?year=2026`, `POST /settings/leaves/requests/<id>/approve\|reject`), `/my-leaves` (+ `POST /my-leaves/apply`, `POST /my-leaves/<id>/cancel`), `/admin/approvals`, `/admin/pending-manual-attendance`, `/admin/login-audit` (+ `/admin/login-audit/pdf`), `POST /employees/<id>/unlock`, `/admin/manage-admins`, `POST /admin/<id>/unlock`, `POST /admin/unlock-request`, `/admin/unlock/<token>` |
 | **Manager** | `/manager/approvals`, `/manager/pending-manual-attendance`, `/manager/edit-attendance/<id>` |
-| **Employee** | `/employee-dashboard`, `/employee-attendance`, `/employee-payroll`, `/employee-reports`, `/employee-profile` |
+| **Employee** | `/employee-dashboard`, `/employee-attendance`, `/employee-payroll` (+ `POST /employee/set-payslip-password`), `/employee-reports`, `/employee-profile` |
 
 ---
 
@@ -235,7 +240,7 @@ The **vendor portal** (see [section 15](#15--vendor-license-portal-selling-licen
 | **PyInstaller** (installed via `requirements-packaging.txt`) | Freezes the app into an `.exe` |
 | **[Inno Setup 6](https://jrsoftware.org/isinfo.php)** | Compiles the final `Setup.exe` installer. `setup.bat` installs it for you (menu option 2) if it is missing. |
 
-> ⚠️ **Why Python 3.10?** The pinned packages (`numpy==1.26.4`, `opencv-python-headless==4.8.1.78`) and Render's `PYTHON_VERSION=3.10.11` are tested on 3.10. Avoid 3.12 and newer.
+> ⚠️ **Why Python 3.10?** The pinned packages (`numpy==1.26.4`, `opencv-python-headless==4.8.1.78`) are tested on 3.10. Avoid 3.12 and newer.
 
 ### How to install Python 3.10 correctly
 
@@ -596,7 +601,8 @@ Not included yet: half-day leave, e-mail notifications about requests, and a Man
 1. **Admin** adds employees and registers their faces (at least `MIN_FACE_IMAGES_REQUIRED` photos each), then trains/refreshes the face model. Company holidays are added once in **Settings → Holiday Calendar**.
 2. **Employees** are marked present by the kiosk screen, or log in and use **My Attendance**.
 3. At **23:59** anyone who never punched out gets a logout approval request → **manager/admin** approves or rejects it.
-4. On the **1st of every month** payroll for the previous month is generated, payslip PDFs are created and emailed.
+4. On the configured **Payroll Generation Day** (default the 1st) payroll for the previous month is calculated, payslip PDFs are created and emailed. Employees who already received their payslip are skipped; everyone else is recalculated for the full month and emailed.
+5. If **Bank Payment Advice** is on, the net-salary list is e-mailed to the bank (automatically, or with **Payroll → Send to Bank**).
 
 ### 🔒 Login security
 
@@ -1157,7 +1163,11 @@ The employee-login page only accepts the face of the logged-in employee. Log in 
 
 **✉️ Payslip emails are not sent**
 
-Fill in the `MAIL_*` settings in `.env`. For Gmail use an **App Password**, not your normal password. Everything else works without email.
+Enter the SMTP details in **Settings → Email Configuration** (or in the `MAIL_*` settings in `.env`) and press **Test Email Connection**. For Gmail use an **App Password**, not your normal password. Also check that **Enable Auto Email Payslip** is on in **Payroll → Payroll Settings**. Everything else works without email.
+
+**✉️ Some employees got a payslip and others didn't / will anyone get it twice?**
+
+No one gets the same month's payslip twice automatically. Payroll skips every employee whose payslip was already emailed and recalculates + emails the rest. To re-send one on purpose use **Payroll → Send Email** (it asks for confirmation).
 
 **❓ The exe keeps running after I close the browser tab**
 
@@ -1195,7 +1205,7 @@ If the admin (or the employee, from the portal) set a custom payslip password, t
 
 ## 14. 🧪 Running the Tests
 
-The project ships with a pytest suite (about 660 tests: auth, login lockout / audit log, employees, attendance rules, payroll maths, PDF payslips, scheduler, licensing and trial logic, rate limiting, face-matching logic and more).
+The project ships with a pytest suite (about 780 tests: auth, login lockout / audit log, employees, attendance rules, payroll maths, PDF payslips, scheduler, licensing and trial logic, rate limiting, face-matching logic and more).
 
 ```
 venv\Scripts\activate
@@ -1352,10 +1362,10 @@ Please read this before selling or deploying to a customer. The project is suita
 | `holiday_utils.py` · `templates/_holiday_macros.html` | Weekly-off / paid-holiday helpers (`is_off_day()`, holiday lookups) and the badge macros used by the templates |
 | `ai_engine.py` · `face_recognition_singleton.py` | Face detection/recognition, strict matching, presence tracker, embedding cache |
 | `lite_face.py` · `scripts/download_face_models.py` · `face_models/` | Lightweight OpenCV face engine (YuNet detector + SFace embeddings, ONNX) and its model downloader. `face_models/` is git-ignored and filled by the script |
-| `CLOUD_DEPLOY.md` · `storage_sync.py` | Free cloud hosting (Render + Neon): files/models are mirrored into the database, set `STORAGE_BACKEND=db` |
 | `crypto_utils.py` | Encryption for face photos and stored payslip passwords |
 | `pdf_generator.py` · `email_service.py` | PDF payslips, attendance/admin reports, the Login Audit PDF the Holiday List PDF and the Leave Report PDF (payslips AES-256), SMTP delivery |
-| `scheduler_service.py` | APScheduler: monthly payroll, 23:59 auto-logout approvals, weekly backup, startup reconciliation and catch-up |
+| `scheduler_service.py` | APScheduler: monthly payroll (recalculates / emails only employees whose payslip was not yet emailed), 23:59 auto-logout approvals, daily backup, startup reconciliation and catch-up |
+| `bank_advice.py` | Bank Payment Advice: builds the net-salary PDF, e-mails it to the bank, records it in `bank_advice`, and e-mails payslips with the "salary will be credited" note |
 | `backup_manager.py` | Backup creation, external copy, pruning and catch-up detection |
 | `services/` | `admin_reports_service`, `approval_service`, `attendance_calculator`, `attendance_stats`, `app_services` |
 | `licensing/` | Customer side: `license_manager.py` (Ed25519, trial, fingerprint), `client_security.py` (license gate + lock screen). Vendor side: `keygen.py`, `vendor_app.py` (Razorpay portal), `plans.py`, `payment_gateway.py`, `customer_*`, `license_email_service.py`, guides and `EULA.txt` |
@@ -1368,7 +1378,7 @@ Please read this before selling or deploying to a customer. The project is suita
 | `instance/` · `dataset/` · `uploads/` · `backups/` · `trained_model/` · `logs/` | Runtime data (git-ignored). `trained_model/face_data.pkl` is the list of employees the recogniser knows; `embeddings_cache.pkl` is a speed-up cache |
 | `requirements.txt` · `requirements-packaging.txt` | Runtime vs build-only dependencies |
 | `.env.example` | Template for your `.env` settings file |
-| `tests/` · `conftest.py` | Pytest suite (about 660 tests) and shared fixtures; `conftest.py` isolates the database **and** face storage from your real data |
+| `tests/` · `conftest.py` | Pytest suite (about 780 tests) and shared fixtures; `conftest.py` isolates the database **and** face storage from your real data |
 | `.github/workflows/ci.yml` | GitHub Actions: installs dependencies and runs `pytest tests/` on every push / pull request |
 | `licensing/*.md` · `licensing/EULA.txt` | `VENDOR_PORTAL_SETUP.md`, `VENDOR_SYSTEM_GUIDE.md`, `USER_MANUAL.md`, `USER_MANUAL_OUTLINE.md`, and the end-user licence agreement |
 | `licensing/vendor_templates/` | Purchase page and thank-you page of the vendor portal |
