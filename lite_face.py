@@ -69,6 +69,10 @@ MAX_DETECT_SIDE = int(os.environ.get("LITE_FACE_MAX_SIDE", "640"))
 # Small images (e.g. stored face crops) with no detectable face are used as a
 # whole "face" when enforce_detection=False, like DeepFace did.
 SMALL_IMAGE_SIDE = 400
+# Phone photos can be 12 MP+. Decoding/embedding several of them at once ran the
+# 512 MB server out of memory, so any bigger image is shrunk right after loading
+# (aspect ratio kept). 1280 px is far more than the 112x112 face model needs.
+MAX_INPUT_SIDE = int(os.environ.get("LITE_FACE_MAX_INPUT", "1280"))
 
 _lock = threading.RLock()
 _detector = None
@@ -123,13 +127,24 @@ def _get_models():
     return _detector, _recognizer
 
 
+def _shrink(arr):
+    """Scale an oversized image down so its longest side is MAX_INPUT_SIDE."""
+    h, w = arr.shape[:2]
+    longest = max(h, w)
+    if longest <= MAX_INPUT_SIDE:
+        return arr
+    scale = MAX_INPUT_SIDE / float(longest)
+    return cv2.resize(arr, (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+                      interpolation=cv2.INTER_AREA)
+
+
 def _to_bgr(img):
     """Accept an ndarray or a file path and return a 3-channel BGR image."""
     if isinstance(img, (str, os.PathLike)):
         arr = cv2.imread(str(img), cv2.IMREAD_COLOR)
         if arr is None:
             raise ValueError(f"Could not read image: {img}")
-        return arr
+        return _shrink(arr)
     arr = np.asarray(img)
     if arr.dtype != np.uint8:
         arr = np.clip(arr, 0, 255).astype(np.uint8)
@@ -137,7 +152,7 @@ def _to_bgr(img):
         arr = cv2.cvtColor(arr, cv2.COLOR_GRAY2BGR)
     elif arr.ndim == 3 and arr.shape[2] == 4:
         arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2BGR)
-    return arr
+    return _shrink(arr)
 
 
 def _detect_rows(image):

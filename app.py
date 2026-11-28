@@ -480,7 +480,7 @@ if __name__ == '__main__':
     logger.info(f"Face recognition engine initialized with {len(recognizer.known_face_ids)} registered employees")
     print(f"[OK] Face recognition loaded: {len(recognizer.known_face_ids)} employees registered")
 
-    embed_stats = preload_employee_embeddings(max_workers=8)
+    embed_stats = preload_employee_embeddings(max_workers=2)
     print(
         f"✅ Face embeddings ready: {embed_stats['total']} image(s) "
         f"| {embed_stats['already_cached']} from disk cache "

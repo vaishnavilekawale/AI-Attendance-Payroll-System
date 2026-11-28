@@ -1076,11 +1076,16 @@
                         return;
                     }
 
+                    // Phone cameras can deliver 4K frames; a full-size photo is
+                    // huge to upload and to process on the server. 800 px on the
+                    // longest side (aspect ratio kept) is plenty for face matching.
                     const canvas = document.createElement('canvas');
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
+                    const vw = video.videoWidth || 640, vh = video.videoHeight || 480;
+                    const sc = Math.min(1, 800 / Math.max(vw, vh));
+                    canvas.width = Math.round(vw * sc);
+                    canvas.height = Math.round(vh * sc);
                     const ctx = canvas.getContext('2d');
-                    ctx.drawImage(video, 0, 0);
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
                     canvas.toBlob(function(blob) {
                         const formData = new FormData();

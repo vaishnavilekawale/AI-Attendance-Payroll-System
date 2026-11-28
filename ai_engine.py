@@ -888,7 +888,7 @@ class FaceRecognitionEngine:
                     del _employee_embeddings_cache[k]
 
             try:
-                with ThreadPoolExecutor(max_workers=4) as executor:
+                with ThreadPoolExecutor(max_workers=2) as executor:
                     futures = [executor.submit(get_employee_embedding_cached, employee_id, p) for p in image_paths]
                     for future in futures:
                         try:
@@ -1004,7 +1004,12 @@ class FaceRecognitionEngine:
             return []
 
         try:
-            resized_frame = cv2.resize(frame, (640, 480))
+            # Keep the camera's real aspect ratio. The old fixed 640x480 resize
+            # squashed portrait phone frames, which pushed the face distance up.
+            _h0, _w0 = frame.shape[:2]
+            _scale = min(1.0, 800.0 / float(max(_h0, _w0)))
+            resized_frame = frame if _scale == 1.0 else cv2.resize(
+                frame, (max(1, int(round(_w0 * _scale))), max(1, int(round(_h0 * _scale)))))
 
             # DeepFace.represent() detects and embeds EVERY face found in
             # the frame - not just the first one - which is what lets us
@@ -1043,7 +1048,7 @@ class FaceRecognitionEngine:
         # different employees marked in the same frame.
         target_objs = self._suppress_overlapping_faces(target_objs)
 
-        frame_area = 640 * 480
+        frame_area = resized_frame.shape[0] * resized_frame.shape[1]
         results = []
         match_distances = []  # parallel to results; distance of a matched face, else None
 
