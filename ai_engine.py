@@ -1048,7 +1048,9 @@ class FaceRecognitionEngine:
         # different employees marked in the same frame.
         target_objs = self._suppress_overlapping_faces(target_objs)
 
-        frame_area = resized_frame.shape[0] * resized_frame.shape[1]
+        # Never smaller than the classic 640x480 reference: the "box covers the
+        # whole frame" sanity check was always measured against that size.
+        frame_area = max(resized_frame.shape[0] * resized_frame.shape[1], 640 * 480)
         results = []
         match_distances = []  # parallel to results; distance of a matched face, else None
 
