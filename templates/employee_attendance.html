@@ -350,7 +350,7 @@
             
             recognitionInProgress = true;
             
-            canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
+            { const vw = video.videoWidth || 640, vh = video.videoHeight || 480, sc = Math.min(1, 800 / Math.max(vw, vh)); canvas.width = Math.round(vw * sc); canvas.height = Math.round(vh * sc); canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); }
             canvas.toBlob(async (blob) => {
                 const formData = new FormData();
                 formData.append('image', blob, 'capture.jpg');
@@ -447,7 +447,7 @@
         });
 
         captureBtn.addEventListener('click', async () => {
-            canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
+            { const vw = video.videoWidth || 640, vh = video.videoHeight || 480, sc = Math.min(1, 800 / Math.max(vw, vh)); canvas.width = Math.round(vw * sc); canvas.height = Math.round(vh * sc); canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); }
             canvas.toBlob(async (blob) => {
                 const formData = new FormData();
                 formData.append('image', blob, 'capture.jpg');

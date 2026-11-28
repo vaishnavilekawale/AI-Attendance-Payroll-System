@@ -507,7 +507,7 @@
             scanInProgress = true;
 
             try {
-                canvas.getContext('2d').drawImage(video, 0, 0, 640, 480);
+                { const vw = video.videoWidth || 640, vh = video.videoHeight || 480, sc = Math.min(1, 800 / Math.max(vw, vh)); canvas.width = Math.round(vw * sc); canvas.height = Math.round(vh * sc); canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height); }
                 const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg'));
 
                 const formData = new FormData();
