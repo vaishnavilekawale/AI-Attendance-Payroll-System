@@ -648,6 +648,35 @@ def train_ai():
     return redirect(url_for('settings.settings'))
 
 
+_face_retrain_lock = threading.Lock()
+
+
+def _retrain_after_face_delete_async(employee_id, employee_name, image_paths):
+    """Retrain (or remove) one employee's face data without blocking the request.
+
+    Runs in a daemon thread; the lock makes several quick deletes retrain one
+    after another. The image list is re-read from disk when the thread gets its
+    turn, so the LAST run always reflects every deletion made so far.
+    """
+    def _work():
+        with _face_retrain_lock:
+            try:
+                folder = os.path.join(Config.DATASET_FOLDER, str(employee_id))
+                current = []
+                if os.path.isdir(folder):
+                    current = [os.path.join(folder, f) for f in sorted(os.listdir(folder))
+                               if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+                recognizer = get_face_recognizer()
+                if current:
+                    recognizer.train_employee(employee_id, employee_name, current)
+                else:
+                    recognizer.remove_employee(employee_id)
+            except Exception:
+                logger.exception("Background face retrain failed for employee %s", employee_id)
+
+    threading.Thread(target=_work, name=f"face-retrain-{employee_id}", daemon=True).start()
+
+
 @attendance_bp.route('/delete-face-image/<int:employee_id>/<string:image_name>', methods=['POST'])
 @login_required
 @admin_required
@@ -678,17 +707,15 @@ def delete_face_image(employee_id, image_name):
         
         remaining_count = len(remaining_images)
         
-        # Retrain the face recognition model with remaining images
-        # Do NOT remove the entire employee - only retrain with remaining images
-        if remaining_images:
-            recognizer = get_face_recognizer()
-            image_paths = [os.path.join(emp_folder, img) for img in remaining_images]
-            recognizer.train_employee(str(employee_id), employee.name, image_paths)
-        else:
-            # If no images remain, remove employee from face recognition
-            recognizer = get_face_recognizer()
-            recognizer.remove_employee(str(employee_id))
-        
+        # Retrain the face recognition model with the remaining images, but in the
+        # BACKGROUND: re-embedding every remaining photo is slow on a small server,
+        # and doing it before answering left the page looking frozen (the deleted
+        # image only vanished after a manual refresh). The file is already gone, so
+        # the page can be updated right away.
+        _retrain_after_face_delete_async(
+            str(employee_id), employee.name,
+            [os.path.join(emp_folder, img) for img in remaining_images])
+
         return jsonify({
             'success': True, 
             'message': 'Face image deleted successfully',

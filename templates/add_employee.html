@@ -1183,7 +1183,7 @@
                             <div class="card">
                                 <div class="card-header d-flex justify-content-between align-items-center">
                                     <h6 class="mb-0">Face Images</h6>
-                                    <span class="badge bg-{{ 'success' if current_face_images >= min_face_images else 'warning' }}">
+                                    <span id="faceCountBadge" class="badge bg-{{ 'success' if current_face_images >= min_face_images else 'warning' }}">
                                         {{ current_face_images }}/{{ min_face_images }}
                                     </span>
                                 </div>
@@ -1277,6 +1277,17 @@
                 return;
             }
 
+            const imageElement = document.getElementById('image-' + imageIndex);
+            const countBadge = document.getElementById('faceCountBadge');
+            const oldBadgeText = countBadge ? countBadge.textContent : null;
+            const oldBadgeClasses = countBadge ? countBadge.className : null;
+
+            // Show the result immediately: grey the photo out and block more clicks.
+            if (imageElement) {
+                imageElement.style.opacity = '0.4';
+                imageElement.style.pointerEvents = 'none';
+            }
+
             fetch(`/delete-face-image/${employeeId}/${imageName}`, {
                 method: 'POST',
                 headers: {
@@ -1287,40 +1298,40 @@
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Remove the image element from the DOM
-                    const imageElement = document.getElementById('image-' + imageIndex);
                     if (imageElement) {
                         imageElement.remove();
                     }
-                    
+
                     // Update the count badge using the accurate count from backend
-                    const countBadge = document.querySelector('.badge');
                     if (countBadge && data.remaining_count !== undefined) {
-                        const currentText = countBadge.textContent;
-                        const parts = currentText.split('/');
+                        const parts = countBadge.textContent.trim().split('/');
                         if (parts.length === 2) {
                             const totalCount = parseInt(parts[1]);
                             const remainingCount = data.remaining_count;
                             countBadge.textContent = `${remainingCount}/${totalCount}`;
-                            
-                            // Update badge color based on new count
                             countBadge.classList.remove('bg-success', 'bg-warning');
-                            if (remainingCount >= totalCount) {
-                                countBadge.classList.add('bg-success');
-                            } else {
-                                countBadge.classList.add('bg-warning');
-                            }
+                            countBadge.classList.add(remainingCount >= totalCount ? 'bg-success' : 'bg-warning');
                         }
                     }
-                    
-                    // Show success message
-                    alert('Face image deleted successfully');
                 } else {
+                    // Put everything back and tell the user why.
+                    if (imageElement) {
+                        imageElement.style.opacity = '';
+                        imageElement.style.pointerEvents = '';
+                    }
+                    if (countBadge && oldBadgeText !== null) {
+                        countBadge.textContent = oldBadgeText;
+                        countBadge.className = oldBadgeClasses;
+                    }
                     alert('Error deleting face image: ' + data.message);
                 }
             })
             .catch(err => {
                 console.error('Error:', err);
+                if (imageElement) {
+                    imageElement.style.opacity = '';
+                    imageElement.style.pointerEvents = '';
+                }
                 alert('Error deleting face image: ' + err.message);
             });
         }
